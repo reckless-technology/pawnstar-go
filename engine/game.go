@@ -65,6 +65,7 @@ func NewGame() *Game {
 		TransTable: NewTranspositionTable(HashTableMB),
 		QuiesTable: NewTranspositionTable(QHashTableMB),
 		TimeCtrl:   NewTimeControl(),
+		Book:       LoadOpeningBook(),
 	}
 	g.newGame("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
 	return g
