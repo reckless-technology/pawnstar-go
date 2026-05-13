@@ -53,9 +53,9 @@ type Game struct {
 	NodeCount    int
 	CancelSearch bool
 
-	positions []Position
-	stopChan  chan struct{}
-	doneChan  chan struct{}
+	pos      Position
+	stopChan chan struct{}
+	doneChan chan struct{}
 }
 
 func NewGame() *Game {
@@ -70,7 +70,7 @@ func NewGame() *Game {
 }
 
 func (g *Game) newGame(fen string) {
-	g.positions = []Position{FromFen(fen)}
+	g.pos = FromFen(fen)
 	g.NodeCount = 0
 	g.CancelSearch = false
 	g.TimeCtrl = NewTimeControl()
@@ -86,16 +86,15 @@ func (g *Game) NewGameStart() {
 }
 
 func (g *Game) CurrentPosition() *Position {
-	return &g.positions[len(g.positions)-1]
+	return &g.pos
 }
 
 func (g *Game) PlayMove(m Move) {
-	next := g.CurrentPosition().MakeMove(m)
-	g.positions = append(g.positions, next)
+	g.pos.MakeMove(m)
 }
 
 func (g *Game) PlayMoveString(s string) Move {
-	moves := g.CurrentPosition().GenerateLegalMoves()
+	moves := g.pos.GenerateLegalMoves()
 	for i := 0; i < len(moves); i++ {
 		m := moves[i]
 		if m.String() == s {
@@ -107,36 +106,21 @@ func (g *Game) PlayMoveString(s string) Move {
 }
 
 func (g *Game) MakeNullMove() {
-	next := g.CurrentPosition().MakeNullMove()
-	g.positions = append(g.positions, next)
+	g.pos.MakeNullMove()
 }
 
 func (g *Game) UndoMove() {
-	if len(g.positions) > 1 {
-		g.positions = g.positions[:len(g.positions)-1]
+	if len(g.pos.stateStack) > 0 {
+		g.pos.UnmakeMove()
 	}
 }
 
 func (g *Game) IsDrawByFiftyMoves() bool {
-	return g.CurrentPosition().HalfMove() >= 100
+	return g.pos.HalfMove() >= 100
 }
 
 func (g *Game) IsDrawByRepetition() bool {
-	hash := g.CurrentPosition().Hash()
-	repetitions := 2
-	n := len(g.positions)
-	for i := n - 5; i >= 0; i -= 2 {
-		if g.positions[i].Hash() == hash {
-			repetitions--
-			if repetitions == 0 {
-				return true
-			}
-		}
-		if g.positions[i].HalfMove() == 0 {
-			return false
-		}
-	}
-	return false
+	return g.pos.IsDrawByRepetition()
 }
 
 // ScoreAndSortMoves assigns MVV/LVA + history scores and sorts descending.

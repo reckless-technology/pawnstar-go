@@ -155,7 +155,7 @@ func handleGo(game *engine.Game, args []string) {
 func runPerft(pos engine.Position, maxDepth int) {
 	for depth := 1; depth <= maxDepth; depth++ {
 		start := time.Now()
-		nodes := engine.Perft(pos, depth)
+		nodes := engine.Perft(&pos, depth)
 		elapsed := time.Since(start)
 		mnps := 0.0
 		if elapsed > 0 {

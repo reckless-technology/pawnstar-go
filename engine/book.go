@@ -37,7 +37,7 @@ func LoadOpeningBook() OpeningBook {
 			if !bookContains(b.moves[hash], m) {
 				b.moves[hash] = append(b.moves[hash], m)
 			}
-			pos = pos.MakeMove(m)
+			pos.MakeMove(m)
 		}
 	}
 	return b

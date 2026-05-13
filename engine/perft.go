@@ -1,7 +1,7 @@
 package engine
 
 // Perft counts leaf nodes at the given depth (bulk-counting at depth 1).
-func Perft(pos Position, depth int) uint64 {
+func Perft(pos *Position, depth int) uint64 {
 	if depth == 0 {
 		return 1
 	}
@@ -11,8 +11,9 @@ func Perft(pos Position, depth int) uint64 {
 	}
 	var nodes uint64
 	for i := 0; i < len(moves); i++ {
-		next := pos.MakeMove(moves[i])
-		nodes += Perft(next, depth-1)
+		pos.MakeMove(moves[i])
+		nodes += Perft(pos, depth-1)
+		pos.UnmakeMove()
 	}
 	return nodes
 }

@@ -82,7 +82,7 @@ var perftEPD = []string{
 	"8/8/8/8/8/K7/P7/k7 b - - 0 1;D1 1;D2 3;D3 12;D4 80;D5 342;D6 2343",
 	"8/8/8/8/8/7K/7P/7k b - - 0 1;D1 1;D2 3;D3 12;D4 80;D5 342;D6 2343",
 	"K7/p7/k7/8/8/8/8/8 b - - 0 1;D1 3;D2 7;D3 43;D4 199;D5 1347;D6 6249",
-	"7K/7p/7k/8/8/8/8/8 b - - 0 1;D1 3;D2 7;D3 43;D4 199;D5 1347;D6 2343",
+	"7K/7p/7k/8/8/8/8/8 b - - 0 1;D1 3;D2 7;D3 43;D4 199;D5 1347;D6 6249",
 	"8/2k1p3/3pP3/3P2K1/8/8/8/8 b - - 0 1;D1 5;D2 35;D3 182;D4 1091;D5 5408;D6 34822",
 	"8/8/8/8/8/4k3/4P3/4K3 w - - 0 1;D1 2;D2 8;D3 44;D4 282;D5 1814;D6 11848",
 	"4k3/4p3/4K3/8/8/8/8/8 b - - 0 1;D1 2;D2 8;D3 44;D4 282;D5 1814;D6 11848",
@@ -189,7 +189,7 @@ func TestPerft(t *testing.T) {
 			t.Run(fmt.Sprintf("%03d/d%d", i+1, tc.depth), func(t *testing.T) {
 				pos := FromFen(fen)
 				start := time.Now()
-				got := Perft(pos, tc.depth)
+				got := Perft(&pos, tc.depth)
 				elapsed := time.Since(start)
 				mnps := float64(got) / elapsed.Seconds() / 1e6
 				t.Logf("%-75s  nodes=%-12d  time=%-10s  %.1f Mnps", fen, got, elapsed.Round(time.Millisecond), mnps)
@@ -213,6 +213,6 @@ func BenchmarkPerft7(b *testing.B) {
 	pos := FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Perft(pos, 7)
+		Perft(&pos, 7)
 	}
 }

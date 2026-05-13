@@ -6,31 +6,34 @@ import (
 	"strings"
 )
 
-// Position holds the complete state of a chess position.
-// It is designed to be copied by value; MakeMove returns a new Position.
-type Position struct {
-	// Per-piece bitboards (indices match Piece constants minus 1: 0=pawn … 5=king).
-	pieces [6]Bitboard
-	// Per-color bitboards.
-	colors [2]Bitboard
-	// Square → piece lookup.
-	squares [64]Piece
-	// Squares attacking the side-to-move's king (if any).
+// irreversibleState holds the fields that cannot be reconstructed by reversing
+// a move's piece operations. Saved on MakeMove, restored on UnmakeMove.
+type irreversibleState struct {
+	hash     uint64
 	checkers Bitboard
-	// Incremental Zobrist hash.
-	hash uint64
-	// King locations.
-	kingLoc [2]Square
-	// En passant target square (0 = none).
-	epSquare Square
-	// Half-move clock (reversible move counter).
-	halfMove uint8
-	// Full-move number (zero-indexed).
-	fullMove uint8
-	// Castling rights.
 	castling CastlingRights
-	// State flags.
-	flags uint8
+	epSquare Square
+	halfMove uint8
+	flags    uint8
+	move     Move // the move that was made to reach the child state
+}
+
+// Position holds the complete mutable state of a chess position.
+// Use MakeMove / UnmakeMove to traverse the game tree in place.
+type Position struct {
+	pieces   [6]Bitboard
+	colors   [2]Bitboard
+	squares  [64]Piece
+	checkers Bitboard
+	hash     uint64
+	kingLoc  [2]Square
+	epSquare Square
+	halfMove uint8
+	fullMove uint8
+	castling CastlingRights
+	flags    uint8
+	// stack of saved state, one entry per MakeMove call not yet undone.
+	stateStack []irreversibleState
 }
 
 const (
@@ -116,7 +119,7 @@ func (pos *Position) IsAttacked(sq Square, by Color) bool {
 // ---- FEN parsing ----
 
 func FromFen(fen string) Position {
-	var pos Position
+	pos := Position{stateStack: make([]irreversibleState, 0, MaxPly)}
 	fields := strings.Fields(fen)
 
 	// Pieces
@@ -255,87 +258,180 @@ func (pos *Position) ToFen() string {
 
 // ---- MakeMove ----
 
-// MakeMove applies move to pos and returns the resulting position.
-func (pos *Position) MakeMove(m Move) Position {
+// MakeMove applies move to pos in place. Call UnmakeMove to reverse it.
+func (pos *Position) MakeMove(m Move) {
 	color := pos.ColorToMove()
-	from := m.From()
-	to := m.To()
-	piece := m.Piece()
+	oldCastling := pos.castling
 
-	next := *pos
-	next.flags &^= flagNullMove
-	next.castling = pos.castling.AfterMove(m)
-	next.hash ^= CastlingRightsHashes[next.castling.Value()] ^ CastlingRightsHashes[pos.castling.Value()]
-	next.hash ^= EnPassantHashes[next.epSquare]
-	next.epSquare = NoSquare
+	pos.stateStack = append(pos.stateStack, irreversibleState{
+		hash:     pos.hash,
+		checkers: pos.checkers,
+		castling: pos.castling,
+		epSquare: pos.epSquare,
+		halfMove: pos.halfMove,
+		flags:    pos.flags,
+		move:     m,
+	})
+
+	from, to, piece := m.From(), m.To(), m.Piece()
+	pos.flags &^= flagNullMove
+	pos.castling = oldCastling.AfterMove(m)
+	pos.hash ^= CastlingRightsHashes[pos.castling.Value()] ^ CastlingRightsHashes[oldCastling.Value()]
+	pos.hash ^= EnPassantHashes[pos.epSquare]
+	pos.epSquare = NoSquare
 
 	switch m.Type() {
 	case NonCapture:
-		next.halfMove++
-		next.movePiece(color, piece, from, to)
+		pos.halfMove++
+		pos.movePiece(color, piece, from, to)
 
 	case Capture:
-		next.halfMove = 0
-		next.removePiece(EnemyOf(color), m.Captured(), to)
-		next.movePiece(color, piece, from, to)
+		pos.halfMove = 0
+		pos.removePiece(EnemyOf(color), m.Captured(), to)
+		pos.movePiece(color, piece, from, to)
 
 	case PromotionKnight, PromotionBishop, PromotionRook, PromotionQueen:
-		next.halfMove = 0
+		pos.halfMove = 0
 		if m.Captured() != NoPiece {
-			next.removePiece(EnemyOf(color), m.Captured(), to)
+			pos.removePiece(EnemyOf(color), m.Captured(), to)
 		}
-		next.removePiece(color, Pawn, from)
-		next.addPiece(color, m.Promoted(), to)
+		pos.removePiece(color, Pawn, from)
+		pos.addPiece(color, m.Promoted(), to)
 
 	case PawnDoublePush:
-		next.halfMove = 0
-		next.movePiece(color, Pawn, from, to)
-		next.epSquare = Square((int(from) + int(to)) >> 1)
-		next.hash ^= EnPassantHashes[next.epSquare]
+		pos.halfMove = 0
+		pos.movePiece(color, Pawn, from, to)
+		pos.epSquare = Square((int(from) + int(to)) >> 1)
+		pos.hash ^= EnPassantHashes[pos.epSquare]
 
 	case EpCapture:
-		next.halfMove = 0
+		pos.halfMove = 0
 		capturedSq := Square((int(from) & 0x38) | (int(to) & 0x07))
-		next.removePiece(EnemyOf(color), Pawn, capturedSq)
-		next.movePiece(color, Pawn, from, to)
+		pos.removePiece(EnemyOf(color), Pawn, capturedSq)
+		pos.movePiece(color, Pawn, from, to)
 
 	case Castling:
-		next.halfMove = 0
+		pos.halfMove = 0
 		switch to {
 		case g1:
-			next.movePiece(White, King, e1, g1)
-			next.movePiece(White, Rook, h1, f1)
+			pos.movePiece(White, King, e1, g1)
+			pos.movePiece(White, Rook, h1, f1)
 		case c1:
-			next.movePiece(White, King, e1, c1)
-			next.movePiece(White, Rook, a1, d1)
+			pos.movePiece(White, King, e1, c1)
+			pos.movePiece(White, Rook, a1, d1)
 		case g8:
-			next.movePiece(Black, King, e8, g8)
-			next.movePiece(Black, Rook, h8, f8)
+			pos.movePiece(Black, King, e8, g8)
+			pos.movePiece(Black, Rook, h8, f8)
 		case c8:
-			next.movePiece(Black, King, e8, c8)
-			next.movePiece(Black, Rook, a8, d8)
+			pos.movePiece(Black, King, e8, c8)
+			pos.movePiece(Black, Rook, a8, d8)
 		}
 	}
 
-	next.flags ^= flagBlackToMove
-	next.hash ^= BlackMoveHash
+	pos.flags ^= flagBlackToMove
+	pos.hash ^= BlackMoveHash
 	if color == Black {
-		next.fullMove++
+		pos.fullMove++
 	}
-	next.kingLoc[color] = (next.Kings() & next.colors[color]).Lsb()
-	next.checkers = next.AttacksTo(next.kingLoc[EnemyOf(color)], color)
-	return next
+	pos.kingLoc[color] = (pos.Kings() & pos.colors[color]).Lsb()
+	pos.checkers = pos.AttacksTo(pos.kingLoc[EnemyOf(color)], color)
+}
+
+// UnmakeMove reverses the last MakeMove or MakeNullMove call.
+func (pos *Position) UnmakeMove() {
+	n := len(pos.stateStack)
+	saved := pos.stateStack[n-1]
+	pos.stateStack = pos.stateStack[:n-1]
+
+	pos.flags = saved.flags
+	color := pos.ColorToMove() // color that made the move
+
+	m := saved.move
+	if !m.IsNone() {
+		from, to, piece := m.From(), m.To(), m.Piece()
+		enemy := EnemyOf(color)
+		switch m.Type() {
+		case NonCapture, PawnDoublePush:
+			pos.movePiece(color, piece, to, from)
+		case Capture:
+			pos.movePiece(color, piece, to, from)
+			pos.addPiece(enemy, m.Captured(), to)
+		case PromotionKnight, PromotionBishop, PromotionRook, PromotionQueen:
+			pos.removePiece(color, m.Promoted(), to)
+			pos.addPiece(color, Pawn, from)
+			if m.Captured() != NoPiece {
+				pos.addPiece(enemy, m.Captured(), to)
+			}
+		case EpCapture:
+			capturedSq := Square((int(from) & 0x38) | (int(to) & 0x07))
+			pos.movePiece(color, Pawn, to, from)
+			pos.addPiece(enemy, Pawn, capturedSq)
+		case Castling:
+			switch to {
+			case g1:
+				pos.movePiece(White, King, g1, e1)
+				pos.movePiece(White, Rook, f1, h1)
+			case c1:
+				pos.movePiece(White, King, c1, e1)
+				pos.movePiece(White, Rook, d1, a1)
+			case g8:
+				pos.movePiece(Black, King, g8, e8)
+				pos.movePiece(Black, Rook, f8, h8)
+			case c8:
+				pos.movePiece(Black, King, c8, e8)
+				pos.movePiece(Black, Rook, d8, a8)
+			}
+		}
+		pos.kingLoc[color] = (pos.Kings() & pos.colors[color]).Lsb()
+		if color == Black {
+			pos.fullMove--
+		}
+	}
+
+	pos.hash = saved.hash
+	pos.checkers = saved.checkers
+	pos.castling = saved.castling
+	pos.epSquare = saved.epSquare
+	pos.halfMove = saved.halfMove
 }
 
 // MakeNullMove flips side to move without moving a piece.
-func (pos *Position) MakeNullMove() Position {
-	next := *pos
-	next.flags |= flagNullMove
-	next.flags ^= flagBlackToMove
-	next.hash ^= EnPassantHashes[next.epSquare]
-	next.hash ^= BlackMoveHash
-	next.epSquare = NoSquare
-	return next
+func (pos *Position) MakeNullMove() {
+	pos.stateStack = append(pos.stateStack, irreversibleState{
+		hash:     pos.hash,
+		checkers: pos.checkers,
+		castling: pos.castling,
+		epSquare: pos.epSquare,
+		halfMove: pos.halfMove,
+		flags:    pos.flags,
+		move:     MoveNone(),
+	})
+	pos.hash ^= EnPassantHashes[pos.epSquare]
+	pos.hash ^= BlackMoveHash
+	pos.epSquare = NoSquare
+	pos.flags |= flagNullMove
+	pos.flags ^= flagBlackToMove
+}
+
+// IsDrawByRepetition returns true if the current position has appeared twice before
+// in the game history recorded on the stateStack.
+func (pos *Position) IsDrawByRepetition() bool {
+	hash := pos.hash
+	k := len(pos.stateStack)
+	repetitions := 2
+	for i := k - 4; i >= 0; i -= 2 {
+		s := pos.stateStack[i]
+		if s.hash == hash {
+			repetitions--
+			if repetitions == 0 {
+				return true
+			}
+		}
+		if s.halfMove == 0 {
+			return false
+		}
+	}
+	return false
 }
 
 // IsLegal returns true if the position is a legal chess position.

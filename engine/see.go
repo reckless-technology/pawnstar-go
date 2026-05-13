@@ -54,23 +54,26 @@ func (b *seeBoard) piecesOfColor(c Color) *Bitboard {
 
 // EvaluateStaticExchange returns the SEE score for move and whether move gives check.
 func EvaluateStaticExchange(pos *Position, m Move) (int, bool) {
-	dst := pos.MakeMove(m)
-	isChecking := dst.IsInCheck()
-	bb := newSeeBoard(&dst)
-	piece := m.Piece()
 	var captured Piece
 	if m.Type() == EpCapture {
 		captured = Pawn
 	} else {
 		captured = pos.PieceAt(m.To())
 	}
+	pos.MakeMove(m)
+	isChecking := pos.IsInCheck()
+	nextColor := pos.ColorToMove()
+	bb := newSeeBoard(pos)
+	pos.UnmakeMove()
+
+	piece := m.Piece()
 	promoted := m.Promoted()
 	if promoted != NoPiece {
 		score := seeValues[captured] + seeValues[promoted] - seeValues[Pawn] -
-			evaluateSwapOff(&bb, m.To(), dst.ColorToMove(), promoted)
+			evaluateSwapOff(&bb, m.To(), nextColor, promoted)
 		return score, isChecking
 	}
-	score := seeValues[captured] - evaluateSwapOff(&bb, m.To(), dst.ColorToMove(), piece)
+	score := seeValues[captured] - evaluateSwapOff(&bb, m.To(), nextColor, piece)
 	return score, isChecking
 }
 
