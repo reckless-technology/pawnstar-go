@@ -82,7 +82,7 @@ func evaluateSwapOff(bb *seeBoard, location Square, color Color, pieceOnSquare P
 		pawnAttacks = PawnAttacksWhite[location]
 	}
 	knightAttacks := KnightAttacks[location]
-	kingAttacks := KingAttacksTable[location]
+	kingAttacks := KingAttacks[location]
 	squareBB := SquareBB(location)
 
 	occupied := bb.whitePieces | bb.blackPieces

@@ -3,7 +3,11 @@
     "allow": [
       "Bash(go build *)",
       "Bash(go test *)",
-      "Bash(./pawnstar-go)"
+      "Bash(./pawnstar-go)",
+      "Bash(gofmt -l -w /home/jonny/work/pawnstar-go/engine/ /home/jonny/work/pawnstar-go/cmd/)",
+      "Read(//home/jonny/work/pawnstar/src/**)",
+      "Bash(time echo quit)",
+      "Bash(/tmp/pawnstar-magic)"
     ]
   }
 }

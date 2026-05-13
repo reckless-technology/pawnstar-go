@@ -1,6 +1,5 @@
 package engine
 
-// CastlingRights encapsulates the four castling-rights flags.
 type CastlingRights uint8
 
 const (
@@ -67,19 +66,19 @@ var castleMoveMasks [64]CastlingRights
 
 func initCastleMasks() {
 	okm := CastlingRights(0x0F)
-	a1m := okm &^ CastleWhiteQueenside
-	e1m := okm &^ (CastleWhiteKingside | CastleWhiteQueenside)
-	h1m := okm &^ CastleWhiteKingside
-	a8m := okm &^ CastleBlackQueenside
-	e8m := okm &^ (CastleBlackKingside | CastleBlackQueenside)
-	h8m := okm &^ CastleBlackKingside
+	a1m := okm & ^CastleWhiteQueenside
+	e1m := okm & ^(CastleWhiteKingside | CastleWhiteQueenside)
+	h1m := okm & ^CastleWhiteKingside
+	a8m := okm & ^CastleBlackQueenside
+	e8m := okm & ^(CastleBlackKingside | CastleBlackQueenside)
+	h8m := okm & ^CastleBlackKingside
 	for i := range castleMoveMasks {
 		castleMoveMasks[i] = okm
 	}
-	castleMoveMasks[SquareFromString("a1")] = a1m
-	castleMoveMasks[SquareFromString("e1")] = e1m
-	castleMoveMasks[SquareFromString("h1")] = h1m
-	castleMoveMasks[SquareFromString("a8")] = a8m
-	castleMoveMasks[SquareFromString("e8")] = e8m
-	castleMoveMasks[SquareFromString("h8")] = h8m
+	castleMoveMasks[a1] = a1m
+	castleMoveMasks[e1] = e1m
+	castleMoveMasks[h1] = h1m
+	castleMoveMasks[a8] = a8m
+	castleMoveMasks[e8] = e8m
+	castleMoveMasks[h8] = h8m
 }

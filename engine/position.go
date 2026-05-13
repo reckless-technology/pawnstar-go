@@ -45,29 +45,26 @@ func (pos *Position) ColorToMove() Color {
 	return White
 }
 
-func (pos *Position) IsNullMove() bool         { return pos.flags&flagNullMove != 0 }
-func (pos *Position) Hash() uint64             { return pos.hash }
-func (pos *Position) IsInCheck() bool          { return pos.checkers != 0 }
-func (pos *Position) Checkers() Bitboard       { return pos.checkers }
-func (pos *Position) EPSquare() Square         { return pos.epSquare }
-func (pos *Position) HalfMove() int            { return int(pos.halfMove) }
-func (pos *Position) FullMove() int            { return int(pos.fullMove) + 1 }
-func (pos *Position) Castling() CastlingRights { return pos.castling }
-
+func (pos *Position) IsNullMove() bool            { return pos.flags&flagNullMove != 0 }
+func (pos *Position) Hash() uint64                { return pos.hash }
+func (pos *Position) IsInCheck() bool             { return pos.checkers != 0 }
+func (pos *Position) Checkers() Bitboard          { return pos.checkers }
+func (pos *Position) EPSquare() Square            { return pos.epSquare }
+func (pos *Position) HalfMove() int               { return int(pos.halfMove) }
+func (pos *Position) FullMove() int               { return int(pos.fullMove) + 1 }
+func (pos *Position) Castling() CastlingRights    { return pos.castling }
 func (pos *Position) KingLocation(c Color) Square { return pos.kingLoc[c] }
-
-func (pos *Position) PieceAt(sq Square) Piece  { return pos.squares[sq] }
-func (pos *Position) PieceBB(p Piece) Bitboard { return pos.pieces[p-1] }
-func (pos *Position) ColorBB(c Color) Bitboard { return pos.colors[c] }
-func (pos *Position) Occupied() Bitboard       { return pos.colors[White] | pos.colors[Black] }
-func (pos *Position) Vacant() Bitboard         { return ^pos.Occupied() }
-
-func (pos *Position) Pawns() Bitboard   { return pos.pieces[Pawn-1] }
-func (pos *Position) Knights() Bitboard { return pos.pieces[Knight-1] }
-func (pos *Position) Bishops() Bitboard { return pos.pieces[Bishop-1] }
-func (pos *Position) Rooks() Bitboard   { return pos.pieces[Rook-1] }
-func (pos *Position) Queens() Bitboard  { return pos.pieces[Queen-1] }
-func (pos *Position) Kings() Bitboard   { return pos.pieces[King-1] }
+func (pos *Position) PieceAt(sq Square) Piece     { return pos.squares[sq] }
+func (pos *Position) PieceBB(p Piece) Bitboard    { return pos.pieces[p-1] }
+func (pos *Position) ColorBB(c Color) Bitboard    { return pos.colors[c] }
+func (pos *Position) Occupied() Bitboard          { return pos.colors[White] | pos.colors[Black] }
+func (pos *Position) Vacant() Bitboard            { return ^pos.Occupied() }
+func (pos *Position) Pawns() Bitboard             { return pos.pieces[Pawn-1] }
+func (pos *Position) Knights() Bitboard           { return pos.pieces[Knight-1] }
+func (pos *Position) Bishops() Bitboard           { return pos.pieces[Bishop-1] }
+func (pos *Position) Rooks() Bitboard             { return pos.pieces[Rook-1] }
+func (pos *Position) Queens() Bitboard            { return pos.pieces[Queen-1] }
+func (pos *Position) Kings() Bitboard             { return pos.pieces[King-1] }
 
 // ---- mutation helpers ----
 
@@ -108,7 +105,7 @@ func (pos *Position) AttacksTo(sq Square, c Color) Bitboard {
 		result = PawnAttacksWhite[sq] & pos.Pawns()
 	}
 	result |= KnightAttacks[sq] & pos.Knights()
-	result |= KingAttacksTable[sq] & pos.Kings()
+	result |= KingAttacks[sq] & pos.Kings()
 	result |= RookAttacks(occ, sq) & (pos.Rooks() | pos.Queens())
 	result |= BishopAttacks(occ, sq) & (pos.Bishops() | pos.Queens())
 	_ = enemy
@@ -147,7 +144,7 @@ func FromFen(fen string) Position {
 			}
 			_ = piece
 			p := Piece(idx + 1)
-			pos.addPiece(c, p, NewSquare(file, rank))
+			pos.addPiece(c, p, SquareXY(file, rank))
 			file++
 		}
 	}
@@ -220,7 +217,7 @@ func (pos *Position) ToFen() string {
 	for rank := 7; rank >= 0; rank-- {
 		empty := 0
 		for file := 0; file < 8; file++ {
-			sq := NewSquare(file, rank)
+			sq := SquareXY(file, rank)
 			if occ&SquareBB(sq) == 0 {
 				empty++
 			} else {
@@ -263,13 +260,6 @@ func (pos *Position) ToFen() string {
 }
 
 // ---- MakeMove ----
-
-var (
-	sqG1 = SquareFromString("g1")
-	sqC1 = SquareFromString("c1")
-	sqG8 = SquareFromString("g8")
-	sqC8 = SquareFromString("c8")
-)
 
 // MakeMove applies move to pos and returns the resulting position.
 func (pos *Position) MakeMove(m Move) Position {
@@ -318,18 +308,18 @@ func (pos *Position) MakeMove(m Move) Position {
 	case Castling:
 		next.halfMove = 0
 		switch to {
-		case sqG1:
-			next.movePiece(White, King, SquareFromString("e1"), sqG1)
-			next.movePiece(White, Rook, SquareFromString("h1"), SquareFromString("f1"))
-		case sqC1:
-			next.movePiece(White, King, SquareFromString("e1"), sqC1)
-			next.movePiece(White, Rook, SquareFromString("a1"), SquareFromString("d1"))
-		case sqG8:
-			next.movePiece(Black, King, SquareFromString("e8"), sqG8)
-			next.movePiece(Black, Rook, SquareFromString("h8"), SquareFromString("f8"))
-		case sqC8:
-			next.movePiece(Black, King, SquareFromString("e8"), sqC8)
-			next.movePiece(Black, Rook, SquareFromString("a8"), SquareFromString("d8"))
+		case g1:
+			next.movePiece(White, King, e1, g1)
+			next.movePiece(White, Rook, h1, f1)
+		case c1:
+			next.movePiece(White, King, e1, c1)
+			next.movePiece(White, Rook, a1, d1)
+		case g8:
+			next.movePiece(Black, King, e8, g8)
+			next.movePiece(Black, Rook, h8, f8)
+		case c8:
+			next.movePiece(Black, King, e8, c8)
+			next.movePiece(Black, Rook, a8, d8)
 		}
 	}
 
@@ -360,18 +350,18 @@ func (pos *Position) IsLegal() bool {
 	wk := pos.Kings() & pos.colors[White]
 	bk := pos.Kings() & pos.colors[Black]
 	return wk.PopCount() == 1 && bk.PopCount() == 1 && wk != bk &&
-		KingAttacksTable[wk.Lsb()]&bk == 0 &&
+		KingAttacks[wk.Lsb()]&bk == 0 &&
 		!pos.IsAttacked(pos.kingLoc[EnemyOf(color)], color)
 }
 
 func (pos *Position) IsCheckmate() bool {
 	ml := pos.GenerateLegalMoves()
-	return pos.IsInCheck() && ml.Len() == 0
+	return pos.IsInCheck() && len(ml) == 0
 }
 
 func (pos *Position) IsStalemate() bool {
 	ml := pos.GenerateLegalMoves()
-	return !pos.IsInCheck() && ml.Len() == 0
+	return !pos.IsInCheck() && len(ml) == 0
 }
 
 // IsDrawByMaterial returns true when neither side has enough material to checkmate.

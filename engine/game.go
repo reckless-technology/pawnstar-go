@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"sync"
 	"time"
 )
 
@@ -55,7 +54,6 @@ type Game struct {
 	CancelSearch bool
 
 	positions []Position
-	mu        sync.Mutex
 	stopChan  chan struct{}
 	doneChan  chan struct{}
 }
@@ -98,8 +96,8 @@ func (g *Game) PlayMove(m Move) {
 
 func (g *Game) PlayMoveString(s string) Move {
 	moves := g.CurrentPosition().GenerateLegalMoves()
-	for i := 0; i < moves.Len(); i++ {
-		m := moves.At(i)
+	for i := 0; i < len(moves); i++ {
+		m := moves[i]
 		if m.String() == s {
 			g.PlayMove(m)
 			return m
@@ -142,17 +140,17 @@ func (g *Game) IsDrawByRepetition() bool {
 }
 
 // ScoreAndSortMoves assigns MVV/LVA + history scores and sorts descending.
-func (g *Game) ScoreAndSortMoves(ml *MoveList, ply int) {
+func (g *Game) ScoreAndSortMoves(moves []Move, ply int) {
 	pos := g.CurrentPosition()
 	pieceVals := [7]int{0, 100, 300, 300, 500, 900, 10000}
-	for i := 0; i < ml.Len(); i++ {
-		m := ml.At(i)
+	for i := 0; i < len(moves); i++ {
+		m := moves[i]
 		score := pieceVals[pos.PieceAt(m.To())]*10000 -
 			pieceVals[pos.PieceAt(m.From())]*1000 +
 			int(g.History.GetCount(ply, m))
-		ml.moves[i] = m.WithScore(score)
+		moves[i] = m.WithScore(score)
 	}
-	ml.SortDescending()
+	SortMovesUnstable(moves)
 }
 
 // StartThinking begins the search on a background goroutine.

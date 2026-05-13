@@ -1,8 +1,8 @@
 package engine
 
 import (
-	_ "embed"
 	"bufio"
+	_ "embed"
 	"math/rand"
 	"strings"
 )
@@ -54,8 +54,8 @@ func (b OpeningBook) GetMove(hash uint64) Move {
 
 func bookFindMove(pos *Position, s string) Move {
 	moves := pos.GenerateLegalMoves()
-	for i := 0; i < moves.Len(); i++ {
-		if m := moves.At(i); m.String() == s {
+	for i := 0; i < len(moves); i++ {
+		if m := moves[i]; m.String() == s {
 			return m
 		}
 	}

@@ -52,7 +52,7 @@ func (tt *TranspositionTable) Record(t Transposition) {
 	idx := tt.index(t.hash)
 	existing := &tt.table[idx]
 	// Replace if: old entry is from previous search, or new entry is deeper, or it's a PV node.
-	if existing.isOld || t.depth >= existing.depth || t.nodeType == NodePV {
+	if existing.hash == 0 || existing.isOld || t.depth >= existing.depth || t.nodeType == NodePV {
 		tt.table[idx] = t
 	}
 }

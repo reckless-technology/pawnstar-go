@@ -7,11 +7,11 @@ func Perft(pos Position, depth int) uint64 {
 	}
 	moves := pos.GenerateLegalMoves()
 	if depth == 1 {
-		return uint64(moves.Len())
+		return uint64(len(moves))
 	}
 	var nodes uint64
-	for i := 0; i < moves.Len(); i++ {
-		next := pos.MakeMove(moves.At(i))
+	for i := 0; i < len(moves); i++ {
+		next := pos.MakeMove(moves[i])
 		nodes += Perft(next, depth-1)
 	}
 	return nodes

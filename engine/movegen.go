@@ -1,23 +1,23 @@
 package engine
 
 // GenerateLegalMoves returns all legal moves from pos.
-func (pos *Position) GenerateLegalMoves() MoveList {
+func (pos *Position) GenerateLegalMoves() []Move {
 	if pos.ColorToMove() == White {
-		return pos.genMoves(White, true)
+		return pos.generateMoves(White, true)
 	}
-	return pos.genMoves(Black, true)
+	return pos.generateMoves(Black, true)
 }
 
 // GenerateLegalCaptures returns captures and promotions only.
-func (pos *Position) GenerateLegalCaptures() MoveList {
+func (pos *Position) GenerateLegalCaptures() []Move {
 	if pos.ColorToMove() == White {
-		return pos.genMoves(White, false)
+		return pos.generateMoves(White, false)
 	}
-	return pos.genMoves(Black, false)
+	return pos.generateMoves(Black, false)
 }
 
-func (pos *Position) genMoves(color Color, doAllMoves bool) MoveList {
-	var moves MoveList
+func (pos *Position) generateMoves(color Color, doAllMoves bool) []Move {
+	moves := make([]Move, 0, 64)
 	occ := pos.Occupied()
 	friendly := pos.colors[color]
 	enemyPieces := occ ^ friendly
@@ -43,17 +43,17 @@ func (pos *Position) genMoves(color Color, doAllMoves bool) MoveList {
 	}
 
 	// King moves.
-	kingTargets := KingAttacksTable[kingLoc] &^ forbidden
+	kingTargets := KingAttacks[kingLoc] & ^forbidden
 	for b := kingTargets & enemyPieces; b != 0; {
 		var to Square
 		b, to = b.PopLsb()
-		moves.Push(MoveCapture(kingLoc, to, King, pos.squares[to]))
+		moves = append(moves, MoveCapture(kingLoc, to, King, pos.squares[to]))
 	}
 	if doAllMoves {
 		for b := kingTargets &^ occ; b != 0; {
 			var to Square
 			b, to = b.PopLsb()
-			moves.Push(MoveNonCapture(kingLoc, to, King))
+			moves = append(moves, MoveNonCapture(kingLoc, to, King))
 		}
 	}
 
@@ -82,13 +82,13 @@ func (pos *Position) genMoves(color Color, doAllMoves bool) MoveList {
 			for c := attacks & allowedCaptures; c != 0; {
 				var to Square
 				c, to = c.PopLsb()
-				moves.Push(MoveCapture(from, to, pt, pos.squares[to]))
+				moves = append(moves, MoveCapture(from, to, pt, pos.squares[to]))
 			}
 			if doAllMoves {
 				for nc := attacks & allowedNonCaptures; nc != 0; {
 					var to Square
 					nc, to = nc.PopLsb()
-					moves.Push(MoveNonCapture(from, to, pt))
+					moves = append(moves, MoveNonCapture(from, to, pt))
 				}
 			}
 		}
@@ -97,97 +97,74 @@ func (pos *Position) genMoves(color Color, doAllMoves bool) MoveList {
 	// Castling.
 	if doAllMoves && !pos.IsInCheck() {
 		if color == White {
-			f1 := SquareFromString("f1")
-			g1 := SquareFromString("g1")
-			b1 := SquareFromString("b1")
-			c1 := SquareFromString("c1")
-			d1 := SquareFromString("d1")
 			if pos.castling.MayWhiteCastleKingside() &&
 				(occ&(SquareBB(f1)|SquareBB(g1))) == 0 &&
 				!pos.IsAttacked(f1, Black) && !pos.IsAttacked(g1, Black) {
-				moves.Push(MoveCastling(SquareFromString("e1"), g1))
+				moves = append(moves, MoveCastling(e1, g1))
 			}
 			if pos.castling.MayWhiteCastleQueenside() &&
 				(occ&(SquareBB(b1)|SquareBB(c1)|SquareBB(d1))) == 0 &&
 				!pos.IsAttacked(d1, Black) && !pos.IsAttacked(c1, Black) {
-				moves.Push(MoveCastling(SquareFromString("e1"), c1))
+				moves = append(moves, MoveCastling(e1, c1))
 			}
 		} else {
-			f8 := SquareFromString("f8")
-			g8 := SquareFromString("g8")
-			b8 := SquareFromString("b8")
-			c8 := SquareFromString("c8")
-			d8 := SquareFromString("d8")
 			if pos.castling.MayBlackCastleKingside() &&
 				(occ&(SquareBB(f8)|SquareBB(g8))) == 0 &&
 				!pos.IsAttacked(f8, White) && !pos.IsAttacked(g8, White) {
-				moves.Push(MoveCastling(SquareFromString("e8"), g8))
+				moves = append(moves, MoveCastling(e8, g8))
 			}
 			if pos.castling.MayBlackCastleQueenside() &&
 				(occ&(SquareBB(b8)|SquareBB(c8)|SquareBB(d8))) == 0 &&
 				!pos.IsAttacked(d8, White) && !pos.IsAttacked(c8, White) {
-				moves.Push(MoveCastling(SquareFromString("e8"), c8))
+				moves = append(moves, MoveCastling(e8, c8))
 			}
 		}
 	}
 
 	// Pawn moves.
-	pos.genPawnMoves(color, occ, friendly, enemyPieces, allowedCaptures, allowedNonCaptures, &pins, &moves, doAllMoves)
-
-	return moves
-}
-
-func (pos *Position) genPawnMoves(
-	color Color, occ, friendly, enemyPieces, allowedCaptures, allowedNonCaptures Bitboard,
-	pins *Pins, moves *MoveList, doAllMoves bool,
-) {
 	var (
-		pawns            Bitboard
-		singlePushes     Bitboard
-		doublePushes     Bitboard
-		capturesWest     Bitboard
-		capturesEast     Bitboard
-		epSources        Bitboard
-		promotions       Bitboard
-		promotionsWest   Bitboard
-		promotionsEast   Bitboard
-		pushDelta        int
-		westDelta        int
-		eastDelta        int
-		promoRank        Bitboard
-		doublePushRank   Bitboard
+		pawns          Bitboard
+		singlePushes   Bitboard
+		doublePushes   Bitboard
+		capturesWest   Bitboard
+		capturesEast   Bitboard
+		epSources      Bitboard
+		promotions     Bitboard
+		promotionsWest Bitboard
+		promotionsEast Bitboard
+		promoRank      Bitboard
+		pushDelta      int
+		westDelta      int
+		eastDelta      int
 	)
 
 	if color == White {
 		pawns = pos.Pawns() & friendly
-		singlePushes = pawns.ShiftNorth() &^ occ
-		doublePushes = singlePushes.ShiftNorth() &^ occ & Rank4
+		singlePushes = pawns.ShiftNorth() & ^occ
+		doublePushes = singlePushes.ShiftNorth() & ^occ & Rank4
 		capturesWest = pawns.ShiftNorthwest() & enemyPieces
 		capturesEast = pawns.ShiftNortheast() & enemyPieces
 		if pos.epSquare != NoSquare {
 			epSources = PawnAttacksBlack[pos.epSquare] & pawns
 		}
-		promoRank = Rank8
-		doublePushRank = Rank4
 		pushDelta = 8
 		westDelta = 7
 		eastDelta = 9
+		promoRank = Rank8
 	} else {
 		pawns = pos.Pawns() & friendly
-		singlePushes = pawns.ShiftSouth() &^ occ
-		doublePushes = singlePushes.ShiftSouth() &^ occ & Rank5
+		singlePushes = pawns.ShiftSouth() & ^occ
+		doublePushes = singlePushes.ShiftSouth() & ^occ & Rank5
 		capturesWest = pawns.ShiftSouthwest() & enemyPieces
 		capturesEast = pawns.ShiftSoutheast() & enemyPieces
 		if pos.epSquare != NoSquare {
 			epSources = PawnAttacksWhite[pos.epSquare] & pawns
 		}
-		promoRank = Rank1
-		doublePushRank = Rank5
 		pushDelta = -8
 		westDelta = -9
 		eastDelta = -7
+		promoRank = Rank1
 	}
-	_ = doublePushRank
 
 	promotions = singlePushes & promoRank
 	promotionsWest = capturesWest & promoRank
@@ -207,11 +184,11 @@ func (pos *Position) genPawnMoves(
 			b, to = b.PopLsb()
 			from := Square(int(to) - pair.delta)
 			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
-				cap := pos.squares[to]
-				moves.Push(MovePromotion(from, to, Queen, cap))
-				moves.Push(MovePromotion(from, to, Rook, cap))
-				moves.Push(MovePromotion(from, to, Bishop, cap))
-				moves.Push(MovePromotion(from, to, Knight, cap))
+				captured := pos.squares[to]
+				moves = append(moves, MovePromotion(from, to, Queen, captured))
+				moves = append(moves, MovePromotion(from, to, Rook, captured))
+				moves = append(moves, MovePromotion(from, to, Bishop, captured))
+				moves = append(moves, MovePromotion(from, to, Knight, captured))
 			}
 		}
 	}
@@ -224,10 +201,10 @@ func (pos *Position) genPawnMoves(
 			b, to = b.PopLsb()
 			from := Square(int(to) - pushDelta)
 			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
-				moves.Push(MovePromotion(from, to, Queen, NoPiece))
-				moves.Push(MovePromotion(from, to, Rook, NoPiece))
-				moves.Push(MovePromotion(from, to, Bishop, NoPiece))
-				moves.Push(MovePromotion(from, to, Knight, NoPiece))
+				moves = append(moves, MovePromotion(from, to, Queen, NoPiece))
+				moves = append(moves, MovePromotion(from, to, Rook, NoPiece))
+				moves = append(moves, MovePromotion(from, to, Bishop, NoPiece))
+				moves = append(moves, MovePromotion(from, to, Knight, NoPiece))
 			}
 		}
 	}
@@ -243,7 +220,7 @@ func (pos *Position) genPawnMoves(
 			b, to = b.PopLsb()
 			from := Square(int(to) - pair.delta)
 			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
-				moves.Push(MoveCapture(from, to, Pawn, pos.squares[to]))
+				moves = append(moves, MoveCapture(from, to, Pawn, pos.squares[to]))
 			}
 		}
 	}
@@ -256,7 +233,7 @@ func (pos *Position) genPawnMoves(
 			b, to = b.PopLsb()
 			from := Square(int(to) - pushDelta)
 			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
-				moves.Push(MoveNonCapture(from, to, Pawn))
+				moves = append(moves, MoveNonCapture(from, to, Pawn))
 			}
 		}
 		// Double pawn pushes.
@@ -266,14 +243,13 @@ func (pos *Position) genPawnMoves(
 			b, to = b.PopLsb()
 			from := Square(int(to) - pushDelta*2)
 			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
-				moves.Push(MoveDoublePush(from, to))
+				moves = append(moves, MoveDoublePush(from, to))
 			}
 		}
 	}
 
 	// En passant captures.
 	occ = pos.Occupied()
-	kingLoc := pos.kingLoc[color]
 	for epSources != 0 {
 		var from Square
 		epSources, from = epSources.PopLsb()
@@ -285,29 +261,30 @@ func (pos *Position) genPawnMoves(
 			if kingLoc.Rank() == from.Rank() {
 				pseudoOcc := occ ^ SquareBB(capturedSq) ^ SquareBB(from)
 				hAttacks := RookAttacks(pseudoOcc, kingLoc) &
-					(West[kingLoc] | East[kingLoc])
+					(WestOf[kingLoc] | EastOf[kingLoc])
 				if hAttacks&pos.colors[EnemyOf(color)]&(pos.Rooks()|pos.Queens()) != 0 {
 					continue
 				}
 			}
-			moves.Push(MoveEpCapture(from, to))
+			moves = append(moves, MoveEpCapture(from, to))
 		}
 	}
+	return moves
 }
 
 // pieceAttacks returns the attack set for piece pt on sq given occupied squares.
-func pieceAttacks(pt Piece, occ Bitboard, sq Square) Bitboard {
-	switch pt {
+func pieceAttacks(piece Piece, occupied Bitboard, sq Square) Bitboard {
+	switch piece {
 	case Knight:
 		return KnightAttacks[sq]
 	case Bishop:
-		return BishopAttacks(occ, sq)
+		return BishopAttacks(occupied, sq)
 	case Rook:
-		return RookAttacks(occ, sq)
+		return RookAttacks(occupied, sq)
 	case Queen:
-		return QueenAttacks(occ, sq)
+		return QueenAttacks(occupied, sq)
 	case King:
-		return KingAttacksTable[sq]
+		return KingAttacks[sq]
 	}
 	return 0
 }

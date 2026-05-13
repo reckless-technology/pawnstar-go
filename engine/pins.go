@@ -38,5 +38,5 @@ func (p *Pins) AllowedSquares(sq Square) Bitboard {
 	if SquareBB(sq)&p.pinned != 0 {
 		return p.allowed[sq]
 	}
-	return BBAll
+	return AllSqs
 }

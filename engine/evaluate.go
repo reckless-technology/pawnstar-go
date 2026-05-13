@@ -166,11 +166,11 @@ func determinePawnStructure(pos *Position, color Color) PawnStructure {
 
 func evaluateMaterial(pos *Position, color Color) int {
 	friendly := pos.ColorBB(color)
-	score := (pos.Pawns() & friendly).PopCount()*100 +
-		(pos.Knights() & friendly).PopCount()*325 +
-		(pos.Bishops() & friendly).PopCount()*325 +
-		(pos.Rooks() & friendly).PopCount()*500 +
-		(pos.Queens() & friendly).PopCount()*1000
+	score := (pos.Pawns()&friendly).PopCount()*100 +
+		(pos.Knights()&friendly).PopCount()*325 +
+		(pos.Bishops()&friendly).PopCount()*325 +
+		(pos.Rooks()&friendly).PopCount()*500 +
+		(pos.Queens()&friendly).PopCount()*1000
 
 	bishops := pos.Bishops() & friendly
 	if bishops&WhiteSqs != 0 && bishops&BlackSqs != 0 {
@@ -323,8 +323,8 @@ func evaluateKing(pos *Position, color Color) int {
 	}
 
 	// Bonus for friendly pieces near king.
-	adj1 := KingAttacksTable[kingLoc]
-	adj2 := KingAttacks2Table[kingLoc] ^ adj1
+	adj1 := KingAttacks[kingLoc]
+	adj2 := KingAttacks2[kingLoc] ^ adj1
 	nonPawns := friendly ^ friendlyPawns
 	safetyScore += 10*(adj1&nonPawns).PopCount() + 5*(adj2&nonPawns).PopCount()
 

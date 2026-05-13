@@ -129,17 +129,17 @@ func search(g *Game, depth, ply, alphav, betav int, parentPV *Variation) int {
 	}
 
 	moves := pos.GenerateLegalMoves()
-	if moves.Len() == 0 {
+	if len(moves) == 0 {
 		if pos.IsInCheck() {
 			return CheckmatedScore + ply
 		}
 		return DrawScore
 	}
 
-	g.ScoreAndSortMoves(&moves, ply)
+	g.ScoreAndSortMoves(moves, ply)
 
-	for i := 0; i < moves.Len(); i++ {
-		m := moves.At(i)
+	for i := 0; i < len(moves); i++ {
+		m := moves[i]
 		if t != nil && m == t.move {
 			continue
 		}
@@ -233,10 +233,10 @@ func searchQuiescent(g *Game, depth, ply, alphav, betav int) int {
 	}
 
 	moves := pos.GenerateLegalCaptures()
-	g.ScoreAndSortMoves(&moves, ply)
+	g.ScoreAndSortMoves(moves, ply)
 
-	for i := 0; i < moves.Len(); i++ {
-		m := moves.At(i)
+	for i := 0; i < len(moves); i++ {
+		m := moves[i]
 		if qt != nil && m == qt.move {
 			continue
 		}
@@ -272,11 +272,11 @@ func SearchRootNode(g *Game) Move {
 	}
 
 	moves := g.CurrentPosition().GenerateLegalMoves()
-	if moves.Len() == 0 {
+	if len(moves) == 0 {
 		return MoveNone()
 	}
-	if moves.Len() == 1 {
-		return moves.At(0)
+	if len(moves) == 1 {
+		return moves[0]
 	}
 
 	// Set up time management.
@@ -311,28 +311,28 @@ func SearchRootNode(g *Game) Move {
 
 	// Initial shallow pass to get move ordering.
 	var initPV Variation
-	for i := 0; i < moves.Len(); i++ {
-		m := moves.At(i)
+	for i := 0; i < len(moves); i++ {
+		m := moves[i]
 		score := searchSingleMove(g, StartDepth, 0, Alpha, Beta, m, &initPV, i)
-		moves.moves[i] = m.WithScore(score)
+		moves[i] = m.WithScore(score)
 	}
-	moves.SortDescending()
-	bestMove := moves.At(0)
+	SortMovesStable(moves)
+	bestMove := moves[0]
 
 	for depth := StartDepth + 1; depth < MaxPly; depth++ {
 		if tc.ClockType == ClockFixedDepth && depth > tc.Depth {
 			break
 		}
-		moves.SortDescending()
+		SortMovesStable(moves)
 		var childPV Variation
 		alphav := Alpha
 		g.NodeCount = 0
 		bestMoves = append(bestMoves, bestMove)
 
-		for i := 0; i < moves.Len(); i++ {
-			m := moves.At(i)
+		for i := 0; i < len(moves); i++ {
+			m := moves[i]
 			score := searchSingleMove(g, depth, 0, alphav, Beta, m, &childPV, i)
-			moves.moves[i] = m.WithScore(score)
+			moves[i] = m.WithScore(score)
 			if g.CancelSearch {
 				return bestMove
 			}
