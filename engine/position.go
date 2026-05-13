@@ -66,8 +66,6 @@ func (pos *Position) Rooks() Bitboard             { return pos.pieces[Rook-1] }
 func (pos *Position) Queens() Bitboard            { return pos.pieces[Queen-1] }
 func (pos *Position) Kings() Bitboard             { return pos.pieces[King-1] }
 
-// ---- mutation helpers ----
-
 func (pos *Position) addPiece(c Color, p Piece, sq Square) {
 	bb := SquareBB(sq)
 	pos.pieces[p-1] |= bb
@@ -96,7 +94,7 @@ func (pos *Position) movePiece(c Color, p Piece, from, to Square) {
 
 // AttacksTo returns the set of squares of color c that attack sq.
 func (pos *Position) AttacksTo(sq Square, c Color) Bitboard {
-	occ := pos.Occupied()
+	occupied := pos.Occupied()
 	var result Bitboard
 	if c == White {
 		result = PawnAttacksBlack[sq] & pos.Pawns()
@@ -105,8 +103,8 @@ func (pos *Position) AttacksTo(sq Square, c Color) Bitboard {
 	}
 	result |= KnightAttacks[sq] & pos.Knights()
 	result |= KingAttacks[sq] & pos.Kings()
-	result |= RookAttacks(occ, sq) & (pos.Rooks() | pos.Queens())
-	result |= BishopAttacks(occ, sq) & (pos.Bishops() | pos.Queens())
+	result |= RookAttacks(occupied, sq) & (pos.Rooks() | pos.Queens())
+	result |= BishopAttacks(occupied, sq) & (pos.Bishops() | pos.Queens())
 	result &= pos.colors[c]
 	return result
 }

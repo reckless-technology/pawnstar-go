@@ -25,7 +25,7 @@ var (
 	bishopTable [64][]Bitboard
 )
 
-// Magic numbers found offline with seed 1337.
+// Magic numbers found offline with seed 1337. It was taking over 400ms to compute them at startup.
 var rookMagic = [64]uint64{
 	0x2280024000142482, 0x0040002000100040, 0x01801000A0018008, 0x8100050010000822,
 	0x2200020020081004, 0x02000A0054031008, 0x0280020001000080, 0x0480088007402100,
@@ -65,17 +65,19 @@ var bishopMagic = [64]uint64{
 }
 
 func initMagics() {
+	var occupancies [4096]Bitboard
+	var target_squares [4096]Bitboard
+
 	for sq := range Square(64) {
-		mask := (NorthOf[sq] & ^Rank8) | (SouthOf[sq] & ^Rank1) |
-			(EastOf[sq] & ^FileH) | (WestOf[sq] & ^FileA)
+		mask := (NorthOf[sq] & ^Rank8) |
+			(SouthOf[sq] & ^Rank1) |
+			(EastOf[sq] & ^FileH) |
+			(WestOf[sq] & ^FileA)
 		rookMask[sq] = mask
 		rookShift[sq] = uint(64 - mask.PopCount())
 		rookTable[sq] = make([]Bitboard, 1<<mask.PopCount())
-
-		var occs [4096]Bitboard
-		var refs [4096]Bitboard
-		n := enumerateOccupancies(mask, occs[:], refs[:], rookAttacksClassic, sq)
-		fillMagicTable(rookMagic[sq], occs[:n], refs[:n], rookShift[sq], rookTable[sq])
+		n := enumerateOccupancies(mask, occupancies[:], target_squares[:], rookAttacksClassic, sq)
+		fillMagicTable(rookMagic[sq], occupancies[:n], target_squares[:n], rookShift[sq], rookTable[sq])
 	}
 
 	for sq := range Square(64) {
@@ -87,10 +89,8 @@ func initMagics() {
 		bishopShift[sq] = uint(64 - mask.PopCount())
 		bishopTable[sq] = make([]Bitboard, 1<<mask.PopCount())
 
-		var occs [512]Bitboard
-		var refs [512]Bitboard
-		n := enumerateOccupancies(mask, occs[:], refs[:], bishopAttacksClassic, sq)
-		fillMagicTable(bishopMagic[sq], occs[:n], refs[:n], bishopShift[sq], bishopTable[sq])
+		n := enumerateOccupancies(mask, occupancies[:], target_squares[:], bishopAttacksClassic, sq)
+		fillMagicTable(bishopMagic[sq], occupancies[:n], target_squares[:n], bishopShift[sq], bishopTable[sq])
 	}
 }
 
@@ -100,15 +100,15 @@ func fillMagicTable(magic uint64, occs, refs []Bitboard, shift uint, table []Bit
 	}
 }
 
-func enumerateOccupancies(mask Bitboard, occs, refs []Bitboard, attackFn func(Bitboard, Square) Bitboard, sq Square) int {
+func enumerateOccupancies(mask Bitboard, occupancies, targets []Bitboard, attackFn func(Bitboard, Square) Bitboard, sq Square) int {
 	n := 0
-	occ := Bitboard(0)
+	occupancy := Bitboard(0)
 	for {
-		occs[n] = occ
-		refs[n] = attackFn(occ, sq)
+		occupancies[n] = occupancy
+		targets[n] = attackFn(occupancy, sq)
 		n++
-		occ = (occ - mask) & mask
-		if occ == 0 {
+		occupancy = (occupancy - 1) & mask
+		if occupancy == 0 {
 			break
 		}
 	}
