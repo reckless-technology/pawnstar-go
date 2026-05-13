@@ -112,10 +112,19 @@ func determinePawnStructure(pos *Position, color Color) PawnStructure {
 	enemy := pos.Pawns() ^ friendly
 	var ps PawnStructure
 
+	var passedMask, supportedMask, doubledMask *[64]Bitboard
+	var enemyAttacks Bitboard
+	var fwdDelta int
 	if color == White {
 		ps.defendedPawns = friendly & (friendly.ShiftNorthwest() | friendly.ShiftNortheast())
+		passedMask, supportedMask, doubledMask = &PassedPawnMaskWhite, &SupportedPawnMaskWhite, &DoubledPawnMaskWhite
+		enemyAttacks = enemy.ShiftSouthwest() | enemy.ShiftSoutheast()
+		fwdDelta = 8
 	} else {
 		ps.defendedPawns = friendly & (friendly.ShiftSouthwest() | friendly.ShiftSoutheast())
+		passedMask, supportedMask, doubledMask = &PassedPawnMaskBlack, &SupportedPawnMaskBlack, &DoubledPawnMaskBlack
+		enemyAttacks = enemy.ShiftNorthwest() | enemy.ShiftNortheast()
+		fwdDelta = -8
 	}
 
 	for b := friendly; b != 0; {
@@ -123,40 +132,18 @@ func determinePawnStructure(pos *Position, color Color) PawnStructure {
 		b, sq = b.PopLsb()
 		bit := SquareBB(sq)
 
-		var passedMask, supportedMask, doubledMask [64]Bitboard
-		if color == White {
-			passedMask = PassedPawnMaskWhite
-			supportedMask = SupportedPawnMaskWhite
-			doubledMask = DoubledPawnMaskWhite
-		} else {
-			passedMask = PassedPawnMaskBlack
-			supportedMask = SupportedPawnMaskBlack
-			doubledMask = DoubledPawnMaskBlack
-		}
-		isolatedMask := IsolatedPawnMask
-
 		if passedMask[sq]&enemy == 0 {
 			ps.passedPawns |= bit
 		}
 		if doubledMask[sq]&friendly != 0 {
 			ps.doubledPawns |= bit
 		}
-		if isolatedMask[sq]&friendly == 0 {
+		if IsolatedPawnMask[sq]&friendly == 0 {
 			ps.isolatedPawns |= bit
 		}
 		if supportedMask[sq]&friendly == 0 {
-			if color == White {
-				enemyAttacks := enemy.ShiftSouthwest() | enemy.ShiftSoutheast()
-				fwd := Square(int(sq) + 8)
-				if enemyAttacks&SquareBB(fwd) != 0 {
-					ps.backwardPawns |= bit
-				}
-			} else {
-				enemyAttacks := enemy.ShiftNorthwest() | enemy.ShiftNortheast()
-				fwd := Square(int(sq) - 8)
-				if enemyAttacks&SquareBB(fwd) != 0 {
-					ps.backwardPawns |= bit
-				}
+			if enemyAttacks&SquareBB(Square(int(sq)+fwdDelta)) != 0 {
+				ps.backwardPawns |= bit
 			}
 		}
 	}

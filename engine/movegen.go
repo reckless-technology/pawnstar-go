@@ -2,18 +2,12 @@ package engine
 
 // GenerateLegalMoves returns all legal moves from pos.
 func (pos *Position) GenerateLegalMoves() []Move {
-	if pos.ColorToMove() == White {
-		return pos.generateMoves(White, true)
-	}
-	return pos.generateMoves(Black, true)
+	return pos.generateMoves(pos.ColorToMove(), true)
 }
 
 // GenerateLegalCaptures returns captures and promotions only.
 func (pos *Position) GenerateLegalCaptures() []Move {
-	if pos.ColorToMove() == White {
-		return pos.generateMoves(White, false)
-	}
-	return pos.generateMoves(Black, false)
+	return pos.generateMoves(pos.ColorToMove(), false)
 }
 
 func (pos *Position) generateMoves(color Color, doAllMoves bool) []Move {
@@ -249,7 +243,6 @@ func (pos *Position) generateMoves(color Color, doAllMoves bool) []Move {
 	}
 
 	// En passant captures.
-	occ = pos.Occupied()
 	for epSources != 0 {
 		var from Square
 		epSources, from = epSources.PopLsb()

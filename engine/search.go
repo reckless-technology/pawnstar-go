@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"math"
 	"strings"
 )
 
@@ -292,7 +291,7 @@ func SearchRootNode(g *Game) Move {
 			numMovesToGo = max(40-mc, 5)
 		}
 		msAllocated = int64(tc.MsRemaining) / int64(numMovesToGo)
-		msTimeout := maxI64(100, minI64(msAllocated*2, int64(tc.MsRemaining)-1000))
+		msTimeout := max(int64(100), min(msAllocated*2, int64(tc.MsRemaining)-1000))
 		tc.HardStopMs = tc.ElapsedMs() + msTimeout
 	case ClockFixedTime:
 		msAllocated = int64(tc.MsRemaining)
@@ -411,32 +410,3 @@ func abs(x int) int {
 	return x
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxI64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minI64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-var _ = math.MaxInt // avoid unused import

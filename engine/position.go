@@ -97,7 +97,6 @@ func (pos *Position) movePiece(c Color, p Piece, from, to Square) {
 // AttacksTo returns the set of squares of color c that attack sq.
 func (pos *Position) AttacksTo(sq Square, c Color) Bitboard {
 	occ := pos.Occupied()
-	enemy := EnemyOf(c)
 	var result Bitboard
 	if c == White {
 		result = PawnAttacksBlack[sq] & pos.Pawns()
@@ -108,7 +107,6 @@ func (pos *Position) AttacksTo(sq Square, c Color) Bitboard {
 	result |= KingAttacks[sq] & pos.Kings()
 	result |= RookAttacks(occ, sq) & (pos.Rooks() | pos.Queens())
 	result |= BishopAttacks(occ, sq) & (pos.Bishops() | pos.Queens())
-	_ = enemy
 	result &= pos.colors[c]
 	return result
 }
@@ -137,12 +135,10 @@ func FromFen(fen string) Position {
 			if ch >= 'a' && ch <= 'z' {
 				c = Black
 			}
-			piece := "  pnbrqk  PNBRQK"
 			idx := strings.IndexRune("pnbrqkPNBRQK", ch)
 			if idx >= 6 {
 				idx -= 6
 			}
-			_ = piece
 			p := Piece(idx + 1)
 			pos.addPiece(c, p, SquareXY(file, rank))
 			file++
