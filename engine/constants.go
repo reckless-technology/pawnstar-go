@@ -13,7 +13,6 @@ const (
 	ScoreInstabilityThresh = 50
 	StartDepth             = 3
 	HashTableMB            = 64
-	QHashTableMB           = 8
 )
 
 type Direction uint8
@@ -51,3 +50,7 @@ const (
 	Queen
 	King
 )
+
+func (piece Piece) ToString() string {
+	return string("-PNBRQK"[piece])
+}

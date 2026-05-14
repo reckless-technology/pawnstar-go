@@ -11,11 +11,11 @@ import (
 type irreversibleState struct {
 	hash     uint64
 	checkers Bitboard
+	move     Move // the move that was made to reach the child state
 	castling CastlingRights
 	epSquare Square
 	halfMove uint8
 	flags    uint8
-	move     Move // the move that was made to reach the child state
 }
 
 // Position holds the complete mutable state of a chess position.
@@ -118,7 +118,7 @@ func (pos *Position) IsAttacked(sq Square, by Color) bool {
 
 // ---- FEN parsing ----
 
-func FromFen(fen string) Position {
+func PositionFromFen(fen string) Position {
 	pos := Position{stateStack: make([]irreversibleState, 0, MaxPly)}
 	fields := strings.Fields(fen)
 
@@ -132,16 +132,14 @@ func FromFen(fen string) Position {
 		case '1', '2', '3', '4', '5', '6', '7', '8':
 			file += int(ch - '0')
 		default:
-			c := White
-			if ch >= 'a' && ch <= 'z' {
-				c = Black
-			}
-			idx := strings.IndexRune("pnbrqkPNBRQK", ch)
+			color := White
+			idx := strings.IndexRune("PNBRQKpnbrqk", ch)
 			if idx >= 6 {
 				idx -= 6
+				color = Black
 			}
-			p := Piece(idx + 1)
-			pos.addPiece(c, p, SquareXY(file, rank))
+			piece := Piece(idx + 1)
+			pos.addPiece(color, piece, SquareXY(file, rank))
 			file++
 		}
 	}
@@ -259,7 +257,10 @@ func (pos *Position) ToFen() string {
 // ---- MakeMove ----
 
 // MakeMove applies move to pos in place. Call UnmakeMove to reverse it.
-func (pos *Position) MakeMove(m Move) {
+func (pos *Position) MakeMove(move Move) {
+	if !pos.IsLegal() {
+		panic(fmt.Sprintf("FEN %s MOVE %s", pos.ToFen(), move.GoString()))
+	}
 	color := pos.ColorToMove()
 	oldCastling := pos.castling
 
@@ -270,33 +271,36 @@ func (pos *Position) MakeMove(m Move) {
 		epSquare: pos.epSquare,
 		halfMove: pos.halfMove,
 		flags:    pos.flags,
-		move:     m,
+		move:     move,
 	})
 
-	from, to, piece := m.From(), m.To(), m.Piece()
+	from, to, piece := move.From(), move.To(), move.Piece()
 	pos.flags &^= flagNullMove
-	pos.castling = oldCastling.AfterMove(m)
+	pos.castling = oldCastling.AfterMove(move)
 	pos.hash ^= CastlingRightsHashes[pos.castling.Value()] ^ CastlingRightsHashes[oldCastling.Value()]
 	pos.hash ^= EnPassantHashes[pos.epSquare]
 	pos.epSquare = NoSquare
 
-	switch m.Type() {
+	switch move.Type() {
 	case NonCapture:
 		pos.halfMove++
+		if move.Piece() == Pawn {
+			pos.halfMove = 0
+		}
 		pos.movePiece(color, piece, from, to)
 
 	case Capture:
 		pos.halfMove = 0
-		pos.removePiece(EnemyOf(color), m.Captured(), to)
+		pos.removePiece(EnemyOf(color), move.Captured(), to)
 		pos.movePiece(color, piece, from, to)
 
 	case PromotionKnight, PromotionBishop, PromotionRook, PromotionQueen:
 		pos.halfMove = 0
-		if m.Captured() != NoPiece {
-			pos.removePiece(EnemyOf(color), m.Captured(), to)
+		if move.Captured() != NoPiece {
+			pos.removePiece(EnemyOf(color), move.Captured(), to)
 		}
 		pos.removePiece(color, Pawn, from)
-		pos.addPiece(color, m.Promoted(), to)
+		pos.addPiece(color, move.Promoted(), to)
 
 	case PawnDoublePush:
 		pos.halfMove = 0
@@ -335,6 +339,11 @@ func (pos *Position) MakeMove(m Move) {
 	}
 	pos.kingLoc[color] = (pos.Kings() & pos.colors[color]).Lsb()
 	pos.checkers = pos.AttacksTo(pos.kingLoc[EnemyOf(color)], color)
+
+	hash := pos.computeHash()
+	if hash != pos.Hash() {
+		panic(-1)
+	}
 }
 
 // UnmakeMove reverses the last MakeMove or MakeNullMove call.
@@ -346,21 +355,21 @@ func (pos *Position) UnmakeMove() {
 	pos.flags = saved.flags
 	color := pos.ColorToMove() // color that made the move
 
-	m := saved.move
-	if !m.IsNone() {
-		from, to, piece := m.From(), m.To(), m.Piece()
+	move := saved.move
+	if !move.IsNone() {
+		from, to, piece := move.From(), move.To(), move.Piece()
 		enemy := EnemyOf(color)
-		switch m.Type() {
+		switch move.Type() {
 		case NonCapture, PawnDoublePush:
 			pos.movePiece(color, piece, to, from)
 		case Capture:
 			pos.movePiece(color, piece, to, from)
-			pos.addPiece(enemy, m.Captured(), to)
+			pos.addPiece(enemy, move.Captured(), to)
 		case PromotionKnight, PromotionBishop, PromotionRook, PromotionQueen:
-			pos.removePiece(color, m.Promoted(), to)
+			pos.removePiece(color, move.Promoted(), to)
 			pos.addPiece(color, Pawn, from)
-			if m.Captured() != NoPiece {
-				pos.addPiece(enemy, m.Captured(), to)
+			if move.Captured() != NoPiece {
+				pos.addPiece(enemy, move.Captured(), to)
 			}
 		case EpCapture:
 			capturedSq := Square((int(from) & 0x38) | (int(to) & 0x07))
@@ -439,7 +448,9 @@ func (pos *Position) IsLegal() bool {
 	color := pos.ColorToMove()
 	wk := pos.Kings() & pos.colors[White]
 	bk := pos.Kings() & pos.colors[Black]
-	return wk.PopCount() == 1 && bk.PopCount() == 1 && wk != bk &&
+	return wk.PopCount() == 1 &&
+		bk.PopCount() == 1 &&
+		wk != bk &&
 		KingAttacks[wk.Lsb()]&bk == 0 &&
 		!pos.IsAttacked(pos.kingLoc[EnemyOf(color)], color)
 }

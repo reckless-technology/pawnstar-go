@@ -2,11 +2,13 @@ package engine
 
 import (
 	"fmt"
+	"runtime/debug"
+	"sync"
 	"time"
 )
 
 // ClockType controls how the search is timed.
-type ClockType int
+type ClockType uint8
 
 const (
 	ClockStandard   ClockType = iota // Time-per-game with remaining time.
@@ -18,61 +20,47 @@ const (
 // TimeControl holds UCI time management parameters.
 type TimeControl struct {
 	ClockType         ClockType
-	MsRemaining       int
+	TimeRemaining     time.Duration
 	NumMovesRemaining int
 	Depth             int
-	HardStopMs        int64 // wall-clock ms to hard-stop (0 = no limit)
-	startTime         time.Time
+	stopTime          time.Time
 }
 
 func NewTimeControl() TimeControl {
 	return TimeControl{
-		ClockType:   ClockStandard,
-		MsRemaining: 5 * 60 * 1000,
-		Depth:       10,
-		startTime:   time.Now(),
+		ClockType:         ClockStandard,
+		TimeRemaining:     5 * time.Minute,
+		Depth:             10,
+		NumMovesRemaining: 40,
 	}
-}
-
-func (tc *TimeControl) Reset() {
-	tc.startTime = time.Now()
-	tc.HardStopMs = 0
-}
-
-func (tc *TimeControl) ElapsedMs() int64 {
-	return time.Since(tc.startTime).Milliseconds()
 }
 
 // Game holds the complete game state.
 type Game struct {
-	TransTable   *TranspositionTable
-	QuiesTable   *TranspositionTable
-	History      HistoryTable
-	TimeCtrl     TimeControl
-	Book         OpeningBook
-	NodeCount    int
-	CancelSearch bool
-
-	pos      Position
-	stopChan chan struct{}
-	doneChan chan struct{}
+	TranspositionTable TranspositionTable
+	History            HistoryTable
+	TimeCtrl           TimeControl
+	Book               OpeningBook
+	NodeCount          int
+	IsCancelPending    bool
+	wg                 sync.WaitGroup
+	pos                Position
 }
 
 func NewGame() *Game {
 	g := &Game{
-		TransTable: NewTranspositionTable(HashTableMB),
-		QuiesTable: NewTranspositionTable(QHashTableMB),
-		TimeCtrl:   NewTimeControl(),
-		Book:       LoadOpeningBook(),
+		TranspositionTable: NewTranspositionTable(HashTableMB),
+		TimeCtrl:           NewTimeControl(),
+		Book:               LoadOpeningBook(),
 	}
 	g.newGame("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
 	return g
 }
 
 func (g *Game) newGame(fen string) {
-	g.pos = FromFen(fen)
+	g.pos = PositionFromFen(fen)
 	g.NodeCount = 0
-	g.CancelSearch = false
+	g.IsCancelPending = false
 	g.TimeCtrl = NewTimeControl()
 }
 
@@ -123,7 +111,6 @@ func (g *Game) IsDrawByRepetition() bool {
 	return g.pos.IsDrawByRepetition()
 }
 
-// ScoreAndSortMoves assigns MVV/LVA + history scores and sorts descending.
 func (g *Game) ScoreAndSortMoves(moves []Move, ply int) {
 	pos := g.CurrentPosition()
 	pieceVals := [7]int{0, 100, 300, 300, 500, 900, 10000}
@@ -137,38 +124,32 @@ func (g *Game) ScoreAndSortMoves(moves []Move, ply int) {
 	SortMovesUnstable(moves)
 }
 
-// StartThinking begins the search on a background goroutine.
 func (g *Game) StartThinking() {
 	g.StopThinking()
-	g.doneChan = make(chan struct{})
-	g.CancelSearch = false
-	g.TimeCtrl.Reset()
+	g.IsCancelPending = false
+	g.wg.Add(1)
 	go func() {
-		defer close(g.doneChan)
 		g.searchEntry()
+		g.wg.Done()
 	}()
 }
 
-// StopThinking signals the search to stop and waits for it to finish.
 func (g *Game) StopThinking() {
-	if g.doneChan != nil {
-		g.CancelSearch = true
-		<-g.doneChan
-		g.doneChan = nil
-		g.stopChan = nil
-	}
-}
-
-// WaitForSearch waits for any running search to complete without cancelling it.
-func (g *Game) WaitForSearch() {
-	if g.doneChan != nil {
-		<-g.doneChan
-		g.doneChan = nil
-		g.stopChan = nil
-	}
+	g.IsCancelPending = true
+	g.wg.Wait()
+	g.IsCancelPending = false
 }
 
 func (g *Game) searchEntry() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("Recovered from panic: %v\n", r)
+
+			// Print the full stack trace to standard output
+			fmt.Println("Full Stack Trace:")
+			fmt.Println(string(debug.Stack()))
+		}
+	}()
 	move := SearchRootNode(g)
 	if move != MoveNone() {
 		g.PlayMove(move)

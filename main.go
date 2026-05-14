@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,15 @@ import (
 )
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("Recovered from panic: %v\n", r)
+
+			// Print the full stack trace to standard output
+			fmt.Println("Full Stack Trace:")
+			fmt.Println(string(debug.Stack()))
+		}
+	}()
 	fmt.Println("Pawnstar (Go) — UCI compatible chess engine")
 
 	game := engine.NewGame()
@@ -50,24 +60,10 @@ func main() {
 			game.StopThinking()
 			return
 
-		case "wait":
-			game.WaitForSearch()
-
-		case "perft":
-			depth := 5
-			if len(fields) > 1 {
-				if d, err := strconv.Atoi(fields[1]); err == nil {
-					depth = d
-				}
-			}
-			runPerft(*game.CurrentPosition(), depth)
-
 		default:
 			// Silently ignore unknown commands (UCI requirement).
 		}
 	}
-	// stdin closed — wait for any running search before exiting.
-	game.WaitForSearch()
 }
 
 func parsePosition(game *engine.Game, args []string) {
@@ -116,7 +112,7 @@ func handleGo(game *engine.Game, args []string) {
 			if color == engine.White {
 				tc.ClockType = engine.ClockStandard
 				if v, err := strconv.Atoi(args[i+1]); err == nil {
-					tc.MsRemaining = v
+					tc.TimeRemaining = time.Duration(v) * time.Millisecond
 				}
 			}
 			i++
@@ -124,7 +120,7 @@ func handleGo(game *engine.Game, args []string) {
 			if color == engine.Black {
 				tc.ClockType = engine.ClockStandard
 				if v, err := strconv.Atoi(args[i+1]); err == nil {
-					tc.MsRemaining = v
+					tc.TimeRemaining = time.Duration(v) * time.Millisecond
 				}
 			}
 			i++
@@ -142,7 +138,7 @@ func handleGo(game *engine.Game, args []string) {
 		case "movetime":
 			tc.ClockType = engine.ClockFixedTime
 			if v, err := strconv.Atoi(args[i+1]); err == nil {
-				tc.MsRemaining = v
+				tc.TimeRemaining = time.Duration(v) * time.Millisecond
 			}
 			i++
 		case "infinite":
@@ -150,18 +146,4 @@ func handleGo(game *engine.Game, args []string) {
 		}
 	}
 	game.StartThinking()
-}
-
-func runPerft(pos engine.Position, maxDepth int) {
-	for depth := 1; depth <= maxDepth; depth++ {
-		start := time.Now()
-		nodes := engine.Perft(&pos, depth)
-		elapsed := time.Since(start)
-		mnps := 0.0
-		if elapsed > 0 {
-			mnps = float64(nodes) / elapsed.Seconds() / 1e6
-		}
-		fmt.Printf("depth: %d  nodes: %d  time: %s  Mnps: %.0f\n",
-			depth, nodes, elapsed.Round(time.Millisecond), mnps)
-	}
 }

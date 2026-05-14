@@ -20,15 +20,15 @@ type Move int64
 type MoveType uint8
 
 const (
-	NonCapture      MoveType = 0
+	NonCapture      MoveType = iota
 	Capture         MoveType = 1
-	PromotionKnight MoveType = MoveType(Knight)
-	PromotionBishop MoveType = MoveType(Bishop)
-	PromotionRook   MoveType = MoveType(Rook)
-	PromotionQueen  MoveType = MoveType(Queen)
-	PawnDoublePush  MoveType = 7
-	EpCapture       MoveType = 8
-	Castling        MoveType = 9
+	PromotionKnight MoveType = 2
+	PromotionBishop MoveType = 3
+	PromotionRook   MoveType = 4
+	PromotionQueen  MoveType = 5
+	PawnDoublePush  MoveType = 6
+	EpCapture       MoveType = 7
+	Castling        MoveType = 8
 )
 
 const isCheckingBit int64 = 1 << 22
@@ -97,17 +97,27 @@ func (m Move) String() string {
 		return "0000"
 	}
 	s := m.From().String() + m.To().String()
-	if p := m.Promoted(); p != NoPiece {
-		s += string(" pnbrqk"[p])
+	if m.Promoted() != NoPiece {
+		s += "=" + m.Promoted().ToString()
 	}
 	return s
 }
 
 func (m Move) GoString() string {
-	return m.String()
+	if m == MoveNone() {
+		return "NONE"
+	}
+	s := m.Piece().ToString() + m.From().String() + m.To().String()
+	if m.Captured() != NoPiece {
+		s += "x" + m.Captured().ToString()
+	}
+	if m.Promoted() != NoPiece {
+		s += "=" + m.Promoted().ToString()
+	}
+	return s
 }
 
-func (m Move) IsNone() bool { return m == 0 }
+func (m Move) IsNone() bool { return (m & 0x3FFFFF) == 0 }
 
 func SortMovesUnstable(moves []Move) {
 	slices.SortFunc(moves, func(a, b Move) int { return cmp.Compare(b.Score(), a.Score()) })

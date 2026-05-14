@@ -7,7 +7,9 @@
       "Bash(gofmt -l -w /home/jonny/work/pawnstar-go/engine/ /home/jonny/work/pawnstar-go/cmd/)",
       "Read(//home/jonny/work/pawnstar/src/**)",
       "Bash(time echo quit)",
-      "Bash(/tmp/pawnstar-magic)"
+      "Bash(/tmp/pawnstar-magic)",
+      "Bash(git add *)",
+      "WebFetch(domain:www.chessprogramming.org)"
     ]
   }
 }

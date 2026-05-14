@@ -176,20 +176,21 @@ func initInterveningSquares() {
 // ---- Zobrist hashing ----
 
 func initZobrist() {
-	for c := range 2 {
-		for p := range 6 {
+	rng := rand.New(rand.NewSource(1968))
+	for color := range 2 {
+		for piece := range 6 {
 			for sq := range 64 {
-				PieceSquareHashes[c][p][sq] = rand.Uint64()
+				PieceSquareHashes[color][piece][sq] = rng.Uint64()
 			}
 		}
 	}
 	for i := range CastlingRightsHashes {
-		CastlingRightsHashes[i] = rand.Uint64()
+		CastlingRightsHashes[i] = rng.Uint64()
 	}
 	for i := range Square(64) {
 		if i.Rank() == 2 || i.Rank() == 5 {
-			EnPassantHashes[i] = rand.Uint64()
+			EnPassantHashes[i] = rng.Uint64()
 		}
 	}
-	BlackMoveHash = rand.Uint64()
+	BlackMoveHash = rng.Uint64()
 }

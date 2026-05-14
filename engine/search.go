@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Variation is a line of play (principal variation).
@@ -15,64 +16,64 @@ func copyVariation(dst *Variation, src Variation, best Move) {
 }
 
 // searchSingleMove plays move, searches recursively, undoes, and returns the score.
-func searchSingleMove(g *Game, depth, ply, alphav, betav int, m Move, pv *Variation, moveIdx int) int {
-	wasInCheck := g.CurrentPosition().IsInCheck()
-
+func searchSingleMove(game *Game, depth, ply, alpha, beta int, move Move, pv *Variation, moveIdx int) int {
+	wasInCheck := game.CurrentPosition().IsInCheck()
 	childDepth := depth - 1
-	mt := m.Type()
-	if mt == PromotionKnight || mt == PromotionBishop || mt == PromotionRook || mt == PromotionQueen || mt == EpCapture {
-		childDepth++
-	}
-
-	g.PlayMove(m)
-	isChecking := g.CurrentPosition().IsInCheck()
-
+	// moveType := move.Type()
+	// if moveType == PromotionKnight ||
+	// 	moveType == PromotionBishop ||
+	// 	moveType == PromotionRook ||
+	// 	moveType == PromotionQueen ||
+	// 	moveType == EpCapture {
+	// 	childDepth++
+	// }
+	game.PlayMove(move)
+	isChecking := game.CurrentPosition().IsInCheck()
 	var score int
-	if betav > alphav+1 && moveIdx > 0 && !wasInCheck && !isChecking {
-		// Principal variation search.
-		score = -search(g, childDepth, ply+1, -alphav-1, -alphav, pv)
-		if score > alphav {
-			score = -search(g, childDepth, ply+1, -betav, -alphav, pv)
+	if beta > alpha+1 && moveIdx > 0 && !wasInCheck && !isChecking {
+		// Try principal variation search.
+		score = -searchAlphaBeta(game, childDepth, ply+1, -alpha-1, -alpha, pv)
+		if score > alpha {
+			// PVS failed.
+			score = -searchAlphaBeta(game, childDepth, ply+1, -beta, -alpha, pv)
 		}
 	} else {
-		score = -search(g, childDepth, ply+1, -betav, -alphav, pv)
+		score = -searchAlphaBeta(game, childDepth, ply+1, -beta, -alpha, pv)
 	}
-	g.UndoMove()
+	game.UndoMove()
 	return score
 }
 
-// search is the main alpha-beta recursive function.
-func search(g *Game, depth, ply, alphav, betav int, parentPV *Variation) int {
-	g.NodeCount++
-	if (g.NodeCount&0xFFFF) == 0 && g.TimeCtrl.HardStopMs != 0 &&
-		g.TimeCtrl.ElapsedMs() >= g.TimeCtrl.HardStopMs {
-		g.CancelSearch = true
+// searchAlphaBeta is the main alpha-beta recursive function.
+func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *Variation) int {
+	game.NodeCount++
+	if (game.NodeCount&0xFFFF) == 0 &&
+		(game.TimeCtrl.ClockType == ClockStandard || game.TimeCtrl.ClockType == ClockFixedTime) &&
+		time.Now().After(game.TimeCtrl.stopTime) {
+		game.IsCancelPending = true
 		return SearchCancelledScore
 	}
 
-	pos := g.CurrentPosition()
-	if pos.IsDrawByMaterial() || g.IsDrawByFiftyMoves() || g.IsDrawByRepetition() {
+	position := game.CurrentPosition()
+	if position.IsDrawByMaterial() || game.IsDrawByFiftyMoves() || game.IsDrawByRepetition() {
 		return DrawScore
 	}
 
-	if pos.IsInCheck() {
-		depth++
-	}
 	if ply >= MaxPly {
-		return evaluatePosition(g, alphav, betav)
+		return evaluatePosition(game, alpha, beta)
 	}
 
 	// Transposition table lookup.
-	t := g.TransTable.Find(pos.Hash())
-	if t != nil && int(t.depth) >= depth {
-		switch t.nodeType {
+	transposition, isTransposition := game.TranspositionTable.Find(position.Hash())
+	if isTransposition && int(transposition.depth) >= depth {
+		switch transposition.nodeType {
 		case NodeCut:
-			if t.score >= betav {
-				return t.score
+			if transposition.move.Score() >= beta {
+				transposition.move.Score()
 			}
 		case NodeAll:
-			if t.score < alphav {
-				return t.score
+			if transposition.move.Score() < alpha {
+				transposition.move.Score()
 			}
 		case NodePV:
 			depth++
@@ -80,24 +81,26 @@ func search(g *Game, depth, ply, alphav, betav int, parentPV *Variation) int {
 	}
 
 	// Enter quiescence at depth <= 0.
-	if depth <= 0 && !pos.IsInCheck() {
-		return searchQuiescent(g, depth, ply, alphav, betav)
+	if depth <= 0 && !position.IsInCheck() {
+		return searchQuiescent(game, depth, ply, alpha, beta)
 	}
 
 	// Null move pruning.
-	if !pos.IsNullMove() && !pos.IsInCheck() && betav == alphav+1 &&
-		pos.ColorBB(pos.ColorToMove()).PopCount() > 3 {
-		evalScore := evaluatePosition(g, alphav, betav)
-		if evalScore >= betav {
+	if !position.IsNullMove() &&
+		!position.IsInCheck() &&
+		beta == alpha+1 &&
+		position.ColorBB(position.ColorToMove()).PopCount() > 3 {
+		evalScore := evaluatePosition(game, alpha, beta)
+		if evalScore >= beta {
 			var dummy Variation
-			g.MakeNullMove()
-			score := -search(g, depth-3, ply+1, -betav, -alphav, &dummy)
-			g.UndoMove()
-			if g.CancelSearch {
+			game.MakeNullMove()
+			score := -searchAlphaBeta(game, depth-3, ply+1, -beta, -alpha, &dummy)
+			game.UndoMove()
+			if game.IsCancelPending {
 				return SearchCancelledScore
 			}
-			if score >= betav {
-				return betav
+			if score >= beta {
+				return beta
 			}
 		}
 	}
@@ -108,154 +111,125 @@ func search(g *Game, depth, ply, alphav, betav int, parentPV *Variation) int {
 	bestScore := Alpha
 	hasRaisedAlpha := false
 
-	if t != nil && t.move != MoveNone() {
-		score := searchSingleMove(g, depth, ply, alphav, betav, t.move, &pv, 0)
-		if g.CancelSearch {
+	if isTransposition && transposition.move.FromTo() != 0 {
+		score := searchSingleMove(game, depth, ply, alpha, beta, transposition.move, &pv, 0)
+		if game.IsCancelPending {
 			return SearchCancelledScore
 		}
-		if score >= betav {
-			g.TransTable.Record(Transposition{pos.Hash(), t.move, score, int16(depth), NodeCut, false})
-			g.History.RecordGoodMove(ply, t.move)
+		if score >= beta {
+			game.TranspositionTable.Record(&Transposition{position.Hash(), transposition.move.WithScore(score), int16(depth), NodeCut, false})
+			game.History.RecordGoodMove(ply, transposition.move)
 			return score
 		}
 		bestScore = score
-		if score > alphav {
-			alphav = score
+		if score > alpha {
+			alpha = score
 			hasRaisedAlpha = true
-			bestMove = t.move
-			g.History.RecordGoodMove(ply, t.move)
+			bestMove = transposition.move
+			game.History.RecordGoodMove(ply, transposition.move)
 		}
 	}
 
-	moves := pos.GenerateLegalMoves()
+	moves := position.GenerateLegalMoves()
 	if len(moves) == 0 {
-		if pos.IsInCheck() {
+		if position.IsInCheck() {
 			return CheckmatedScore + ply
 		}
 		return DrawScore
 	}
 
-	g.ScoreAndSortMoves(moves, ply)
+	game.ScoreAndSortMoves(moves, ply)
 
-	for i := 0; i < len(moves); i++ {
-		m := moves[i]
-		if t != nil && m == t.move {
+	for moveIdx, move := range moves {
+		if isTransposition && move.Equal(transposition.move) {
 			continue
 		}
-		moveIdx := i
 
 		// Late move reduction.
-		lmrDepth := depth
-		if moveIdx > 3 && !pos.IsInCheck() && depth > 2 && betav == alphav+1 &&
-			pos.PieceAt(m.To()) == NoPiece && pos.PieceAt(m.From()) != Pawn {
-			lmrDepth--
+		childDepth := depth
+		if moveIdx > 3 &&
+			!position.IsInCheck() &&
+			!move.IsChecking() &&
+			depth > 2 &&
+			beta == alpha+1 &&
+			move.Piece() != Pawn &&
+			move.Captured() == NoPiece {
+			childDepth--
 			if depth > 3 && moveIdx > 6 {
-				lmrDepth--
+				childDepth--
 			}
 		}
 
-		score := searchSingleMove(g, lmrDepth, ply, alphav, betav, m, &pv, moveIdx)
-		if score > alphav && lmrDepth < depth {
-			score = searchSingleMove(g, depth, ply, alphav, betav, m, &pv, moveIdx)
+		score := searchSingleMove(game, childDepth, ply, alpha, beta, move, &pv, moveIdx)
+		if score > alpha && childDepth < depth {
+			score = searchSingleMove(game, depth, ply, alpha, beta, move, &pv, moveIdx)
 		}
-		if g.CancelSearch {
+		if game.IsCancelPending {
 			return SearchCancelledScore
 		}
-		if score >= betav {
-			g.TransTable.Record(Transposition{pos.Hash(), m, score, int16(depth), NodeCut, false})
-			g.History.RecordGoodMove(ply, m)
+		if score >= beta {
+			game.TranspositionTable.Record(&Transposition{position.Hash(), move.WithScore(score), int16(depth), NodeCut, false})
+			game.History.RecordGoodMove(ply, move)
 			return score
 		}
 		if score > bestScore {
 			bestScore = score
-			bestMove = m
-			if score > alphav {
-				alphav = score
+			bestMove = move
+			if score > alpha {
+				alpha = score
 				hasRaisedAlpha = true
-				g.History.RecordGoodMove(ply, m)
+				game.History.RecordGoodMove(ply, move)
 			}
 		}
 	}
 
 	if hasRaisedAlpha {
-		g.TransTable.Record(Transposition{pos.Hash(), bestMove, alphav, int16(depth), NodePV, false})
-		g.History.RecordGoodMove(ply, bestMove)
+		game.TranspositionTable.Record(&Transposition{position.Hash(), bestMove.WithScore(alpha), int16(depth), NodePV, false})
+		game.History.RecordGoodMove(ply, bestMove)
 		copyVariation(parentPV, pv, bestMove)
 	} else {
-		g.TransTable.Record(Transposition{pos.Hash(), bestMove, bestScore, int16(depth), NodeAll, false})
+		game.TranspositionTable.Record(&Transposition{position.Hash(), bestMove.WithScore(alpha), int16(depth), NodeAll, false})
 	}
 	return bestScore
 }
 
-// searchQuiescent is the quiescence search (captures only).
-func searchQuiescent(g *Game, depth, ply, alphav, betav int) int {
+// Quiescent search - captures and pawn promotions only.
+func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 	if ply >= MaxPly {
-		return evaluatePosition(g, alphav, betav)
+		return evaluatePosition(game, alpha, beta)
 	}
-	pos := g.CurrentPosition()
-	if pos.IsInCheck() {
+	position := game.CurrentPosition()
+	if position.IsInCheck() {
 		var dummy Variation
-		return search(g, depth, ply, alphav, betav, &dummy)
+		// Can't handle checks in quiescent search.
+		return searchAlphaBeta(game, depth, ply, alpha, beta, &dummy)
 	}
-
-	qt := g.QuiesTable.Find(pos.Hash())
-	if qt != nil && qt.score >= betav {
-		return qt.score
-	}
-
-	score := evaluatePosition(g, alphav, betav)
-	if score >= betav {
-		g.QuiesTable.Record(Transposition{pos.Hash(), MoveNone(), score, int16(depth), NodeCut, false})
+	score := evaluatePosition(game, alpha, beta)
+	if score >= beta {
 		return score
 	}
-	if score > alphav {
-		alphav = score
+	if score > alpha {
+		alpha = score
 	}
 	bestScore := score
-
-	if qt != nil && qt.move != MoveNone() {
-		g.PlayMove(qt.move)
-		score = -searchQuiescent(g, depth-1, ply+1, -betav, -alphav)
-		g.UndoMove()
-		if g.CancelSearch {
+	moves := position.GenerateLegalCaptures()
+	game.ScoreAndSortMoves(moves, ply)
+	for _, move := range moves {
+		game.PlayMove(move)
+		score = -searchQuiescent(game, depth-1, ply+1, -beta, -alpha)
+		game.UndoMove()
+		if game.IsCancelPending {
 			return SearchCancelledScore
 		}
-		if score >= betav {
+		if score >= beta {
+			game.History.RecordGoodMove(ply, move)
 			return score
 		}
 		if score > bestScore {
 			bestScore = score
-			if score > alphav {
-				alphav = score
-			}
-		}
-	}
-
-	moves := pos.GenerateLegalCaptures()
-	g.ScoreAndSortMoves(moves, ply)
-
-	for i := 0; i < len(moves); i++ {
-		m := moves[i]
-		if qt != nil && m == qt.move {
-			continue
-		}
-		g.PlayMove(m)
-		score = -searchQuiescent(g, depth-1, ply+1, -betav, -alphav)
-		g.UndoMove()
-		if g.CancelSearch {
-			return SearchCancelledScore
-		}
-		if score >= betav {
-			g.History.RecordGoodMove(ply, m)
-			g.QuiesTable.Record(Transposition{pos.Hash(), m, score, int16(depth), NodeCut, false})
-			return score
-		}
-		if score > bestScore {
-			bestScore = score
-			if score > alphav {
-				alphav = score
-				g.History.RecordGoodMove(ply, m)
-				g.QuiesTable.Record(Transposition{pos.Hash(), m, score, int16(depth), NodeCut, false})
+			if score > alpha {
+				alpha = score
+				game.History.RecordGoodMove(ply, move)
 			}
 		}
 	}
@@ -279,31 +253,26 @@ func SearchRootNode(g *Game) Move {
 	}
 
 	// Set up time management.
-	tc := &g.TimeCtrl
-	var msAllocated int64
-	switch tc.ClockType {
-	case ClockStandard:
-		var numMovesToGo int
-		if tc.NumMovesRemaining != 0 {
-			numMovesToGo = tc.NumMovesRemaining
-		} else {
-			mc := g.CurrentPosition().FullMove()
-			numMovesToGo = max(40-mc, 5)
-		}
-		msAllocated = int64(tc.MsRemaining) / int64(numMovesToGo)
-		msTimeout := max(int64(100), min(msAllocated*2, int64(tc.MsRemaining)-1000))
-		tc.HardStopMs = tc.ElapsedMs() + msTimeout
-	case ClockFixedTime:
-		msAllocated = int64(tc.MsRemaining)
-		tc.HardStopMs = tc.ElapsedMs() + msAllocated
-	default:
-		tc.HardStopMs = 0
-	}
+	allocatedTime := time.Duration(0)
+	timeControl := &g.TimeCtrl
 
-	startMs := tc.ElapsedMs()
-	g.CancelSearch = false
+	switch timeControl.ClockType {
+	case ClockStandard:
+		if timeControl.NumMovesRemaining > 0 {
+			allocatedTime = timeControl.TimeRemaining / time.Duration(timeControl.NumMovesRemaining)
+		} else {
+			allocatedTime = timeControl.TimeRemaining
+		}
+		hardStopDuration := max(100*time.Millisecond, min(allocatedTime*2, timeControl.TimeRemaining-time.Second))
+		timeControl.stopTime = time.Now().Add(hardStopDuration)
+
+	case ClockFixedTime:
+		timeControl.stopTime = time.Now().Add(timeControl.TimeRemaining)
+	}
+	startTime := time.Now()
+	g.IsCancelPending = false
 	g.History.Reset()
-	g.TransTable.Age()
+	g.TranspositionTable.Age()
 
 	var principalVariation Variation
 	var bestMoves []Move
@@ -319,46 +288,44 @@ func SearchRootNode(g *Game) Move {
 	bestMove := moves[0]
 
 	for depth := StartDepth + 1; depth < MaxPly; depth++ {
-		if tc.ClockType == ClockFixedDepth && depth > tc.Depth {
+		if timeControl.ClockType == ClockFixedDepth && depth > timeControl.Depth {
 			break
 		}
 		SortMovesStable(moves)
 		var childPV Variation
-		alphav := Alpha
+		alpha := Alpha
 		g.NodeCount = 0
 		bestMoves = append(bestMoves, bestMove)
 
 		for i := 0; i < len(moves); i++ {
 			m := moves[i]
-			score := searchSingleMove(g, depth, 0, alphav, Beta, m, &childPV, i)
+			score := searchSingleMove(g, depth, 0, alpha, Beta, m, &childPV, i)
 			moves[i] = m.WithScore(score)
-			if g.CancelSearch {
+			if g.IsCancelPending {
 				return bestMove
 			}
-			if score > alphav {
-				alphav = score
+			if score > alpha {
+				alpha = score
 				bestMove = m
 				copyVariation(&principalVariation, childPV, bestMove)
 				pvStr := pvString(principalVariation)
 				fmt.Printf("info depth %d score cp %d time %d nodes %d pv %s\n",
-					depth, alphav, tc.ElapsedMs()-startMs, g.NodeCount, pvStr)
+					depth, alpha, time.Since(startTime).Milliseconds(), g.NodeCount, pvStr)
 			}
 		}
-
-		stopMs := tc.ElapsedMs()
-		if alphav > WinThreshold || alphav < LoseThreshold {
+		if alpha > WinThreshold || alpha < LoseThreshold {
 			break
 		}
 
-		if tc.ClockType == ClockStandard {
-			elapsedMs := stopMs - startMs
+		if timeControl.ClockType == ClockStandard {
+			elapsedTime := time.Since(startTime)
 			isBestMoveConsistent := allSame(bestMoves, bestMove)
 			isScoreStable := allScoreStable(bestMoves, bestMove)
-			if isBestMoveConsistent && isScoreStable && elapsedMs*4 > msAllocated {
-				fmt.Println("info string Best move consistent AND score stable - search terminated.")
+			if isBestMoveConsistent && isScoreStable && elapsedTime*4 > allocatedTime {
+				fmt.Println("info string Best move consistent and score stable - search terminated.")
 				break
 			}
-			if (isBestMoveConsistent || isScoreStable) && elapsedMs*2 > msAllocated {
+			if (isBestMoveConsistent || isScoreStable) && elapsedTime*2 > allocatedTime {
 				if isBestMoveConsistent {
 					fmt.Println("info string Best move consistent - search terminated.")
 				} else {
@@ -366,7 +333,7 @@ func SearchRootNode(g *Game) Move {
 				}
 				break
 			}
-			if elapsedMs > msAllocated {
+			if elapsedTime > allocatedTime {
 				break
 			}
 		}
@@ -387,7 +354,7 @@ func pvString(pv Variation) string {
 
 func allSame(moves []Move, best Move) bool {
 	for _, m := range moves {
-		if m != best {
+		if !m.Equal(best) {
 			return false
 		}
 	}
@@ -409,4 +376,3 @@ func abs(x int) int {
 	}
 	return x
 }
-

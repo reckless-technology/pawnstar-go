@@ -27,16 +27,14 @@ func LoadOpeningBook() OpeningBook {
 		if line == "" {
 			continue
 		}
-		pos := FromFen(startFen)
+		pos := PositionFromFen(startFen)
 		for _, token := range strings.Fields(line) {
 			m := bookFindMove(&pos, token)
 			if m.IsNone() {
 				break
 			}
 			hash := pos.Hash()
-			if !bookContains(b.moves[hash], m) {
-				b.moves[hash] = append(b.moves[hash], m)
-			}
+			b.moves[hash] = append(b.moves[hash], m)
 			pos.MakeMove(m)
 		}
 	}

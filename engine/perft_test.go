@@ -187,7 +187,7 @@ func TestPerft(t *testing.T) {
 			}
 			tc := tc
 			t.Run(fmt.Sprintf("%03d/d%d", i+1, tc.depth), func(t *testing.T) {
-				pos := FromFen(fen)
+				pos := PositionFromFen(fen)
 				start := time.Now()
 				got := Perft(&pos, tc.depth)
 				elapsed := time.Since(start)
@@ -210,7 +210,7 @@ func TestPerft(t *testing.T) {
 
 // BenchmarkPerft7 times perft(7) on the start position.
 func BenchmarkPerft7(b *testing.B) {
-	pos := FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+	pos := PositionFromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Perft(&pos, 7)
