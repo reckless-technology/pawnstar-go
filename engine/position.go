@@ -21,17 +21,19 @@ type irreversibleState struct {
 // Position holds the complete mutable state of a chess position.
 // Use MakeMove / UnmakeMove to traverse the game tree in place.
 type Position struct {
-	pieces   [6]Bitboard
-	colors   [2]Bitboard
-	squares  [64]Piece
-	checkers Bitboard
-	hash     uint64
-	kingLoc  [2]Square
-	epSquare Square
-	halfMove uint8
-	fullMove uint8
-	castling CastlingRights
-	flags    uint8
+	pieces     [6]Bitboard
+	colors     [2]Bitboard
+	squares    [64]Piece
+	checkers   Bitboard
+	hash       uint64
+	kingLoc    [2]Square
+	epSquare   Square
+	halfMove   uint8
+	fullMove   uint8
+	castling   CastlingRights
+	flags      uint8
+	scoreWhite int // material + non-king PST for white, maintained by addPiece/removePiece/movePiece
+	scoreBlack int // material + non-king PST for black, maintained by addPiece/removePiece/movePiece
 	// stack of saved state, one entry per MakeMove call not yet undone.
 	stateStack []irreversibleState
 }
@@ -75,6 +77,11 @@ func (pos *Position) addPiece(c Color, p Piece, sq Square) {
 	pos.colors[c] |= bb
 	pos.hash ^= PieceSquareHashes[c][p-1][sq]
 	pos.squares[sq] = p
+	if c == White {
+		pos.scoreWhite += pstValue(c, p, sq)
+	} else {
+		pos.scoreBlack += pstValue(c, p, sq)
+	}
 }
 
 func (pos *Position) removePiece(c Color, p Piece, sq Square) {
@@ -83,6 +90,11 @@ func (pos *Position) removePiece(c Color, p Piece, sq Square) {
 	pos.colors[c] &^= bb
 	pos.hash ^= PieceSquareHashes[c][p-1][sq]
 	pos.squares[sq] = NoPiece
+	if c == White {
+		pos.scoreWhite -= pstValue(c, p, sq)
+	} else {
+		pos.scoreBlack -= pstValue(c, p, sq)
+	}
 }
 
 func (pos *Position) movePiece(c Color, p Piece, from, to Square) {
@@ -93,6 +105,11 @@ func (pos *Position) movePiece(c Color, p Piece, from, to Square) {
 	pos.hash ^= PieceSquareHashes[c][p-1][from] ^ PieceSquareHashes[c][p-1][to]
 	pos.squares[from] = NoPiece
 	pos.squares[to] = p
+	if c == White {
+		pos.scoreWhite += pstValue(c, p, to) - pstValue(c, p, from)
+	} else {
+		pos.scoreBlack += pstValue(c, p, to) - pstValue(c, p, from)
+	}
 }
 
 // AttacksTo returns the set of squares of color c that attack sq.
@@ -275,7 +292,7 @@ func (pos *Position) MakeMove(move Move) {
 	})
 
 	from, to, piece := move.From(), move.To(), move.Piece()
-	pos.flags &^= flagNullMove
+	pos.flags &= ^flagNullMove
 	pos.castling = oldCastling.AfterMove(move)
 	pos.hash ^= CastlingRightsHashes[pos.castling.Value()] ^ CastlingRightsHashes[oldCastling.Value()]
 	pos.hash ^= EnPassantHashes[pos.epSquare]

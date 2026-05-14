@@ -99,42 +99,40 @@ func isEndgame(pos *Position) bool {
 
 var flips = [2]Square{RankFlip, 0}
 
-func evaluateSide(position *Position, color Color, isEndgame bool) int {
-	friendlyPieces := position.ColorBB(color)
-	rankFlip := flips[color]
-	score := 0
-	for b := position.Pawns() & friendlyPieces; b != 0; {
-		var sq Square
-		b, sq = b.PopLsb()
-		score += 100 + pawnSquare[sq^rankFlip]
+// pstValue returns material + piece-square bonus for a piece at a square.
+// Returns 0 for King; king PST is phase-dependent and handled separately in Score.
+func pstValue(c Color, p Piece, sq Square) int {
+	flip := flips[c]
+	switch p {
+	case Pawn:
+		return 100 + pawnSquare[sq^flip]
+	case Knight:
+		return 320 + knightSquare[sq^flip]
+	case Bishop:
+		return 330 + bishopSquare[sq^flip]
+	case Rook:
+		return 500 + rookSquare[sq^flip]
+	case Queen:
+		return 900 + queenSquare[sq^flip]
 	}
-	for b := position.Knights() & friendlyPieces; b != 0; {
-		var sq Square
-		b, sq = b.PopLsb()
-		score += 320 + knightSquare[sq^rankFlip]
-	}
-	for b := position.Bishops() & friendlyPieces; b != 0; {
-		var sq Square
-		b, sq = b.PopLsb()
-		score += 330 + bishopSquare[sq^rankFlip]
-	}
-	for b := position.Rooks() & friendlyPieces; b != 0; {
-		var sq Square
-		b, sq = b.PopLsb()
-		score += 500 + rookSquare[sq^rankFlip]
-	}
-	for b := position.Queens() & friendlyPieces; b != 0; {
-		var sq Square
-		b, sq = b.PopLsb()
-		score += 900 + queenSquare[sq^rankFlip]
-	}
-	kingSq := position.KingLocation(color) ^ rankFlip
-	if isEndgame {
-		score += kingSqEndgame[kingSq]
+	return 0
+}
+
+// Score returns material + PST score relative to the side to move.
+// scoreWhite/scoreBlack track all non-king pieces incrementally; king PST is looked up here.
+func (pos *Position) Score(endgame bool) int {
+	var kingTable *[64]int
+	if endgame {
+		kingTable = &kingSqEndgame
 	} else {
-		score += kingSqMidgame[kingSq]
+		kingTable = &kingSqMidgame
 	}
-	return score
+	white := pos.scoreWhite + kingTable[pos.kingLoc[White]^RankFlip]
+	black := pos.scoreBlack + kingTable[pos.kingLoc[Black]]
+	if pos.ColorToMove() == White {
+		return white - black
+	}
+	return black - white
 }
 
 // evaluatePosition scores the position from the side-to-move's perspective.
@@ -143,14 +141,8 @@ func evaluatePosition(game *Game, _, _ int) int {
 		panic(game.CurrentPosition().ToFen())
 	}
 	position := game.CurrentPosition()
-	if position.IsDrawByMaterial() || game.IsDrawByFiftyMoves() || game.IsDrawByRepetition() {
+	if position.IsDrawByMaterial() {
 		return DrawScore
 	}
-	endgame := isEndgame(position)
-	white := evaluateSide(position, White, endgame)
-	black := evaluateSide(position, Black, endgame)
-	if position.ColorToMove() == White {
-		return white - black
-	}
-	return black - white
+	return position.Score(isEndgame(position))
 }
