@@ -1,163 +1,155 @@
 package engine
 
-// GenerateLegalMoves returns all legal moves from pos.
-func (pos *Position) GenerateLegalMoves() []Move {
-	return pos.generateMoves(pos.ColorToMove(), true)
+// generateLegalMoves returns all legal moves from pos.
+func (pos *position) generateLegalMoves() []move {
+	return pos.generateMoves(pos.colorToMove(), true)
 }
 
-// GenerateLegalCaptures returns captures and promotions only.
-func (pos *Position) GenerateLegalCaptures() []Move {
-	return pos.generateMoves(pos.ColorToMove(), false)
+// generateLegalCaptures returns captures and promotions only.
+func (pos *position) generateLegalCaptures() []move {
+	return pos.generateMoves(pos.colorToMove(), false)
 }
 
-func (pos *Position) generateMoves(color Color, doAllMoves bool) []Move {
-	moves := make([]Move, 0, 64)
-	occ := pos.Occupied()
-	friendly := pos.colors[color]
-	enemyPieces := occ ^ friendly
-	enemyPawns := pos.Pawns() & enemyPieces
-	kingLoc := pos.kingLoc[color]
+func (pos *position) generateMoves(color color, doAllMoves bool) []move {
+	moves := make([]move, 0, 64)
+	occupied := pos.occupied()
+	friendlyPieces := pos.colors[color]
+	enemyPieces := occupied ^ friendlyPieces
+	enemyPawns := pos.pawns() & enemyPieces
+	kingLocation := pos.kingLocn[color]
 
 	// Build forbidden squares for the king by computing all enemy attacks
 	// (temporarily removing our king so X-ray attacks are included).
-	var forbidden Bitboard
-	if color == White {
-		forbidden = enemyPawns.ShiftSouthwest() | enemyPawns.ShiftSoutheast()
+	var forbidden bitboard
+	if color == white {
+		forbidden = enemyPawns.shiftSouthwest() | enemyPawns.shiftSoutheast()
 	} else {
-		forbidden = enemyPawns.ShiftNorthwest() | enemyPawns.ShiftNortheast()
+		forbidden = enemyPawns.shiftNorthwest() | enemyPawns.shiftNortheast()
 	}
-	occExceptKing := occ ^ SquareBB(kingLoc)
-	for _, pt := range []Piece{Knight, Bishop, Rook, Queen, King} {
-		b := pos.PieceBB(pt) & enemyPieces
-		for b != 0 {
-			var s Square
-			b, s = b.PopLsb()
-			forbidden |= pieceAttacks(pt, occExceptKing, s)
+	occExceptKing := occupied ^ squareBB(kingLocation)
+	for piece := knight; piece <= king; piece++ {
+		for b := pos.pieceBB(piece) & enemyPieces; b.isNotEmpty(); {
+			s := b.popLsb()
+			forbidden |= pieceAttacks(piece, occExceptKing, s)
 		}
 	}
 
 	// King moves.
-	kingTargets := KingAttacks[kingLoc] & ^forbidden
-	for b := kingTargets & enemyPieces; b != 0; {
-		var to Square
-		b, to = b.PopLsb()
-		moves = append(moves, MoveCapture(kingLoc, to, King, pos.squares[to]))
+	kingTargets := kingAttacks[kingLocation] & ^forbidden
+	for b := kingTargets & enemyPieces; b.isNotEmpty(); {
+		to := b.popLsb()
+		moves = append(moves, moveCapture(kingLocation, to, king, pos.squares[to]))
 	}
 	if doAllMoves {
-		for b := kingTargets &^ occ; b != 0; {
-			var to Square
-			b, to = b.PopLsb()
-			moves = append(moves, MoveNonCapture(kingLoc, to, King))
+		for b := kingTargets & ^occupied; b.isNotEmpty(); {
+			to := b.popLsb()
+			moves = append(moves, moveNonCapture(kingLocation, to, king))
 		}
 	}
 
 	allowedCaptures := enemyPieces
-	allowedNonCaptures := ^occ
+	allowedNonCaptures := ^occupied
 
 	// In check: restrict allowed targets.
-	if pos.IsInCheck() {
-		if pos.checkers.PopCount() > 1 {
+	if pos.isInCheck() {
+		if pos.checkers.popCount() > 1 {
 			return moves // Double check — only king moves.
 		}
-		checkerSq := pos.checkers.Lsb()
+		checkerSq := pos.checkers.lsb()
 		allowedCaptures = pos.checkers
-		allowedNonCaptures = InterveningSquares[kingLoc][checkerSq]
+		allowedNonCaptures = interveningSquares[kingLocation][checkerSq]
 	}
 
-	pins := computePins(pos)
+	pinInfo := computePins(pos)
 
 	// Piece moves (knight, bishop, rook, queen).
-	for _, pt := range []Piece{Knight, Bishop, Rook, Queen} {
-		b := pos.PieceBB(pt) & friendly
-		for b != 0 {
-			var from Square
-			b, from = b.PopLsb()
-			attacks := pieceAttacks(pt, occ, from) & pins.AllowedSquares(from)
-			for c := attacks & allowedCaptures; c != 0; {
-				var to Square
-				c, to = c.PopLsb()
-				moves = append(moves, MoveCapture(from, to, pt, pos.squares[to]))
+	for piece := knight; piece <= queen; piece++ {
+		for b := pos.pieceBB(piece) & friendlyPieces; b.isNotEmpty(); {
+			from := b.popLsb()
+			attacks := pieceAttacks(piece, occupied, from) & pinInfo.allowedSquares(from)
+			for captures := attacks & allowedCaptures; captures.isNotEmpty(); {
+				to := captures.popLsb()
+				moves = append(moves, moveCapture(from, to, piece, pos.squares[to]))
 			}
 			if doAllMoves {
-				for nc := attacks & allowedNonCaptures; nc != 0; {
-					var to Square
-					nc, to = nc.PopLsb()
-					moves = append(moves, MoveNonCapture(from, to, pt))
+				for nonCaptures := attacks & allowedNonCaptures; nonCaptures.isNotEmpty(); {
+					to := nonCaptures.popLsb()
+					moves = append(moves, moveNonCapture(from, to, piece))
 				}
 			}
 		}
 	}
 
 	// Castling.
-	if doAllMoves && !pos.IsInCheck() {
-		if color == White {
-			if pos.castling.MayWhiteCastleKingside() &&
-				(occ&(SquareBB(f1)|SquareBB(g1))) == 0 &&
-				!pos.IsAttacked(f1, Black) && !pos.IsAttacked(g1, Black) {
-				moves = append(moves, MoveCastling(e1, g1))
+	if doAllMoves && !pos.isInCheck() {
+		if color == white {
+			if pos.castling.mayWhiteCastleKingside() &&
+				(occupied & (squareBB(f1) | squareBB(g1))).isEmpty() &&
+				!pos.isAttacked(f1, black) && !pos.isAttacked(g1, black) {
+				moves = append(moves, moveCastling(e1, g1))
 			}
-			if pos.castling.MayWhiteCastleQueenside() &&
-				(occ&(SquareBB(b1)|SquareBB(c1)|SquareBB(d1))) == 0 &&
-				!pos.IsAttacked(d1, Black) && !pos.IsAttacked(c1, Black) {
-				moves = append(moves, MoveCastling(e1, c1))
+			if pos.castling.mayWhiteCastleQueenside() &&
+				(occupied & (squareBB(b1) | squareBB(c1) | squareBB(d1))).isEmpty() &&
+				!pos.isAttacked(d1, black) && !pos.isAttacked(c1, black) {
+				moves = append(moves, moveCastling(e1, c1))
 			}
 		} else {
-			if pos.castling.MayBlackCastleKingside() &&
-				(occ&(SquareBB(f8)|SquareBB(g8))) == 0 &&
-				!pos.IsAttacked(f8, White) && !pos.IsAttacked(g8, White) {
-				moves = append(moves, MoveCastling(e8, g8))
+			if pos.castling.mayBlackCastleKingside() &&
+				(occupied & (squareBB(f8) | squareBB(g8))).isEmpty() &&
+				!pos.isAttacked(f8, white) && !pos.isAttacked(g8, white) {
+				moves = append(moves, moveCastling(e8, g8))
 			}
-			if pos.castling.MayBlackCastleQueenside() &&
-				(occ&(SquareBB(b8)|SquareBB(c8)|SquareBB(d8))) == 0 &&
-				!pos.IsAttacked(d8, White) && !pos.IsAttacked(c8, White) {
-				moves = append(moves, MoveCastling(e8, c8))
+			if pos.castling.mayBlackCastleQueenside() &&
+				(occupied & (squareBB(b8) | squareBB(c8) | squareBB(d8))).isEmpty() &&
+				!pos.isAttacked(d8, white) && !pos.isAttacked(c8, white) {
+				moves = append(moves, moveCastling(e8, c8))
 			}
 		}
 	}
 
 	// Pawn moves.
 	var (
-		pawns          Bitboard
-		singlePushes   Bitboard
-		doublePushes   Bitboard
-		capturesWest   Bitboard
-		capturesEast   Bitboard
-		epSources      Bitboard
-		promotions     Bitboard
-		promotionsWest Bitboard
-		promotionsEast Bitboard
-		promoRank      Bitboard
+		pawns          bitboard
+		singlePushes   bitboard
+		doublePushes   bitboard
+		capturesWest   bitboard
+		capturesEast   bitboard
+		epSources      bitboard
+		promotions     bitboard
+		promotionsWest bitboard
+		promotionsEast bitboard
+		promoRank      bitboard
 		pushDelta      int
 		westDelta      int
 		eastDelta      int
 	)
 
-	if color == White {
-		pawns = pos.Pawns() & friendly
-		singlePushes = pawns.ShiftNorth() & ^occ
-		doublePushes = singlePushes.ShiftNorth() & ^occ & Rank4
-		capturesWest = pawns.ShiftNorthwest() & enemyPieces
-		capturesEast = pawns.ShiftNortheast() & enemyPieces
-		if pos.epSquare != NoSquare {
-			epSources = PawnAttacksBlack[pos.epSquare] & pawns
+	if color == white {
+		pawns = pos.pawns() & friendlyPieces
+		singlePushes = pawns.shiftNorth() & ^occupied
+		doublePushes = singlePushes.shiftNorth() & ^occupied & rank4
+		capturesWest = pawns.shiftNorthwest() & enemyPieces
+		capturesEast = pawns.shiftNortheast() & enemyPieces
+		if pos.epSquare != noSquare {
+			epSources = pawnAttacksBlack[pos.epSquare] & pawns
 		}
 		pushDelta = 8
 		westDelta = 7
 		eastDelta = 9
-		promoRank = Rank8
+		promoRank = rank8
 	} else {
-		pawns = pos.Pawns() & friendly
-		singlePushes = pawns.ShiftSouth() & ^occ
-		doublePushes = singlePushes.ShiftSouth() & ^occ & Rank5
-		capturesWest = pawns.ShiftSouthwest() & enemyPieces
-		capturesEast = pawns.ShiftSoutheast() & enemyPieces
-		if pos.epSquare != NoSquare {
-			epSources = PawnAttacksWhite[pos.epSquare] & pawns
+		pawns = pos.pawns() & friendlyPieces
+		singlePushes = pawns.shiftSouth() & ^occupied
+		doublePushes = singlePushes.shiftSouth() & ^occupied & rank5
+		capturesWest = pawns.shiftSouthwest() & enemyPieces
+		capturesEast = pawns.shiftSoutheast() & enemyPieces
+		if pos.epSquare != noSquare {
+			epSources = pawnAttacksWhite[pos.epSquare] & pawns
 		}
 		pushDelta = -8
 		westDelta = -9
 		eastDelta = -7
-		promoRank = Rank1
+		promoRank = rank1
 	}
 
 	promotions = singlePushes & promoRank
@@ -169,115 +161,104 @@ func (pos *Position) generateMoves(color Color, doAllMoves bool) []Move {
 
 	// Capture promotions.
 	for _, pair := range [2]struct {
-		bb    Bitboard
+		bb    bitboard
 		delta int
 	}{{promotionsWest, westDelta}, {promotionsEast, eastDelta}} {
-		b := pair.bb & allowedCaptures
-		for b != 0 {
-			var to Square
-			b, to = b.PopLsb()
-			from := Square(int(to) - pair.delta)
-			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
+		for b := pair.bb & allowedCaptures; b.isNotEmpty(); {
+			to := b.popLsb()
+			from := square(int(to) - pair.delta)
+			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
 				captured := pos.squares[to]
-				moves = append(moves, MovePromotion(from, to, Queen, captured))
-				moves = append(moves, MovePromotion(from, to, Rook, captured))
-				moves = append(moves, MovePromotion(from, to, Bishop, captured))
-				moves = append(moves, MovePromotion(from, to, Knight, captured))
+				moves = append(moves, movePromotion(from, to, queen, captured))
+				moves = append(moves, movePromotion(from, to, rook, captured))
+				moves = append(moves, movePromotion(from, to, bishop, captured))
+				moves = append(moves, movePromotion(from, to, knight, captured))
 			}
 		}
 	}
 
 	// Push promotions.
 	{
-		b := promotions & allowedNonCaptures
-		for b != 0 {
-			var to Square
-			b, to = b.PopLsb()
-			from := Square(int(to) - pushDelta)
-			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
-				moves = append(moves, MovePromotion(from, to, Queen, NoPiece))
-				moves = append(moves, MovePromotion(from, to, Rook, NoPiece))
-				moves = append(moves, MovePromotion(from, to, Bishop, NoPiece))
-				moves = append(moves, MovePromotion(from, to, Knight, NoPiece))
+		for b := promotions & allowedNonCaptures; b.isNotEmpty(); {
+			to := b.popLsb()
+			from := square(int(to) - pushDelta)
+			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
+				moves = append(moves, movePromotion(from, to, queen, noPiece))
+				moves = append(moves, movePromotion(from, to, rook, noPiece))
+				moves = append(moves, movePromotion(from, to, bishop, noPiece))
+				moves = append(moves, movePromotion(from, to, knight, noPiece))
 			}
 		}
 	}
 
 	// Captures (non-promotion).
 	for _, pair := range [2]struct {
-		bb    Bitboard
+		bb    bitboard
 		delta int
 	}{{capturesWest, westDelta}, {capturesEast, eastDelta}} {
-		b := pair.bb & allowedCaptures
-		for b != 0 {
-			var to Square
-			b, to = b.PopLsb()
-			from := Square(int(to) - pair.delta)
-			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
-				moves = append(moves, MoveCapture(from, to, Pawn, pos.squares[to]))
+		for b := pair.bb & allowedCaptures; b.isNotEmpty(); {
+			to := b.popLsb()
+			from := square(int(to) - pair.delta)
+			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
+				moves = append(moves, moveCapture(from, to, pawn, pos.squares[to]))
 			}
 		}
 	}
 
 	if doAllMoves {
 		// Single pawn pushes.
-		b := singlePushes & allowedNonCaptures
-		for b != 0 {
-			var to Square
-			b, to = b.PopLsb()
-			from := Square(int(to) - pushDelta)
-			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
-				moves = append(moves, MoveNonCapture(from, to, Pawn))
+		for b := singlePushes & allowedNonCaptures; b.isNotEmpty(); {
+			to := b.popLsb()
+			from := square(int(to) - pushDelta)
+			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
+				moves = append(moves, moveSinglePush(from, to))
 			}
 		}
 		// Double pawn pushes.
-		b = doublePushes & allowedNonCaptures
-		for b != 0 {
-			var to Square
-			b, to = b.PopLsb()
-			from := Square(int(to) - pushDelta*2)
-			if pins.AllowedSquares(from)&SquareBB(to) != 0 {
-				moves = append(moves, MoveDoublePush(from, to))
+		for b := doublePushes & allowedNonCaptures; b.isNotEmpty(); {
+			to := b.popLsb()
+			from := square(int(to) - pushDelta*2)
+			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
+				moves = append(moves, moveDoublePush(from, to))
 			}
 		}
 	}
 
 	// En passant captures.
-	for epSources != 0 {
-		var from Square
-		epSources, from = epSources.PopLsb()
+	for epSources.isNotEmpty() {
+		from := epSources.popLsb()
 		to := pos.epSquare
-		capturedSq := Square((int(from) & 0x38) | (int(to) & 0x07))
-		if pins.AllowedSquares(from)&SquareBB(to) != 0 &&
-			allowedCaptures&SquareBB(capturedSq) != 0 {
+		// Captured pawn is on source rank, destination file.
+		capturedSq := square((from & 0x38) | (to & 0x07))
+		if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() &&
+			(allowedCaptures & squareBB(capturedSq)).isNotEmpty() {
 			// Check for horizontal discovered check through the king rank.
-			if kingLoc.Rank() == from.Rank() {
-				pseudoOcc := occ ^ SquareBB(capturedSq) ^ SquareBB(from)
-				hAttacks := RookAttacks(pseudoOcc, kingLoc) &
-					(WestOf[kingLoc] | EastOf[kingLoc])
-				if hAttacks&pos.colors[EnemyOf(color)]&(pos.Rooks()|pos.Queens()) != 0 {
+			if kingLocation.rank() == from.rank() {
+				pseudoOcc := occupied ^ squareBB(capturedSq) ^ squareBB(from)
+				horizontalAttacks := rookAttacks(pseudoOcc, kingLocation) & (westOf[kingLocation] | eastOf[kingLocation])
+				if (horizontalAttacks & pos.colors[enemyOf(color)] & (pos.rooks() | pos.queens())).isNotEmpty() {
 					continue
 				}
 			}
-			moves = append(moves, MoveEpCapture(from, to))
+			moves = append(moves, moveEpCapture(from, to))
 		}
 	}
 	return moves
 }
 
 // pieceAttacks returns the attack set for piece pt on sq given occupied squares.
-func pieceAttacks(piece Piece, occupied Bitboard, sq Square) Bitboard {
-	switch piece {
-	case Knight:
-		return KnightAttacks[sq]
-	case Bishop:
-		return BishopAttacks(occupied, sq)
-	case Rook:
-		return RookAttacks(occupied, sq)
-	case Queen:
-		return QueenAttacks(occupied, sq)
-	case King:
-		return KingAttacks[sq]
+func pieceAttacks(pt piece, occupied bitboard, sq square) bitboard {
+	switch pt {
+	case knight:
+		return knightAttacks[sq]
+	case bishop:
+		return bishopAttacks(occupied, sq)
+	case rook:
+		return rookAttacks(occupied, sq)
+	case queen:
+		return bishopAttacks(occupied, sq) | rookAttacks(occupied, sq)
+	case king:
+		return kingAttacks[sq]
 	}
 	return 0
 }

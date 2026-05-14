@@ -1,77 +1,76 @@
 package engine
 
-type CastlingRights uint8
+type castlingRights uint8
 
 const (
-	CastleWhiteKingside  CastlingRights = 0x01
-	CastleWhiteQueenside CastlingRights = 0x02
-	CastleBlackKingside  CastlingRights = 0x04
-	CastleBlackQueenside CastlingRights = 0x08
+	castleWhiteKingside  castlingRights = 0x01
+	castleWhiteQueenside castlingRights = 0x02
+	castleBlackKingside  castlingRights = 0x04
+	castleBlackQueenside castlingRights = 0x08
 )
 
-func (cr CastlingRights) MayWhiteCastleKingside() bool  { return cr&CastleWhiteKingside != 0 }
-func (cr CastlingRights) MayWhiteCastleQueenside() bool { return cr&CastleWhiteQueenside != 0 }
-func (cr CastlingRights) MayBlackCastleKingside() bool  { return cr&CastleBlackKingside != 0 }
-func (cr CastlingRights) MayBlackCastleQueenside() bool { return cr&CastleBlackQueenside != 0 }
-func (cr CastlingRights) IsNone() bool                  { return cr == 0 }
-func (cr CastlingRights) Value() uint8                  { return uint8(cr) }
+func (cr castlingRights) mayWhiteCastleKingside() bool  { return cr&castleWhiteKingside != 0 }
+func (cr castlingRights) mayWhiteCastleQueenside() bool { return cr&castleWhiteQueenside != 0 }
+func (cr castlingRights) mayBlackCastleKingside() bool  { return cr&castleBlackKingside != 0 }
+func (cr castlingRights) mayBlackCastleQueenside() bool { return cr&castleBlackQueenside != 0 }
+func (cr castlingRights) isNone() bool                  { return cr == 0 }
+func (cr castlingRights) hash() uint64                  { return castlingRightsHashes[cr] }
 
-// AfterMove returns the castling rights that result after making a move.
-func (cr CastlingRights) AfterMove(m Move) CastlingRights {
-	return cr & castleMoveMasks[m.From()] & castleMoveMasks[m.To()]
+func (cr castlingRights) afterMove(m move) castlingRights {
+	return cr & castleMoveMasks[m.from()] & castleMoveMasks[m.to()]
 }
 
-func CastlingRightsFromFen(fen string) CastlingRights {
+func castlingRightsFromFen(fen string) castlingRights {
 	if fen == "-" {
 		return 0
 	}
-	var cr CastlingRights
+	var cr castlingRights
 	for _, c := range fen {
 		switch c {
 		case 'K':
-			cr |= CastleWhiteKingside
+			cr |= castleWhiteKingside
 		case 'Q':
-			cr |= CastleWhiteQueenside
+			cr |= castleWhiteQueenside
 		case 'k':
-			cr |= CastleBlackKingside
+			cr |= castleBlackKingside
 		case 'q':
-			cr |= CastleBlackQueenside
+			cr |= castleBlackQueenside
 		}
 	}
 	return cr
 }
 
-func (cr CastlingRights) ToFenString() string {
+func (cr castlingRights) toFenString() string {
 	if cr == 0 {
 		return "-"
 	}
 	s := ""
-	if cr&CastleWhiteKingside != 0 {
+	if cr&castleWhiteKingside != 0 {
 		s += "K"
 	}
-	if cr&CastleWhiteQueenside != 0 {
+	if cr&castleWhiteQueenside != 0 {
 		s += "Q"
 	}
-	if cr&CastleBlackKingside != 0 {
+	if cr&castleBlackKingside != 0 {
 		s += "k"
 	}
-	if cr&CastleBlackQueenside != 0 {
+	if cr&castleBlackQueenside != 0 {
 		s += "q"
 	}
 	return s
 }
 
 // per-square AND masks: applied to castling rights when a piece moves from or to that square.
-var castleMoveMasks [64]CastlingRights
+var castleMoveMasks [64]castlingRights
 
 func initCastleMasks() {
-	okm := CastlingRights(0x0F)
-	a1m := okm & ^CastleWhiteQueenside
-	e1m := okm & ^(CastleWhiteKingside | CastleWhiteQueenside)
-	h1m := okm & ^CastleWhiteKingside
-	a8m := okm & ^CastleBlackQueenside
-	e8m := okm & ^(CastleBlackKingside | CastleBlackQueenside)
-	h8m := okm & ^CastleBlackKingside
+	okm := castlingRights(0x0F)
+	a1m := okm & ^castleWhiteQueenside
+	e1m := okm & ^(castleWhiteKingside | castleWhiteQueenside)
+	h1m := okm & ^castleWhiteKingside
+	a8m := okm & ^castleBlackQueenside
+	e8m := okm & ^(castleBlackKingside | castleBlackQueenside)
+	h8m := okm & ^castleBlackKingside
 	for i := range castleMoveMasks {
 		castleMoveMasks[i] = okm
 	}

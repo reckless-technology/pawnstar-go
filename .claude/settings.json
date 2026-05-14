@@ -9,7 +9,11 @@
       "Bash(time echo quit)",
       "Bash(/tmp/pawnstar-magic)",
       "Bash(git add *)",
-      "WebFetch(domain:www.chessprogramming.org)"
+      "WebFetch(domain:www.chessprogramming.org)",
+      "Bash(chmod +x /tmp/analyze_exports.sh)",
+      "Bash(bash /tmp/analyze_exports.sh)",
+      "Bash(go list *)",
+      "Bash(git -C /home/jonny/work/pawnstar-go/.claude/worktrees/agent-af4e8d3705c79d41e diff HEAD --stat)"
     ]
   }
 }

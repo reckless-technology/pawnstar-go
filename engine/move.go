@@ -5,7 +5,7 @@ import (
 	"slices"
 )
 
-// Move is a packed int64, bit-layout identical to the C++ version:
+// move is a packed int64, bit-layout identical to the C++ version:
 //
 //	 0- 5: to square
 //	 6-11: from square
@@ -14,115 +14,115 @@ import (
 //	18-21: move type
 //	   22: gives-check flag
 //	32-63: score
-type Move int64
+type move int64
 
-// MoveType classifies a move.
-type MoveType uint8
+// moveType classifies a move.
+type moveType uint8
 
 const (
-	NonCapture      MoveType = iota
-	Capture         MoveType = 1
-	PromotionKnight MoveType = 2
-	PromotionBishop MoveType = 3
-	PromotionRook   MoveType = 4
-	PromotionQueen  MoveType = 5
-	PawnDoublePush  MoveType = 6
-	EpCapture       MoveType = 7
-	Castling        MoveType = 8
+	nonCapture moveType = iota
+	capture
+	promotionKnight
+	promotionBishop
+	promotionRook
+	promotionQueen
+	pawnSinglePush
+	pawnDoublePush
+	epCapture
+	castling
 )
 
 const isCheckingBit int64 = 1 << 22
 
-func makeMove(from, to Square, piece Piece, mt MoveType, captured Piece) Move {
-	return Move(int64(to) | int64(from)<<6 | int64(piece)<<12 | int64(captured)<<15 | int64(mt)<<18)
+func constructMove(from, to square, p piece, mt moveType, captured piece) move {
+	return move(int64(to) | int64(from)<<6 | int64(p)<<12 | int64(captured)<<15 | int64(mt)<<18)
 }
 
-func MoveNonCapture(from, to Square, piece Piece) Move {
-	return makeMove(from, to, piece, NonCapture, NoPiece)
+func moveNonCapture(from, to square, p piece) move {
+	return constructMove(from, to, p, nonCapture, noPiece)
 }
-func MoveCapture(from, to Square, piece, captured Piece) Move {
-	return makeMove(from, to, piece, Capture, captured)
+func moveCapture(from, to square, p, captured piece) move {
+	return constructMove(from, to, p, capture, captured)
 }
-func MovePromotion(from, to Square, promoted Piece, captured Piece) Move {
-	return makeMove(from, to, Pawn, MoveType(promoted), captured)
+func movePromotion(from, to square, promoted piece, captured piece) move {
+	return constructMove(from, to, pawn, moveType(promoted), captured)
 }
-func MoveCastling(from, to Square) Move {
-	return makeMove(from, to, King, Castling, NoPiece)
+func moveCastling(from, to square) move {
+	return constructMove(from, to, king, castling, noPiece)
 }
-func MoveEpCapture(from, to Square) Move {
-	return makeMove(from, to, Pawn, EpCapture, Pawn)
+func moveEpCapture(from, to square) move {
+	return constructMove(from, to, pawn, epCapture, pawn)
 }
-func MoveDoublePush(from, to Square) Move {
-	return makeMove(from, to, Pawn, PawnDoublePush, NoPiece)
+func moveDoublePush(from, to square) move {
+	return constructMove(from, to, pawn, pawnDoublePush, noPiece)
 }
-func MoveNone() Move { return Move(0) }
+func moveSinglePush(from, to square) move {
+	return constructMove(from, to, pawn, pawnSinglePush, noPiece)
+}
+func moveNone() move { return move(0) }
 
-func (m Move) To() Square       { return Square(m & 0x3F) }
-func (m Move) From() Square     { return Square((m >> 6) & 0x3F) }
-func (m Move) Piece() Piece     { return Piece((m >> 12) & 0x07) }
-func (m Move) Captured() Piece  { return Piece((m >> 15) & 0x07) }
-func (m Move) Type() MoveType   { return MoveType((m >> 18) & 0x0F) }
-func (m Move) Score() int       { return int(m >> 32) }
-func (m Move) IsChecking() bool { return (int64(m) & isCheckingBit) != 0 }
-func (m Move) FromTo() int      { return int(m) & 0xFFF }
+func (m move) to() square       { return square(m & 0x3F) }
+func (m move) from() square     { return square((m >> 6) & 0x3F) }
+func (m move) piece() piece     { return piece((m >> 12) & 0x07) }
+func (m move) captured() piece  { return piece((m >> 15) & 0x07) }
+func (m move) kind() moveType   { return moveType((m >> 18) & 0x0F) }
+func (m move) score() int       { return int(m >> 32) }
+func (m move) isChecking() bool { return (int64(m) & isCheckingBit) != 0 }
+func (m move) fromTo() int      { return int(m) & 0xFFF }
 
-func (m Move) Promoted() Piece {
-	switch m.Type() {
-	case PromotionKnight:
-		return Knight
-	case PromotionBishop:
-		return Bishop
-	case PromotionRook:
-		return Rook
-	case PromotionQueen:
-		return Queen
+func (m move) promoted() piece {
+	switch m.kind() {
+	case promotionKnight:
+		return knight
+	case promotionBishop:
+		return bishop
+	case promotionRook:
+		return rook
+	case promotionQueen:
+		return queen
 	}
-	return NoPiece
+	return noPiece
 }
 
-func (m Move) WithScore(score int) Move {
-	return Move((int64(m) & 0xFFFFFFFF) | int64(score)<<32)
+func (m move) withScore(s int) move {
+	return move((int64(m) & 0xFFFFFFFF) | int64(s)<<32)
 }
 
-func (m Move) GivesCheck() Move {
-	return Move(int64(m) | isCheckingBit)
-}
-
-func (m Move) Equal(other Move) bool {
+func (m move) equal(other move) bool {
 	return (int64(m) & 0x3FFFFF) == (int64(other) & 0x3FFFFF)
 }
 
-func (m Move) String() string {
-	if m == MoveNone() {
+func (m move) String() string {
+	if m == moveNone() {
 		return "0000"
 	}
-	s := m.From().String() + m.To().String()
-	if m.Promoted() != NoPiece {
-		s += "=" + m.Promoted().ToString()
+	s := m.from().String() + m.to().String()
+	if m.promoted() != noPiece {
+		s += "=" + m.promoted().toString()
 	}
 	return s
 }
 
-func (m Move) GoString() string {
-	if m == MoveNone() {
+func (m move) GoString() string {
+	if m == moveNone() {
 		return "NONE"
 	}
-	s := m.Piece().ToString() + m.From().String() + m.To().String()
-	if m.Captured() != NoPiece {
-		s += "x" + m.Captured().ToString()
+	s := m.piece().toString() + m.from().String() + m.to().String()
+	if m.captured() != noPiece {
+		s += "x" + m.captured().toString()
 	}
-	if m.Promoted() != NoPiece {
-		s += "=" + m.Promoted().ToString()
+	if m.promoted() != noPiece {
+		s += "=" + m.promoted().toString()
 	}
 	return s
 }
 
-func (m Move) IsNone() bool { return (m & 0x3FFFFF) == 0 }
+func (m move) isNone() bool { return (m & 0x3FFFFF) == 0 }
 
-func SortMovesUnstable(moves []Move) {
-	slices.SortFunc(moves, func(a, b Move) int { return cmp.Compare(b.Score(), a.Score()) })
+func sortMovesUnstable(moves []move) {
+	slices.SortFunc(moves, func(a, b move) int { return cmp.Compare(b.score(), a.score()) })
 }
 
-func SortMovesStable(moves []Move) {
-	slices.SortStableFunc(moves, func(a, b Move) int { return cmp.Compare(b.Score(), a.Score()) })
+func sortMovesStable(moves []move) {
+	slices.SortStableFunc(moves, func(a, b move) int { return cmp.Compare(b.score(), a.score()) })
 }

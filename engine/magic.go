@@ -1,28 +1,23 @@
 package engine
 
-// BishopAttacks returns squares attacked by a bishop on sq given occupied squares.
-func BishopAttacks(occ Bitboard, sq Square) Bitboard {
+// bishopAttacks returns squares attacked by a bishop on sq given occupied squares.
+func bishopAttacks(occ bitboard, sq square) bitboard {
 	return bishopTable[sq][(uint64(occ&bishopMask[sq])*bishopMagic[sq])>>bishopShift[sq]]
 }
 
-// RookAttacks returns squares attacked by a rook on sq given occupied squares.
-func RookAttacks(occ Bitboard, sq Square) Bitboard {
+// rookAttacks returns squares attacked by a rook on sq given occupied squares.
+func rookAttacks(occ bitboard, sq square) bitboard {
 	return rookTable[sq][(uint64(occ&rookMask[sq])*rookMagic[sq])>>rookShift[sq]]
 }
 
-// QueenAttacks returns squares attacked by a queen on sq given occupied squares.
-func QueenAttacks(occupied Bitboard, sq Square) Bitboard {
-	return BishopAttacks(occupied, sq) | RookAttacks(occupied, sq)
-}
-
 var (
-	rookMask  [64]Bitboard
+	rookMask  [64]bitboard
 	rookShift [64]uint
-	rookTable [64][]Bitboard
+	rookTable [64][]bitboard
 
-	bishopMask  [64]Bitboard
+	bishopMask  [64]bitboard
 	bishopShift [64]uint
-	bishopTable [64][]Bitboard
+	bishopTable [64][]bitboard
 )
 
 // Magic numbers found offline with seed 1337. It was taking over 400ms to compute them at startup.
@@ -65,73 +60,72 @@ var bishopMagic = [64]uint64{
 }
 
 func initMagics() {
-	var occupancies [4096]Bitboard
-	var target_squares [4096]Bitboard
+	var occupancies [4096]bitboard
+	var target_squares [4096]bitboard
 
-	for sq := range Square(64) {
-		mask := (NorthOf[sq] & ^Rank8) |
-			(SouthOf[sq] & ^Rank1) |
-			(EastOf[sq] & ^FileH) |
-			(WestOf[sq] & ^FileA)
+	for sq := range square(64) {
+		mask := (northOf[sq] & ^rank8) |
+			(southOf[sq] & ^rank1) |
+			(eastOf[sq] & ^fileH) |
+			(westOf[sq] & ^fileA)
 		rookMask[sq] = mask
-		rookShift[sq] = uint(64 - mask.PopCount())
-		rookTable[sq] = make([]Bitboard, 1<<mask.PopCount())
+		rookShift[sq] = uint(64 - mask.popCount())
+		rookTable[sq] = make([]bitboard, 1<<mask.popCount())
 		n := enumerateOccupancies(mask, occupancies[:], target_squares[:], rookAttacksClassic, sq)
 		fillMagicTable(rookMagic[sq], occupancies[:n], target_squares[:n], rookShift[sq], rookTable[sq])
 	}
 
-	for sq := range Square(64) {
-		mask := (NortheastOf[sq] & ^(Rank8 | FileH)) |
-			(NorthwestOf[sq] & ^(Rank8 | FileA)) |
-			(SoutheastOf[sq] & ^(Rank1 | FileH)) |
-			(SouthwestOf[sq] & ^(Rank1 | FileA))
+	for sq := range square(64) {
+		mask := (northeastOf[sq] & ^(rank8 | fileH)) |
+			(northwestOf[sq] & ^(rank8 | fileA)) |
+			(southeastOf[sq] & ^(rank1 | fileH)) |
+			(southwestOf[sq] & ^(rank1 | fileA))
 		bishopMask[sq] = mask
-		bishopShift[sq] = uint(64 - mask.PopCount())
-		bishopTable[sq] = make([]Bitboard, 1<<mask.PopCount())
-
+		bishopShift[sq] = uint(64 - mask.popCount())
+		bishopTable[sq] = make([]bitboard, 1<<mask.popCount())
 		n := enumerateOccupancies(mask, occupancies[:], target_squares[:], bishopAttacksClassic, sq)
 		fillMagicTable(bishopMagic[sq], occupancies[:n], target_squares[:n], bishopShift[sq], bishopTable[sq])
 	}
 }
 
-func fillMagicTable(magic uint64, occs, refs []Bitboard, shift uint, table []Bitboard) {
+func fillMagicTable(magic uint64, occs, refs []bitboard, shift uint, table []bitboard) {
 	for i, occ := range occs {
 		table[(uint64(occ)*magic)>>shift] = refs[i]
 	}
 }
 
-func enumerateOccupancies(mask Bitboard, occupancies, targets []Bitboard, attackFn func(Bitboard, Square) Bitboard, sq Square) int {
-	n := 0
-	occupancy := Bitboard(0)
+func enumerateOccupancies(mask bitboard, occupancies, targets []bitboard, attackFn func(bitboard, square) bitboard, sq square) int {
+	count := 0
+	occupancy := bitboard(0)
 	for {
-		occupancies[n] = occupancy
-		targets[n] = attackFn(occupancy, sq)
-		n++
+		occupancies[count] = occupancy
+		targets[count] = attackFn(occupancy, sq)
+		count++
 		occupancy = (occupancy - 1) & mask
 		if occupancy == 0 {
 			break
 		}
 	}
-	return n
+	return count
 }
 
-func lsbX(b Bitboard) Square { return (b | 0x8000000000000000).Lsb() }
-func msbX(b Bitboard) Square { return (b | 1).Msb() }
+func lsbX(b bitboard) square { return (b | 0x8000000000000000).lsb() }
+func msbX(b bitboard) square { return (b | 1).msb() }
 
-func rookAttacksClassic(occ Bitboard, sq Square) Bitboard {
-	result := RookAttacksEmpty[sq]
-	result ^= NorthOf[lsbX(NorthOf[sq]&occ)]
-	result ^= EastOf[lsbX(EastOf[sq]&occ)]
-	result ^= SouthOf[msbX(SouthOf[sq]&occ)]
-	result ^= WestOf[msbX(WestOf[sq]&occ)]
+func rookAttacksClassic(occ bitboard, sq square) bitboard {
+	result := rookAttacksEmpty[sq]
+	result ^= northOf[lsbX(northOf[sq]&occ)]
+	result ^= eastOf[lsbX(eastOf[sq]&occ)]
+	result ^= southOf[msbX(southOf[sq]&occ)]
+	result ^= westOf[msbX(westOf[sq]&occ)]
 	return result
 }
 
-func bishopAttacksClassic(occ Bitboard, sq Square) Bitboard {
-	result := BishopAttacksEmpty[sq]
-	result ^= NortheastOf[lsbX(NortheastOf[sq]&occ)]
-	result ^= NorthwestOf[lsbX(NorthwestOf[sq]&occ)]
-	result ^= SouthwestOf[msbX(SouthwestOf[sq]&occ)]
-	result ^= SoutheastOf[msbX(SoutheastOf[sq]&occ)]
+func bishopAttacksClassic(occ bitboard, sq square) bitboard {
+	result := bishopAttacksEmpty[sq]
+	result ^= northeastOf[lsbX(northeastOf[sq]&occ)]
+	result ^= northwestOf[lsbX(northwestOf[sq]&occ)]
+	result ^= southwestOf[msbX(southwestOf[sq]&occ)]
+	result ^= southeastOf[msbX(southeastOf[sq]&occ)]
 	return result
 }

@@ -6,36 +6,31 @@ import (
 	"strings"
 )
 
-// irreversibleState holds the fields that cannot be reconstructed by reversing
-// a move's piece operations. Saved on MakeMove, restored on UnmakeMove.
 type irreversibleState struct {
 	hash     uint64
-	checkers Bitboard
-	move     Move // the move that was made to reach the child state
-	castling CastlingRights
-	epSquare Square
+	checkers bitboard
+	move     move
+	castling castlingRights
+	epSquare square
 	halfMove uint8
 	flags    uint8
 }
 
-// Position holds the complete mutable state of a chess position.
-// Use MakeMove / UnmakeMove to traverse the game tree in place.
-type Position struct {
-	pieces     [6]Bitboard
-	colors     [2]Bitboard
-	squares    [64]Piece
-	checkers   Bitboard
+type position struct {
+	pieces     [6]bitboard
+	colors     [2]bitboard
+	squares    [64]piece
+	checkers   bitboard
 	hash       uint64
-	kingLoc    [2]Square
-	epSquare   Square
+	stateStack []irreversibleState
+	scoreWhite int
+	scoreBlack int
+	kingLocn   [2]square
+	epSquare   square
 	halfMove   uint8
 	fullMove   uint8
-	castling   CastlingRights
+	castling   castlingRights
 	flags      uint8
-	scoreWhite int // material + non-king PST for white, maintained by addPiece/removePiece/movePiece
-	scoreBlack int // material + non-king PST for black, maintained by addPiece/removePiece/movePiece
-	// stack of saved state, one entry per MakeMove call not yet undone.
-	stateStack []irreversibleState
 }
 
 const (
@@ -43,121 +38,113 @@ const (
 	flagNullMove    uint8 = 0x02
 )
 
-func (pos *Position) ColorToMove() Color {
+func (pos *position) colorToMove() color {
 	if pos.flags&flagBlackToMove != 0 {
-		return Black
+		return black
 	}
-	return White
+	return white
 }
 
-func (pos *Position) IsNullMove() bool            { return pos.flags&flagNullMove != 0 }
-func (pos *Position) Hash() uint64                { return pos.hash }
-func (pos *Position) IsInCheck() bool             { return pos.checkers != 0 }
-func (pos *Position) Checkers() Bitboard          { return pos.checkers }
-func (pos *Position) EPSquare() Square            { return pos.epSquare }
-func (pos *Position) HalfMove() int               { return int(pos.halfMove) }
-func (pos *Position) FullMove() int               { return int(pos.fullMove) + 1 }
-func (pos *Position) Castling() CastlingRights    { return pos.castling }
-func (pos *Position) KingLocation(c Color) Square { return pos.kingLoc[c] }
-func (pos *Position) PieceAt(sq Square) Piece     { return pos.squares[sq] }
-func (pos *Position) PieceBB(p Piece) Bitboard    { return pos.pieces[p-1] }
-func (pos *Position) ColorBB(c Color) Bitboard    { return pos.colors[c] }
-func (pos *Position) Occupied() Bitboard          { return pos.colors[White] | pos.colors[Black] }
-func (pos *Position) Vacant() Bitboard            { return ^pos.Occupied() }
-func (pos *Position) Pawns() Bitboard             { return pos.pieces[Pawn-1] }
-func (pos *Position) Knights() Bitboard           { return pos.pieces[Knight-1] }
-func (pos *Position) Bishops() Bitboard           { return pos.pieces[Bishop-1] }
-func (pos *Position) Rooks() Bitboard             { return pos.pieces[Rook-1] }
-func (pos *Position) Queens() Bitboard            { return pos.pieces[Queen-1] }
-func (pos *Position) Kings() Bitboard             { return pos.pieces[King-1] }
+func (pos *position) isNullMove() bool            { return pos.flags&flagNullMove != 0 }
+func (pos *position) getHash() uint64             { return pos.hash }
+func (pos *position) isInCheck() bool             { return pos.checkers.isNotEmpty() }
+func (pos *position) getHalfMove() int            { return int(pos.halfMove) }
+func (pos *position) kingLocation(c color) square { return pos.kingLocn[c] }
+func (pos *position) pieceAt(sq square) piece     { return pos.squares[sq] }
+func (pos *position) pieceBB(p piece) bitboard    { return pos.pieces[p-1] }
+func (pos *position) colorBB(c color) bitboard    { return pos.colors[c] }
+func (pos *position) occupied() bitboard          { return pos.colors[white] | pos.colors[black] }
+func (pos *position) pawns() bitboard             { return pos.pieces[pawn-1] }
+func (pos *position) knights() bitboard           { return pos.pieces[knight-1] }
+func (pos *position) bishops() bitboard           { return pos.pieces[bishop-1] }
+func (pos *position) rooks() bitboard             { return pos.pieces[rook-1] }
+func (pos *position) queens() bitboard            { return pos.pieces[queen-1] }
+func (pos *position) kings() bitboard             { return pos.pieces[king-1] }
 
-func (pos *Position) addPiece(c Color, p Piece, sq Square) {
-	bb := SquareBB(sq)
+func (pos *position) addPiece(c color, p piece, sq square) {
+	bb := squareBB(sq)
 	pos.pieces[p-1] |= bb
 	pos.colors[c] |= bb
-	pos.hash ^= PieceSquareHashes[c][p-1][sq]
+	pos.hash ^= pieceSquareHashes[c][p-1][sq]
 	pos.squares[sq] = p
-	if c == White {
+	if c == white {
 		pos.scoreWhite += pstValue(c, p, sq)
 	} else {
 		pos.scoreBlack += pstValue(c, p, sq)
 	}
 }
 
-func (pos *Position) removePiece(c Color, p Piece, sq Square) {
-	bb := SquareBB(sq)
+func (pos *position) removePiece(c color, p piece, sq square) {
+	bb := squareBB(sq)
 	pos.pieces[p-1] &^= bb
 	pos.colors[c] &^= bb
-	pos.hash ^= PieceSquareHashes[c][p-1][sq]
-	pos.squares[sq] = NoPiece
-	if c == White {
+	pos.hash ^= pieceSquareHashes[c][p-1][sq]
+	pos.squares[sq] = noPiece
+	if c == white {
 		pos.scoreWhite -= pstValue(c, p, sq)
 	} else {
 		pos.scoreBlack -= pstValue(c, p, sq)
 	}
 }
 
-func (pos *Position) movePiece(c Color, p Piece, from, to Square) {
-	fromBB, toBB := SquareBB(from), SquareBB(to)
+func (pos *position) movePiece(c color, p piece, from, to square) {
+	fromBB, toBB := squareBB(from), squareBB(to)
 	fromTo := fromBB | toBB
 	pos.pieces[p-1] ^= fromTo
 	pos.colors[c] ^= fromTo
-	pos.hash ^= PieceSquareHashes[c][p-1][from] ^ PieceSquareHashes[c][p-1][to]
-	pos.squares[from] = NoPiece
+	pos.hash ^= pieceSquareHashes[c][p-1][from] ^ pieceSquareHashes[c][p-1][to]
+	pos.squares[from] = noPiece
 	pos.squares[to] = p
-	if c == White {
+	if c == white {
 		pos.scoreWhite += pstValue(c, p, to) - pstValue(c, p, from)
 	} else {
 		pos.scoreBlack += pstValue(c, p, to) - pstValue(c, p, from)
 	}
 }
 
-// AttacksTo returns the set of squares of color c that attack sq.
-func (pos *Position) AttacksTo(sq Square, c Color) Bitboard {
-	occupied := pos.Occupied()
-	var result Bitboard
-	if c == White {
-		result = PawnAttacksBlack[sq] & pos.Pawns()
+func (pos *position) attacksTo(sq square, c color) bitboard {
+	occ := pos.occupied()
+	var result bitboard
+	if c == white {
+		result = pawnAttacksBlack[sq] & pos.pawns()
 	} else {
-		result = PawnAttacksWhite[sq] & pos.Pawns()
+		result = pawnAttacksWhite[sq] & pos.pawns()
 	}
-	result |= KnightAttacks[sq] & pos.Knights()
-	result |= KingAttacks[sq] & pos.Kings()
-	result |= RookAttacks(occupied, sq) & (pos.Rooks() | pos.Queens())
-	result |= BishopAttacks(occupied, sq) & (pos.Bishops() | pos.Queens())
+	result |= knightAttacks[sq] & pos.knights()
+	result |= kingAttacks[sq] & pos.kings()
+	result |= rookAttacks(occ, sq) & (pos.rooks() | pos.queens())
+	result |= bishopAttacks(occ, sq) & (pos.bishops() | pos.queens())
 	result &= pos.colors[c]
 	return result
 }
 
-func (pos *Position) IsAttacked(sq Square, by Color) bool {
-	return pos.AttacksTo(sq, by) != 0
+func (pos *position) isAttacked(sq square, by color) bool {
+	return pos.attacksTo(sq, by).isNotEmpty()
 }
 
-// ---- FEN parsing ----
-
-func PositionFromFen(fen string) Position {
-	pos := Position{stateStack: make([]irreversibleState, 0, MaxPly)}
+func positionFromFen(fen string) position {
+	pos := position{stateStack: make([]irreversibleState, 0, maxPly)}
 	fields := strings.Fields(fen)
 
 	// Pieces
-	rank, file := 7, 0
+	y, x := 7, 0
 	for _, ch := range fields[0] {
 		switch ch {
 		case '/':
-			rank--
-			file = 0
+			y--
+			x = 0
 		case '1', '2', '3', '4', '5', '6', '7', '8':
-			file += int(ch - '0')
+			x += int(ch - '0')
 		default:
-			color := White
+			color := white
 			idx := strings.IndexRune("PNBRQKpnbrqk", ch)
 			if idx >= 6 {
 				idx -= 6
-				color = Black
+				color = black
 			}
-			piece := Piece(idx + 1)
-			pos.addPiece(color, piece, SquareXY(file, rank))
-			file++
+			p := piece(idx + 1)
+			pos.addPiece(color, p, squareXY(x, y))
+			x++
 		}
 	}
 
@@ -166,17 +153,17 @@ func PositionFromFen(fen string) Position {
 		pos.flags |= flagBlackToMove
 	}
 
-	pos.kingLoc[White] = (pos.Kings() & pos.colors[White]).Lsb()
-	pos.kingLoc[Black] = (pos.Kings() & pos.colors[Black]).Lsb()
+	pos.kingLocn[white] = (pos.kings() & pos.colors[white]).lsb()
+	pos.kingLocn[black] = (pos.kings() & pos.colors[black]).lsb()
 
 	// Castling rights
 	if len(fields) > 2 {
-		pos.castling = CastlingRightsFromFen(fields[2])
+		pos.castling = castlingRightsFromFen(fields[2])
 	}
 
 	// En passant
 	if len(fields) > 3 && fields[3] != "-" {
-		pos.epSquare = SquareFromString(fields[3])
+		pos.epSquare = squareFromString(fields[3])
 	}
 
 	// Half-move clock
@@ -192,53 +179,49 @@ func PositionFromFen(fen string) Position {
 	}
 
 	pos.hash = pos.computeHash()
-	color := pos.ColorToMove()
-	pos.checkers = pos.AttacksTo(pos.kingLoc[color], EnemyOf(color))
+	c := pos.colorToMove()
+	pos.checkers = pos.attacksTo(pos.kingLocn[c], enemyOf(c))
 	return pos
 }
 
-func (pos *Position) computeHash() uint64 {
+func (pos *position) computeHash() uint64 {
 	var h uint64
 	if pos.flags&flagBlackToMove != 0 {
-		h ^= BlackMoveHash
+		h ^= blackMoveHash
 	}
-	h ^= CastlingRightsHashes[pos.castling.Value()]
-	h ^= EnPassantHashes[pos.epSquare]
-	for p := Pawn; p <= King; p++ {
-		b := pos.PieceBB(p) & pos.colors[White]
-		for b != 0 {
-			var sq Square
-			b, sq = b.PopLsb()
-			h ^= PieceSquareHashes[White][p-1][sq]
+	h ^= pos.castling.hash()
+	h ^= enPassantHashes[pos.epSquare]
+	for p := pawn; p <= king; p++ {
+		b := pos.pieceBB(p) & pos.colors[white]
+		for b.isNotEmpty() {
+			sq := b.popLsb()
+			h ^= pieceSquareHashes[white][p-1][sq]
 		}
-		b = pos.PieceBB(p) & pos.colors[Black]
-		for b != 0 {
-			var sq Square
-			b, sq = b.PopLsb()
-			h ^= PieceSquareHashes[Black][p-1][sq]
+		b = pos.pieceBB(p) & pos.colors[black]
+		for b.isNotEmpty() {
+			sq := b.popLsb()
+			h ^= pieceSquareHashes[black][p-1][sq]
 		}
 	}
 	return h
 }
 
-// ---- FEN serialisation ----
-
-func (pos *Position) ToFen() string {
+func (pos *position) toFenString() string {
 	var sb strings.Builder
-	occ := pos.Occupied()
-	for rank := 7; rank >= 0; rank-- {
-		empty := 0
-		for file := 0; file < 8; file++ {
-			sq := SquareXY(file, rank)
-			if occ&SquareBB(sq) == 0 {
-				empty++
+	occ := pos.occupied()
+	for y := 7; y >= 0; y-- {
+		numEmpty := 0
+		for x := range 8 {
+			sq := squareXY(x, y)
+			if (occ & squareBB(sq)).isEmpty() {
+				numEmpty++
 			} else {
-				if empty > 0 {
-					sb.WriteByte(byte('0' + empty))
-					empty = 0
+				if numEmpty > 0 {
+					sb.WriteByte(byte('0' + numEmpty))
+					numEmpty = 0
 				}
 				p := pos.squares[sq]
-				isWhite := pos.colors[White]&SquareBB(sq) != 0
+				isWhite := (pos.colors[white] & squareBB(sq)).isNotEmpty()
 				ch := " PNBRQK"[p]
 				if !isWhite {
 					ch = " pnbrqk"[p]
@@ -246,10 +229,10 @@ func (pos *Position) ToFen() string {
 				sb.WriteByte(ch)
 			}
 		}
-		if empty > 0 {
-			sb.WriteByte(byte('0' + empty))
+		if numEmpty > 0 {
+			sb.WriteByte(byte('0' + numEmpty))
 		}
-		if rank > 0 {
+		if y > 0 {
 			sb.WriteByte('/')
 		}
 	}
@@ -260,9 +243,9 @@ func (pos *Position) ToFen() string {
 		sb.WriteByte('w')
 	}
 	sb.WriteByte(' ')
-	sb.WriteString(pos.castling.ToFenString())
+	sb.WriteString(pos.castling.toFenString())
 	sb.WriteByte(' ')
-	if pos.epSquare == NoSquare {
+	if pos.epSquare == noSquare {
 		sb.WriteByte('-')
 	} else {
 		sb.WriteString(pos.epSquare.String())
@@ -271,15 +254,9 @@ func (pos *Position) ToFen() string {
 	return sb.String()
 }
 
-// ---- MakeMove ----
-
-// MakeMove applies move to pos in place. Call UnmakeMove to reverse it.
-func (pos *Position) MakeMove(move Move) {
-	if !pos.IsLegal() {
-		panic(fmt.Sprintf("FEN %s MOVE %s", pos.ToFen(), move.GoString()))
-	}
-	color := pos.ColorToMove()
-	oldCastling := pos.castling
+func (pos *position) makeMove(m move) {
+	color := pos.colorToMove()
+	prevCastling := pos.castling
 
 	pos.stateStack = append(pos.stateStack, irreversibleState{
 		hash:     pos.hash,
@@ -288,128 +265,128 @@ func (pos *Position) MakeMove(move Move) {
 		epSquare: pos.epSquare,
 		halfMove: pos.halfMove,
 		flags:    pos.flags,
-		move:     move,
+		move:     m,
 	})
 
-	from, to, piece := move.From(), move.To(), move.Piece()
+	from, to, piece := m.from(), m.to(), m.piece()
 	pos.flags &= ^flagNullMove
-	pos.castling = oldCastling.AfterMove(move)
-	pos.hash ^= CastlingRightsHashes[pos.castling.Value()] ^ CastlingRightsHashes[oldCastling.Value()]
-	pos.hash ^= EnPassantHashes[pos.epSquare]
-	pos.epSquare = NoSquare
+	pos.castling = prevCastling.afterMove(m)
+	pos.hash ^= prevCastling.hash() ^ pos.castling.hash()
+	pos.hash ^= enPassantHashes[pos.epSquare]
+	pos.epSquare = noSquare
 
-	switch move.Type() {
-	case NonCapture:
+	switch m.kind() {
+	case nonCapture:
 		pos.halfMove++
-		if move.Piece() == Pawn {
-			pos.halfMove = 0
-		}
 		pos.movePiece(color, piece, from, to)
 
-	case Capture:
+	case capture:
 		pos.halfMove = 0
-		pos.removePiece(EnemyOf(color), move.Captured(), to)
+		pos.removePiece(enemyOf(color), m.captured(), to)
 		pos.movePiece(color, piece, from, to)
 
-	case PromotionKnight, PromotionBishop, PromotionRook, PromotionQueen:
+	case promotionKnight, promotionBishop, promotionRook, promotionQueen:
 		pos.halfMove = 0
-		if move.Captured() != NoPiece {
-			pos.removePiece(EnemyOf(color), move.Captured(), to)
+		if m.captured() != noPiece {
+			pos.removePiece(enemyOf(color), m.captured(), to)
 		}
-		pos.removePiece(color, Pawn, from)
-		pos.addPiece(color, move.Promoted(), to)
+		pos.removePiece(color, pawn, from)
+		pos.addPiece(color, m.promoted(), to)
 
-	case PawnDoublePush:
+	case pawnSinglePush:
 		pos.halfMove = 0
-		pos.movePiece(color, Pawn, from, to)
-		pos.epSquare = Square((int(from) + int(to)) >> 1)
-		pos.hash ^= EnPassantHashes[pos.epSquare]
+		pos.movePiece(color, pawn, from, to)
 
-	case EpCapture:
+	case pawnDoublePush:
 		pos.halfMove = 0
-		capturedSq := Square((int(from) & 0x38) | (int(to) & 0x07))
-		pos.removePiece(EnemyOf(color), Pawn, capturedSq)
-		pos.movePiece(color, Pawn, from, to)
+		pos.movePiece(color, pawn, from, to)
+		pos.epSquare = square((int(from) + int(to)) >> 1)
+		pos.hash ^= enPassantHashes[pos.epSquare]
 
-	case Castling:
+	case epCapture:
+		pos.halfMove = 0
+		capturedSq := square((int(from) & 0x38) | (int(to) & 0x07))
+		pos.removePiece(enemyOf(color), pawn, capturedSq)
+		pos.movePiece(color, pawn, from, to)
+
+	case castling:
 		pos.halfMove = 0
 		switch to {
 		case g1:
-			pos.movePiece(White, King, e1, g1)
-			pos.movePiece(White, Rook, h1, f1)
+			pos.movePiece(white, king, e1, g1)
+			pos.movePiece(white, rook, h1, f1)
 		case c1:
-			pos.movePiece(White, King, e1, c1)
-			pos.movePiece(White, Rook, a1, d1)
+			pos.movePiece(white, king, e1, c1)
+			pos.movePiece(white, rook, a1, d1)
 		case g8:
-			pos.movePiece(Black, King, e8, g8)
-			pos.movePiece(Black, Rook, h8, f8)
+			pos.movePiece(black, king, e8, g8)
+			pos.movePiece(black, rook, h8, f8)
 		case c8:
-			pos.movePiece(Black, King, e8, c8)
-			pos.movePiece(Black, Rook, a8, d8)
+			pos.movePiece(black, king, e8, c8)
+			pos.movePiece(black, rook, a8, d8)
 		}
 	}
 
 	pos.flags ^= flagBlackToMove
-	pos.hash ^= BlackMoveHash
-	if color == Black {
+	pos.hash ^= blackMoveHash
+	if color == black {
 		pos.fullMove++
 	}
-	pos.kingLoc[color] = (pos.Kings() & pos.colors[color]).Lsb()
-	pos.checkers = pos.AttacksTo(pos.kingLoc[EnemyOf(color)], color)
-
-	hash := pos.computeHash()
-	if hash != pos.Hash() {
-		panic(-1)
-	}
+	pos.kingLocn[color] = (pos.kings() & pos.colors[color]).lsb()
+	pos.checkers = pos.attacksTo(pos.kingLocn[enemyOf(color)], color)
 }
 
-// UnmakeMove reverses the last MakeMove or MakeNullMove call.
-func (pos *Position) UnmakeMove() {
+func (pos *position) unmakeMove() {
 	n := len(pos.stateStack)
 	saved := pos.stateStack[n-1]
 	pos.stateStack = pos.stateStack[:n-1]
 
 	pos.flags = saved.flags
-	color := pos.ColorToMove() // color that made the move
+	color := pos.colorToMove() // color that made the move
 
 	move := saved.move
-	if !move.IsNone() {
-		from, to, piece := move.From(), move.To(), move.Piece()
-		enemy := EnemyOf(color)
-		switch move.Type() {
-		case NonCapture, PawnDoublePush:
+	if !move.isNone() {
+		from, to, piece := move.from(), move.to(), move.piece()
+		enemy := enemyOf(color)
+		switch move.kind() {
+
+		case nonCapture, pawnSinglePush, pawnDoublePush:
 			pos.movePiece(color, piece, to, from)
-		case Capture:
+
+		case capture:
 			pos.movePiece(color, piece, to, from)
-			pos.addPiece(enemy, move.Captured(), to)
-		case PromotionKnight, PromotionBishop, PromotionRook, PromotionQueen:
-			pos.removePiece(color, move.Promoted(), to)
-			pos.addPiece(color, Pawn, from)
-			if move.Captured() != NoPiece {
-				pos.addPiece(enemy, move.Captured(), to)
+			pos.addPiece(enemy, move.captured(), to)
+
+		case promotionKnight, promotionBishop, promotionRook, promotionQueen:
+			pos.removePiece(color, move.promoted(), to)
+			pos.addPiece(color, pawn, from)
+			if move.captured() != noPiece {
+				pos.addPiece(enemy, move.captured(), to)
 			}
-		case EpCapture:
-			capturedSq := Square((int(from) & 0x38) | (int(to) & 0x07))
-			pos.movePiece(color, Pawn, to, from)
-			pos.addPiece(enemy, Pawn, capturedSq)
-		case Castling:
+
+		case epCapture:
+			capturedSq := square((int(from) & 0x38) | (int(to) & 0x07))
+			pos.movePiece(color, pawn, to, from)
+			pos.addPiece(enemy, pawn, capturedSq)
+
+		case castling:
 			switch to {
 			case g1:
-				pos.movePiece(White, King, g1, e1)
-				pos.movePiece(White, Rook, f1, h1)
+				pos.movePiece(white, king, g1, e1)
+				pos.movePiece(white, rook, f1, h1)
 			case c1:
-				pos.movePiece(White, King, c1, e1)
-				pos.movePiece(White, Rook, d1, a1)
+				pos.movePiece(white, king, c1, e1)
+				pos.movePiece(white, rook, d1, a1)
 			case g8:
-				pos.movePiece(Black, King, g8, e8)
-				pos.movePiece(Black, Rook, f8, h8)
+				pos.movePiece(black, king, g8, e8)
+				pos.movePiece(black, rook, f8, h8)
 			case c8:
-				pos.movePiece(Black, King, c8, e8)
-				pos.movePiece(Black, Rook, d8, a8)
+				pos.movePiece(black, king, c8, e8)
+				pos.movePiece(black, rook, d8, a8)
 			}
 		}
-		pos.kingLoc[color] = (pos.Kings() & pos.colors[color]).Lsb()
-		if color == Black {
+		pos.kingLocn[color] = (pos.kings() & pos.colors[color]).lsb()
+		if color == black {
 			pos.fullMove--
 		}
 	}
@@ -421,8 +398,7 @@ func (pos *Position) UnmakeMove() {
 	pos.halfMove = saved.halfMove
 }
 
-// MakeNullMove flips side to move without moving a piece.
-func (pos *Position) MakeNullMove() {
+func (pos *position) makeNullMove() {
 	pos.stateStack = append(pos.stateStack, irreversibleState{
 		hash:     pos.hash,
 		checkers: pos.checkers,
@@ -430,24 +406,24 @@ func (pos *Position) MakeNullMove() {
 		epSquare: pos.epSquare,
 		halfMove: pos.halfMove,
 		flags:    pos.flags,
-		move:     MoveNone(),
+		move:     moveNone(),
 	})
-	pos.hash ^= EnPassantHashes[pos.epSquare]
-	pos.hash ^= BlackMoveHash
-	pos.epSquare = NoSquare
+	pos.hash ^= enPassantHashes[pos.epSquare]
+	pos.hash ^= blackMoveHash
+	pos.epSquare = noSquare
 	pos.flags |= flagNullMove
 	pos.flags ^= flagBlackToMove
 }
 
-// IsDrawByRepetition returns true if the current position has appeared twice before
+// isDrawByRepetition returns true if the current position has appeared twice before
 // in the game history recorded on the stateStack.
-func (pos *Position) IsDrawByRepetition() bool {
-	hash := pos.hash
+func (pos *position) isDrawByRepetition() bool {
+	h := pos.hash
 	k := len(pos.stateStack)
 	repetitions := 2
 	for i := k - 4; i >= 0; i -= 2 {
 		s := pos.stateStack[i]
-		if s.hash == hash {
+		if s.hash == h {
 			repetitions--
 			if repetitions == 0 {
 				return true
@@ -460,42 +436,33 @@ func (pos *Position) IsDrawByRepetition() bool {
 	return false
 }
 
-// IsLegal returns true if the position is a legal chess position.
-func (pos *Position) IsLegal() bool {
-	color := pos.ColorToMove()
-	wk := pos.Kings() & pos.colors[White]
-	bk := pos.Kings() & pos.colors[Black]
-	return wk.PopCount() == 1 &&
-		bk.PopCount() == 1 &&
-		wk != bk &&
-		KingAttacks[wk.Lsb()]&bk == 0 &&
-		!pos.IsAttacked(pos.kingLoc[EnemyOf(color)], color)
+// isLegal returns true if the position is a legal chess position.
+func (pos *position) isLegal() bool {
+	color := pos.colorToMove()
+	whiteKing := pos.kings() & pos.colors[white]
+	blackKing := pos.kings() & pos.colors[black]
+	return whiteKing.popCount() == 1 && blackKing.popCount() == 1 &&
+		whiteKing != blackKing &&
+		(kingAttacks[whiteKing.lsb()] & blackKing).isEmpty() &&
+		!pos.isAttacked(pos.kingLocn[enemyOf(color)], color) &&
+		pos.kingLocn[white] == whiteKing.lsb() &&
+		pos.kingLocn[black] == blackKing.lsb()
 }
 
-func (pos *Position) IsCheckmate() bool {
-	ml := pos.GenerateLegalMoves()
-	return pos.IsInCheck() && len(ml) == 0
-}
-
-func (pos *Position) IsStalemate() bool {
-	ml := pos.GenerateLegalMoves()
-	return !pos.IsInCheck() && len(ml) == 0
-}
-
-// IsDrawByMaterial returns true when neither side has enough material to checkmate.
-func (pos *Position) IsDrawByMaterial() bool {
-	if pos.Pawns() != 0 || pos.Rooks() != 0 || pos.Queens() != 0 {
+// isDrawByMaterial returns true when neither side has enough material to checkmate.
+func (pos *position) isDrawByMaterial() bool {
+	if pos.pawns().isNotEmpty() || pos.rooks().isNotEmpty() || pos.queens().isNotEmpty() {
 		return false
 	}
 	// Only kings, knights, and/or bishops remain.
 	// Insufficient material: KK, KNK, KBK, KBKB (same colour).
-	minor := pos.Knights() | pos.Bishops()
-	if minor.PopCount() <= 1 {
+	minorPieces := pos.knights() | pos.bishops()
+	if minorPieces.popCount() <= 1 {
 		return true
 	}
 	// Two bishops on same colour squares is also a draw.
-	if pos.Knights() == 0 && minor.PopCount() == 2 {
-		if minor&WhiteSqs == minor || minor&BlackSqs == minor {
+	if pos.knights() == 0 && minorPieces.popCount() == 2 {
+		if minorPieces&whiteSqs == minorPieces || minorPieces&blackSqs == minorPieces {
 			return true
 		}
 	}

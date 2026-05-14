@@ -1,56 +1,65 @@
 package engine
 
 const (
-	Beta                   = 11000
-	Alpha                  = -11000
-	CheckmatedScore        = -10000
-	WinThreshold           = 9000
-	LoseThreshold          = -9000
-	DrawScore              = 0
-	MaxPly                 = 64
-	RankFlip               = 0x38
-	SearchCancelledScore   = -12345678
-	ScoreInstabilityThresh = 50
-	StartDepth             = 3
-	HashTableMB            = 64
+	initialBeta            = 11000
+	initialAlpha           = -11000
+	checkmatedScore        = -10000
+	winThreshold           = 9000
+	loseThreshold          = -9000
+	drawScore              = 0
+	maxPly                 = 64
+	rankFlip               = 0x38
+	searchCancelledScore   = -12345678
+	scoreInstabilityThresh = 50
+	startDepth             = 3
+	hashTableMB            = 64
 )
 
-type Direction uint8
+type direction uint8
 
 const (
-	North Direction = iota
-	Northeast
-	East
-	Southeast
-	South
-	Southwest
-	West
-	Northwest
+	north     direction = iota
+	northeast direction = iota
+	east      direction = iota
+	southeast direction = iota
+	south     direction = iota
+	southwest direction = iota
+	west      direction = iota
+	northwest direction = iota
 )
 
-type Color uint8
+type color uint8
 
 const (
-	White Color = iota
-	Black
+	white color = iota
+	black color = iota
 )
 
-func EnemyOf(c Color) Color {
+func enemyOf(c color) color {
 	return c ^ 1
 }
 
-type Piece uint8
+type piece uint8
 
 const (
-	NoPiece Piece = iota
-	Pawn
-	Knight
-	Bishop
-	Rook
-	Queen
-	King
+	noPiece piece = iota
+	pawn    piece = iota
+	knight  piece = iota
+	bishop  piece = iota
+	rook    piece = iota
+	queen   piece = iota
+	king    piece = iota
 )
 
-func (piece Piece) ToString() string {
-	return string("-PNBRQK"[piece])
+func (p piece) toString() string {
+	return string("-PNBRQK"[p])
 }
+
+type clockType uint8
+
+const (
+	clockStandard   clockType = iota // Time-per-game with remaining time.
+	clockFixedDepth                  // Search to a fixed depth.
+	clockFixedTime                   // Search for a fixed number of ms.
+	clockInfinite                    // Search until stop.
+)

@@ -1,30 +1,30 @@
 package engine
 
-// NodeType indicates what kind of alpha-beta node was stored.
-type NodeType uint8
+// nodeType indicates what kind of alpha-beta node was stored.
+type nodeType uint8
 
 const (
-	NodeCut NodeType = iota // Beta cutoff occurred.
-	NodeAll                 // No move exceeded alpha.
-	NodePV                  // Principal variation node.
+	nodeCut nodeType = iota // Beta cutoff occurred.
+	nodeAll                 // No move exceeded alpha.
+	nodePV                  // Principal variation node.
 )
 
-// Transposition is a cached search result.
-type Transposition struct {
+// transposition is a cached search result.
+type transposition struct {
 	hash     uint64
-	move     Move // includes score
+	move     move // includes score
 	depth    int16
-	nodeType NodeType
+	nodeType nodeType
 	isOld    bool
 }
 
-// TranspositionTable is a fixed-size hash table of search results.
-type TranspositionTable struct {
-	table []Transposition
+// transpositionTable is a fixed-size hash table of search results.
+type transpositionTable struct {
+	table []transposition
 }
 
-// NewTranspositionTable allocates a table of the given size in megabytes.
-func NewTranspositionTable(megabytes int) TranspositionTable {
+// newTranspositionTable allocates a table of the given size in megabytes.
+func newTranspositionTable(megabytes int) transpositionTable {
 	const entrySize = 24 // approx bytes per entry
 	n := (megabytes * 1024 * 1024) / entrySize
 	if n < 1 {
@@ -33,30 +33,30 @@ func NewTranspositionTable(megabytes int) TranspositionTable {
 	if (n & 1) == 0 {
 		n += 1
 	}
-	return TranspositionTable{table: make([]Transposition, n)}
+	return transpositionTable{table: make([]transposition, n)}
 }
 
-// Find returns the entry for hash if present.
-func (tt *TranspositionTable) Find(hash uint64) (Transposition, bool) {
+// find returns the entry for hash if present.
+func (tt *transpositionTable) find(hash uint64) (transposition, bool) {
 	e := &tt.table[hash%uint64(len(tt.table))]
 	if e.hash == hash {
 		return *e, true
 	}
-	return Transposition{}, false
+	return transposition{}, false
 }
 
-// Record stores a new transposition entry, applying replacement policy.
-func (tt *TranspositionTable) Record(t *Transposition) {
+// record stores a new transposition entry, applying replacement policy.
+func (tt *transpositionTable) record(t *transposition) {
 	idx := t.hash % uint64(len(tt.table))
 	existing := &tt.table[idx]
 	// Replace if: old entry is from previous search, or new entry is deeper, or it's a PV node.
-	if existing.hash == 0 || existing.isOld || t.depth >= existing.depth || t.nodeType == NodePV {
+	if existing.hash == 0 || existing.isOld || t.depth >= existing.depth || t.nodeType == nodePV {
 		*existing = *t
 	}
 }
 
-// Age marks all entries as old so they can be replaced next search.
-func (tt *TranspositionTable) Age() {
+// age marks all entries as old so they can be replaced next search.
+func (tt *transpositionTable) age() {
 	for i := range tt.table {
 		tt.table[i].isOld = true
 	}

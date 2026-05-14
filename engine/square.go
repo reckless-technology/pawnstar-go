@@ -1,22 +1,22 @@
 package engine
 
-type Square uint8
+type square uint8
 
-func SquareXY(x, y int) Square  { return Square(x + (8 * y)) }
-func (s Square) File() uint8    { return (uint8(s) & 7) }
-func (s Square) Rank() uint8    { return (uint8(s) >> 3) }
-func (s Square) String() string { return string([]byte{'a' + byte(s.File()), '1' + byte(s.Rank())}) }
+func squareXY(x, y int) square  { return square(x + (8 * y)) }
+func (s square) file() uint8    { return (uint8(s) & 7) }
+func (s square) rank() uint8    { return (uint8(s) >> 3) }
+func (s square) String() string { return string([]byte{'a' + byte(s.file()), '1' + byte(s.rank())}) }
 
-func SquareFromString(str string) Square {
-	file := int(str[0]|0x20) - 'a'
-	rank := int(str[1]) - '1'
-	return SquareXY(file, rank)
+func squareFromString(str string) square {
+	f := int(str[0]|0x20) - 'a'
+	r := int(str[1]) - '1'
+	return squareXY(f, r)
 }
 
-const NoSquare Square = 0
+const noSquare square = 0
 
 const (
-	a1 Square = iota
+	a1 square = iota
 	b1
 	c1
 	d1

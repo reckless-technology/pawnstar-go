@@ -10,61 +10,55 @@ import (
 //go:embed book.txt
 var bookData string
 
-// OpeningBook maps position hashes to candidate moves parsed from book.txt.
-type OpeningBook struct {
-	moves map[uint64][]Move
+// openingBook maps position hashes to candidate moves parsed from book.txt.
+type openingBook struct {
+	moves map[uint64][]move
 }
 
-// LoadOpeningBook parses the embedded book.txt and builds the position→moves index.
+// loadOpeningBook parses the embedded book.txt and builds the position→moves index.
 // Each line is a sequence of moves from the starting position; for every prefix,
 // the next move is recorded as a candidate for that position's Zobrist hash.
-func LoadOpeningBook() OpeningBook {
-	b := OpeningBook{moves: make(map[uint64][]Move)}
-	startFen := "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+func loadOpeningBook() openingBook {
+	b := openingBook{moves: make(map[uint64][]move)}
 	scanner := bufio.NewScanner(strings.NewReader(bookData))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		pos := PositionFromFen(startFen)
+		pos := positionFromFen(startFen)
 		for _, token := range strings.Fields(line) {
 			m := bookFindMove(&pos, token)
-			if m.IsNone() {
+			if m.isNone() {
 				break
 			}
-			hash := pos.Hash()
+			hash := pos.getHash()
 			b.moves[hash] = append(b.moves[hash], m)
-			pos.MakeMove(m)
+			pos.makeMove(m)
 		}
 	}
 	return b
 }
 
-// GetMove returns a randomly chosen book move for the given position hash, or MoveNone.
-func (b OpeningBook) GetMove(hash uint64) Move {
+func (book *openingBook) clearOpeningBook() {
+	clear(book.moves)
+}
+
+// getMove returns a randomly chosen book move for the given position hash, or moveNone.
+func (b openingBook) getMove(hash uint64) move {
 	candidates := b.moves[hash]
 	if len(candidates) == 0 {
-		return MoveNone()
+		return moveNone()
 	}
 	return candidates[rand.Intn(len(candidates))]
 }
 
-func bookFindMove(pos *Position, s string) Move {
-	moves := pos.GenerateLegalMoves()
+func bookFindMove(pos *position, s string) move {
+	moves := pos.generateLegalMoves()
 	for i := 0; i < len(moves); i++ {
 		if m := moves[i]; m.String() == s {
 			return m
 		}
 	}
-	return MoveNone()
-}
-
-func bookContains(moves []Move, m Move) bool {
-	for _, existing := range moves {
-		if existing.Equal(m) {
-			return true
-		}
-	}
-	return false
+	return moveNone()
 }

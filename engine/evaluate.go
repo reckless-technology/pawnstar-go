@@ -2,7 +2,7 @@ package engine
 
 // Piece-square tables from https://www.chessprogramming.org/Simplified_Evaluation_Function
 // Stored with wiki rank 8 at low indices, rank 1 at high indices (index 0 = a1 convention).
-// Black reads the table directly; White reads via sq^RankFlip (0x38).
+// Black reads the table directly; White reads via sq^rankFlip (0x38).
 
 var pawnSquare = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -83,66 +83,63 @@ var kingSqEndgame = [64]int{
 
 // isEndgame returns true when neither side has a queen, or each side that has
 // a queen has at most one additional minor piece and no rooks.
-func isEndgame(pos *Position) bool {
-	for c := White; c <= Black; c++ {
-		friendlyPieces := pos.ColorBB(c)
-		if (pos.Queens() & friendlyPieces).PopCount() == 0 {
+func isEndgame(pos *position) bool {
+	for c := white; c <= black; c++ {
+		friendlyPieces := pos.colorBB(c)
+		if (pos.queens() & friendlyPieces).popCount() == 0 {
 			continue
 		}
-		if (pos.Rooks()&friendlyPieces).PopCount() > 0 ||
-			((pos.Knights()|pos.Bishops())&friendlyPieces).PopCount() > 1 {
+		if (pos.rooks()&friendlyPieces).popCount() > 0 ||
+			((pos.knights()|pos.bishops())&friendlyPieces).popCount() > 1 {
 			return false
 		}
 	}
 	return true
 }
 
-var flips = [2]Square{RankFlip, 0}
+var flips = [2]square{rankFlip, 0}
 
 // pstValue returns material + piece-square bonus for a piece at a square.
-// Returns 0 for King; king PST is phase-dependent and handled separately in Score.
-func pstValue(c Color, p Piece, sq Square) int {
+// Returns 0 for king; king PST is phase-dependent and handled separately in Score.
+func pstValue(c color, p piece, sq square) int {
 	flip := flips[c]
 	switch p {
-	case Pawn:
+	case pawn:
 		return 100 + pawnSquare[sq^flip]
-	case Knight:
+	case knight:
 		return 320 + knightSquare[sq^flip]
-	case Bishop:
+	case bishop:
 		return 330 + bishopSquare[sq^flip]
-	case Rook:
+	case rook:
 		return 500 + rookSquare[sq^flip]
-	case Queen:
+	case queen:
 		return 900 + queenSquare[sq^flip]
 	}
 	return 0
 }
 
-// Score returns material + PST score relative to the side to move.
+// score returns material + PST score relative to the side to move.
 // scoreWhite/scoreBlack track all non-king pieces incrementally; king PST is looked up here.
-func (pos *Position) Score(endgame bool) int {
+func (pos *position) score(endgame bool) int {
 	var kingTable *[64]int
 	if endgame {
 		kingTable = &kingSqEndgame
 	} else {
 		kingTable = &kingSqMidgame
 	}
-	white := pos.scoreWhite + kingTable[pos.kingLoc[White]^RankFlip]
-	black := pos.scoreBlack + kingTable[pos.kingLoc[Black]]
-	if pos.ColorToMove() == White {
-		return white - black
+	wScore := pos.scoreWhite + kingTable[pos.kingLocn[white]^rankFlip]
+	bScore := pos.scoreBlack + kingTable[pos.kingLocn[black]]
+	if pos.colorToMove() == white {
+		return wScore - bScore
 	}
-	return black - white
+	return bScore - wScore
 }
 
 // evaluatePosition scores the position from the side-to-move's perspective.
 func evaluatePosition(game *Game, _, _ int) int {
-	if !game.CurrentPosition().IsLegal() {
-		panic(game.CurrentPosition().ToFen())
+	pos := game.currentPosition()
+	if pos.isDrawByMaterial() {
+		return drawScore
 	}
-	position := game.CurrentPosition()
-	if position.IsDrawByMaterial() {
-		return DrawScore
-	}
-	return position.Score(isEndgame(position))
+	return pos.score(isEndgame(pos))
 }

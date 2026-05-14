@@ -2,131 +2,111 @@ package engine
 
 import (
 	"fmt"
-	"runtime/debug"
 	"sync"
 	"time"
 )
 
-// ClockType controls how the search is timed.
-type ClockType uint8
+const startFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
-const (
-	ClockStandard   ClockType = iota // Time-per-game with remaining time.
-	ClockFixedDepth                  // Search to a fixed depth.
-	ClockFixedTime                   // Search for a fixed number of ms.
-	ClockInfinite                    // Search until stop.
-)
-
-// TimeControl holds UCI time management parameters.
-type TimeControl struct {
-	ClockType         ClockType
-	TimeRemaining     time.Duration
-	NumMovesRemaining int
-	Depth             int
+type timeControl struct {
+	clockType         clockType
+	timeRemaining     time.Duration
+	numMovesRemaining int
+	depth             int
 	stopTime          time.Time
 }
 
-func NewTimeControl() TimeControl {
-	return TimeControl{
-		ClockType:         ClockStandard,
-		TimeRemaining:     5 * time.Minute,
-		Depth:             10,
-		NumMovesRemaining: 40,
+func newTimeControl() timeControl {
+	return timeControl{
+		clockType:         clockStandard,
+		timeRemaining:     5 * time.Minute,
+		depth:             10,
+		numMovesRemaining: 40,
 	}
 }
 
-// Game holds the complete game state.
 type Game struct {
-	TranspositionTable TranspositionTable
-	History            HistoryTable
-	TimeCtrl           TimeControl
-	Book               OpeningBook
-	NodeCount          int
-	IsCancelPending    bool
+	transpositionTable transpositionTable
+	historyTable       historyTable
+	timeControl        timeControl
+	openingBook        openingBook
+	nodeCount          int
 	wg                 sync.WaitGroup
-	pos                Position
+	pos                position
+	isCancelPending    bool
 }
 
 func NewGame() *Game {
 	g := &Game{
-		TranspositionTable: NewTranspositionTable(HashTableMB),
-		TimeCtrl:           NewTimeControl(),
-		Book:               LoadOpeningBook(),
+		transpositionTable: newTranspositionTable(hashTableMB),
+		timeControl:        newTimeControl(),
+		openingBook:        loadOpeningBook(),
 	}
-	g.newGame("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+	g.newGameFromFen(startFen)
 	return g
 }
 
-func (g *Game) newGame(fen string) {
-	g.pos = PositionFromFen(fen)
-	g.NodeCount = 0
-	g.IsCancelPending = false
-	g.TimeCtrl = NewTimeControl()
+func (g *Game) newGameFromFen(fen string) {
+	g.pos = positionFromFen(fen)
+	g.nodeCount = 0
+	g.isCancelPending = false
+	g.timeControl = newTimeControl()
+	g.pos.stateStack = g.pos.stateStack[:0]
 }
 
-func (g *Game) NewGameFen(fen string) {
-	g.StopThinking()
-	g.newGame(fen)
-}
-
-func (g *Game) NewGameStart() {
-	g.NewGameFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
-}
-
-func (g *Game) CurrentPosition() *Position {
+func (g *Game) currentPosition() *position {
 	return &g.pos
 }
 
-func (g *Game) PlayMove(m Move) {
-	g.pos.MakeMove(m)
+func (g *Game) playMove(m move) {
+	g.pos.makeMove(m)
 }
 
-func (g *Game) PlayMoveString(s string) Move {
-	moves := g.pos.GenerateLegalMoves()
-	for i := 0; i < len(moves); i++ {
-		m := moves[i]
-		if m.String() == s {
-			g.PlayMove(m)
-			return m
+func (g *Game) playMoveString(s string) move {
+	moves := g.pos.generateLegalMoves()
+	for _, move := range moves {
+		if move.String() == s {
+			g.playMove(move)
+			return move
 		}
 	}
-	return MoveNone()
+	return moveNone()
 }
 
-func (g *Game) MakeNullMove() {
-	g.pos.MakeNullMove()
+func (g *Game) makeNullMove() {
+	g.pos.makeNullMove()
 }
 
-func (g *Game) UndoMove() {
+func (g *Game) undoMove() {
 	if len(g.pos.stateStack) > 0 {
-		g.pos.UnmakeMove()
+		g.pos.unmakeMove()
 	}
 }
 
-func (g *Game) IsDrawByFiftyMoves() bool {
-	return g.pos.HalfMove() >= 100
+func (g *Game) isDrawByFiftyMoves() bool {
+	return g.pos.getHalfMove() >= 100
 }
 
-func (g *Game) IsDrawByRepetition() bool {
-	return g.pos.IsDrawByRepetition()
+func (g *Game) isDrawByRepetition() bool {
+	return g.pos.isDrawByRepetition()
 }
 
-func (g *Game) ScoreAndSortMoves(moves []Move, ply int) {
-	pos := g.CurrentPosition()
+func (g *Game) scoreAndSortMoves(moves []move, ply int) {
+	pos := g.currentPosition()
 	pieceVals := [7]int{0, 100, 300, 300, 500, 900, 10000}
 	for i := 0; i < len(moves); i++ {
 		m := moves[i]
-		score := pieceVals[pos.PieceAt(m.To())]*10000 -
-			pieceVals[pos.PieceAt(m.From())]*1000 +
-			int(g.History.GetCount(ply, m))
-		moves[i] = m.WithScore(score)
+		s := pieceVals[pos.pieceAt(m.to())]*10000 -
+			pieceVals[pos.pieceAt(m.from())]*1000 +
+			int(g.historyTable.getCount(ply, m))
+		moves[i] = m.withScore(s)
 	}
-	SortMovesUnstable(moves)
+	sortMovesUnstable(moves)
 }
 
-func (g *Game) StartThinking() {
-	g.StopThinking()
-	g.IsCancelPending = false
+func (g *Game) startThinking() {
+	g.stopThinking()
+	g.isCancelPending = false
 	g.wg.Add(1)
 	go func() {
 		g.searchEntry()
@@ -134,25 +114,16 @@ func (g *Game) StartThinking() {
 	}()
 }
 
-func (g *Game) StopThinking() {
-	g.IsCancelPending = true
+func (g *Game) stopThinking() {
+	g.isCancelPending = true
 	g.wg.Wait()
-	g.IsCancelPending = false
+	g.isCancelPending = false
 }
 
 func (g *Game) searchEntry() {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("Recovered from panic: %v\n", r)
-
-			// Print the full stack trace to standard output
-			fmt.Println("Full Stack Trace:")
-			fmt.Println(string(debug.Stack()))
-		}
-	}()
-	move := SearchRootNode(g)
-	if move != MoveNone() {
-		g.PlayMove(move)
-		fmt.Println("bestmove " + move.String())
+	m := searchRootNode(g)
+	if m != moveNone() {
+		g.playMove(m)
+		fmt.Println("bestmove " + m.String())
 	}
 }

@@ -3,36 +3,36 @@ package engine
 import "math/rand"
 
 var (
-	NorthOf                [64]Bitboard
-	NortheastOf            [64]Bitboard
-	EastOf                 [64]Bitboard
-	SoutheastOf            [64]Bitboard
-	SouthOf                [64]Bitboard
-	SouthwestOf            [64]Bitboard
-	WestOf                 [64]Bitboard
-	NorthwestOf            [64]Bitboard
-	PawnAttacksWhite       [64]Bitboard
-	PawnAttacksBlack       [64]Bitboard
-	KnightAttacks          [64]Bitboard
-	BishopAttacksEmpty     [64]Bitboard
-	RookAttacksEmpty       [64]Bitboard
-	QueenAttacksEmpty      [64]Bitboard
-	KingAttacks            [64]Bitboard
-	KingAttacks2           [64]Bitboard
-	KingPawnShelterWhite   [64]Bitboard
-	KingPawnShelterBlack   [64]Bitboard
-	PassedPawnMaskWhite    [64]Bitboard
-	PassedPawnMaskBlack    [64]Bitboard
-	IsolatedPawnMask       [64]Bitboard
-	SupportedPawnMaskWhite [64]Bitboard
-	SupportedPawnMaskBlack [64]Bitboard
-	DoubledPawnMaskWhite   [64]Bitboard
-	DoubledPawnMaskBlack   [64]Bitboard
-	InterveningSquares     [64][64]Bitboard
-	PieceSquareHashes      [2][6][64]uint64 // [color][piece-1][square]
-	CastlingRightsHashes   [16]uint64
-	EnPassantHashes        [64]uint64
-	BlackMoveHash          uint64
+	northOf                [64]bitboard
+	northeastOf            [64]bitboard
+	eastOf                 [64]bitboard
+	southeastOf            [64]bitboard
+	southOf                [64]bitboard
+	southwestOf            [64]bitboard
+	westOf                 [64]bitboard
+	northwestOf            [64]bitboard
+	pawnAttacksWhite       [64]bitboard
+	pawnAttacksBlack       [64]bitboard
+	knightAttacks          [64]bitboard
+	bishopAttacksEmpty     [64]bitboard
+	rookAttacksEmpty       [64]bitboard
+	queenAttacksEmpty      [64]bitboard
+	kingAttacks            [64]bitboard
+	kingAttacks2           [64]bitboard
+	kingPawnShelterWhite   [64]bitboard
+	kingPawnShelterBlack   [64]bitboard
+	passedPawnMaskWhite    [64]bitboard
+	passedPawnMaskBlack    [64]bitboard
+	isolatedPawnMask       [64]bitboard
+	supportedPawnMaskWhite [64]bitboard
+	supportedPawnMaskBlack [64]bitboard
+	doubledPawnMaskWhite   [64]bitboard
+	doubledPawnMaskBlack   [64]bitboard
+	interveningSquares     [64][64]bitboard
+	pieceSquareHashes      [2][6][64]uint64 // [color][piece-1][square]
+	castlingRightsHashes   [16]uint64
+	enPassantHashes        [64]uint64
+	blackMoveHash          uint64
 )
 
 func init() {
@@ -45,127 +45,127 @@ func init() {
 	initCastleMasks()
 }
 
-type shiftFn func(Bitboard) Bitboard
+type shiftFn func(bitboard) bitboard
 
-var shiftFns = map[Direction]shiftFn{
-	North:     Bitboard.ShiftNorth,
-	Northeast: Bitboard.ShiftNortheast,
-	East:      Bitboard.ShiftEast,
-	Southeast: Bitboard.ShiftSoutheast,
-	South:     Bitboard.ShiftSouth,
-	Southwest: Bitboard.ShiftSouthwest,
-	West:      Bitboard.ShiftWest,
-	Northwest: Bitboard.ShiftNorthwest,
+var shiftFns = map[direction]shiftFn{
+	north:     bitboard.shiftNorth,
+	northeast: bitboard.shiftNortheast,
+	east:      bitboard.shiftEast,
+	southeast: bitboard.shiftSoutheast,
+	south:     bitboard.shiftSouth,
+	southwest: bitboard.shiftSouthwest,
+	west:      bitboard.shiftWest,
+	northwest: bitboard.shiftNorthwest,
 }
 
-func rayFrom(sq Square, dir Direction) Bitboard {
-	var result Bitboard
+func rayFrom(sq square, dir direction) bitboard {
+	var result bitboard
 	fn := shiftFns[dir]
-	for b := fn(SquareBB(sq)); b != 0; b = fn(b) {
+	for b := fn(squareBB(sq)); b != 0; b = fn(b) {
 		result |= b
 	}
 	return result
 }
 
 func initRays() {
-	var sq Square
+	var sq square
 	for sq = range 64 {
-		NorthOf[sq] = rayFrom(sq, North)
-		NortheastOf[sq] = rayFrom(sq, Northeast)
-		EastOf[sq] = rayFrom(sq, East)
-		SoutheastOf[sq] = rayFrom(sq, Southeast)
-		SouthOf[sq] = rayFrom(sq, South)
-		SouthwestOf[sq] = rayFrom(sq, Southwest)
-		WestOf[sq] = rayFrom(sq, West)
-		NorthwestOf[sq] = rayFrom(sq, Northwest)
+		northOf[sq] = rayFrom(sq, north)
+		northeastOf[sq] = rayFrom(sq, northeast)
+		eastOf[sq] = rayFrom(sq, east)
+		southeastOf[sq] = rayFrom(sq, southeast)
+		southOf[sq] = rayFrom(sq, south)
+		southwestOf[sq] = rayFrom(sq, southwest)
+		westOf[sq] = rayFrom(sq, west)
+		northwestOf[sq] = rayFrom(sq, northwest)
 	}
 }
 
-func kingFill(b Bitboard) Bitboard {
-	return b.ShiftNorth() |
-		b.ShiftNortheast() |
-		b.ShiftEast() |
-		b.ShiftSoutheast() |
-		b.ShiftSouth() |
-		b.ShiftSouthwest() |
-		b.ShiftWest() |
-		b.ShiftNorthwest()
+func kingFill(b bitboard) bitboard {
+	return b.shiftNorth() |
+		b.shiftNortheast() |
+		b.shiftEast() |
+		b.shiftSoutheast() |
+		b.shiftSouth() |
+		b.shiftSouthwest() |
+		b.shiftWest() |
+		b.shiftNorthwest()
 }
 
 func initAttacks() {
 	knightVectors := [8][2]int{{-2, -1}, {-2, 1}, {-1, -2}, {-1, 2}, {1, -2}, {1, 2}, {2, -1}, {2, 1}}
-	for sq := range Square(64) {
-		file, rank := sq.File(), sq.Rank()
+	for sq := range square(64) {
+		f, r := sq.file(), sq.rank()
 
 		// Pawn attacks
-		b := SquareBB(sq)
-		PawnAttacksWhite[sq] = b.ShiftNorthwest() | b.ShiftNortheast()
-		PawnAttacksBlack[sq] = b.ShiftSouthwest() | b.ShiftSoutheast()
+		b := squareBB(sq)
+		pawnAttacksWhite[sq] = b.shiftNorthwest() | b.shiftNortheast()
+		pawnAttacksBlack[sq] = b.shiftSouthwest() | b.shiftSoutheast()
 
 		// Knight attacks
-		var ka Bitboard
+		var ka bitboard
 		for _, v := range knightVectors {
-			f, r := int(file)+v[0], int(rank)+v[1]
-			if f >= 0 && f < 8 && r >= 0 && r < 8 {
-				ka |= SquareBB(SquareXY(f, r))
+			nf, nr := int(f)+v[0], int(r)+v[1]
+			if nf >= 0 && nf < 8 && nr >= 0 && nr < 8 {
+				ka |= squareBB(squareXY(nf, nr))
 			}
 		}
-		KnightAttacks[sq] = ka
+		knightAttacks[sq] = ka
 
 		// Sliding piece attacks on empty board
-		BishopAttacksEmpty[sq] = NortheastOf[sq] | NorthwestOf[sq] | SoutheastOf[sq] | SouthwestOf[sq]
-		RookAttacksEmpty[sq] = NorthOf[sq] | SouthOf[sq] | EastOf[sq] | WestOf[sq]
-		QueenAttacksEmpty[sq] = BishopAttacksEmpty[sq] | RookAttacksEmpty[sq]
+		bishopAttacksEmpty[sq] = northeastOf[sq] | northwestOf[sq] | southeastOf[sq] | southwestOf[sq]
+		rookAttacksEmpty[sq] = northOf[sq] | southOf[sq] | eastOf[sq] | westOf[sq]
+		queenAttacksEmpty[sq] = bishopAttacksEmpty[sq] | rookAttacksEmpty[sq]
 
 		// King attacks
-		KingAttacks[sq] = kingFill(b)
-		KingAttacks2[sq] = kingFill(kingFill(b)) & ^b
+		kingAttacks[sq] = kingFill(b)
+		kingAttacks2[sq] = kingFill(kingFill(b)) & ^b
 	}
 }
 
 func initPawnMasks() {
-	for sq := Square(0); sq < 64; sq++ {
-		b := SquareBB(sq)
-		file := FileA << uint(sq.File())
+	for sq := square(0); sq < 64; sq++ {
+		b := squareBB(sq)
+		file := fileA << uint(sq.file())
 
 		// Pawn shelter
 		if sq != e1 {
-			KingPawnShelterWhite[sq] = b.ShiftNorthwest() | b.ShiftNorth() | b.ShiftNortheast()
+			kingPawnShelterWhite[sq] = b.shiftNorthwest() | b.shiftNorth() | b.shiftNortheast()
 		}
 		if sq != e8 {
-			KingPawnShelterBlack[sq] = b.ShiftSouthwest() | b.ShiftSouth() | b.ShiftSoutheast()
+			kingPawnShelterBlack[sq] = b.shiftSouthwest() | b.shiftSouth() | b.shiftSoutheast()
 		}
 
 		// Passed pawn masks
-		fwd := NorthOf[sq]
-		PassedPawnMaskWhite[sq] = fwd | fwd.ShiftWest() | fwd.ShiftEast()
-		bwd := SouthOf[sq]
-		PassedPawnMaskBlack[sq] = bwd | bwd.ShiftWest() | bwd.ShiftEast()
+		fwd := northOf[sq]
+		passedPawnMaskWhite[sq] = fwd | fwd.shiftWest() | fwd.shiftEast()
+		bwd := southOf[sq]
+		passedPawnMaskBlack[sq] = bwd | bwd.shiftWest() | bwd.shiftEast()
 
 		// Isolated pawn mask (adjacent files, all ranks)
-		IsolatedPawnMask[sq] = file.ShiftWest() | file.ShiftEast()
+		isolatedPawnMask[sq] = file.shiftWest() | file.shiftEast()
 
 		// Supported pawn mask
-		colW := (SouthOf[sq] | b).ShiftWest() | (SouthOf[sq] | b).ShiftEast()
-		SupportedPawnMaskWhite[sq] = colW
-		colB := (NorthOf[sq] | b).ShiftWest() | (NorthOf[sq] | b).ShiftEast()
-		SupportedPawnMaskBlack[sq] = colB
+		colW := (southOf[sq] | b).shiftWest() | (southOf[sq] | b).shiftEast()
+		supportedPawnMaskWhite[sq] = colW
+		colB := (northOf[sq] | b).shiftWest() | (northOf[sq] | b).shiftEast()
+		supportedPawnMaskBlack[sq] = colB
 
 		// Doubled pawn mask
-		DoubledPawnMaskWhite[sq] = NorthOf[sq]
-		DoubledPawnMaskBlack[sq] = SouthOf[sq]
+		doubledPawnMaskWhite[sq] = northOf[sq]
+		doubledPawnMaskBlack[sq] = southOf[sq]
 	}
 }
 
 // ---- intervening squares ----
 
 func initInterveningSquares() {
-	for from := range Square(64) {
-		for to := range Square(64) {
-			for dir := range Direction(8) {
+	for from := range square(64) {
+		for to := range square(64) {
+			for dir := range direction(8) {
 				ray := rayFrom(from, dir)
-				if (ray & SquareBB(to)) != 0 {
-					InterveningSquares[from][to] = ray ^ rayFrom(to, dir) ^ SquareBB(to)
+				if (ray & squareBB(to)) != 0 {
+					interveningSquares[from][to] = ray ^ rayFrom(to, dir) ^ squareBB(to)
 					break
 				}
 			}
@@ -177,20 +177,20 @@ func initInterveningSquares() {
 
 func initZobrist() {
 	rng := rand.New(rand.NewSource(1968))
-	for color := range 2 {
-		for piece := range 6 {
+	for c := range 2 {
+		for p := range 6 {
 			for sq := range 64 {
-				PieceSquareHashes[color][piece][sq] = rng.Uint64()
+				pieceSquareHashes[c][p][sq] = rng.Uint64()
 			}
 		}
 	}
-	for i := range CastlingRightsHashes {
-		CastlingRightsHashes[i] = rng.Uint64()
+	for i := range castlingRightsHashes {
+		castlingRightsHashes[i] = rng.Uint64()
 	}
-	for i := range Square(64) {
-		if i.Rank() == 2 || i.Rank() == 5 {
-			EnPassantHashes[i] = rng.Uint64()
+	for i := range square(64) {
+		if i.rank() == 2 || i.rank() == 5 {
+			enPassantHashes[i] = rng.Uint64()
 		}
 	}
-	BlackMoveHash = rng.Uint64()
+	blackMoveHash = rng.Uint64()
 }

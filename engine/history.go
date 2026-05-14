@@ -1,25 +1,25 @@
 package engine
 
-// HistoryTable tracks which moves raised alpha at each ply, indexed by from/to square pair.
-type HistoryTable struct {
-	counts [MaxPly * 4096]uint32
+// historyTable tracks which moves raised alpha at each ply, indexed by from/to square pair.
+type historyTable struct {
+	counts [maxPly * 4096]uint32
 }
 
-func (h *HistoryTable) Reset() {
+func (h *historyTable) reset() {
 	for i := range h.counts {
 		h.counts[i] = 0
 	}
 }
 
-func (h *HistoryTable) RecordGoodMove(ply int, m Move) {
-	if ply >= 0 && ply < MaxPly {
-		h.counts[ply*4096+m.FromTo()]++
+func (h *historyTable) recordGoodMove(ply int, m move) {
+	if ply >= 0 && ply < maxPly {
+		h.counts[ply*4096+m.fromTo()]++
 	}
 }
 
-func (h *HistoryTable) GetCount(ply int, m Move) uint32 {
-	if ply >= 0 && ply < MaxPly {
-		return h.counts[ply*4096+m.FromTo()]
+func (h *historyTable) getCount(ply int, m move) uint32 {
+	if ply >= 0 && ply < maxPly {
+		return h.counts[ply*4096+m.fromTo()]
 	}
 	return 0
 }

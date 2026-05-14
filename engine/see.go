@@ -4,172 +4,156 @@ package engine
 var seeValues = [7]int{0, 100, 300, 300, 500, 900, 10000}
 
 type seeBoard struct {
-	pawns       Bitboard
-	knights     Bitboard
-	bishops     Bitboard
-	rooks       Bitboard
-	queens      Bitboard
-	kings       Bitboard
-	whitePieces Bitboard
-	blackPieces Bitboard
+	pawns       bitboard
+	knights     bitboard
+	bishops     bitboard
+	rooks       bitboard
+	queens      bitboard
+	kings       bitboard
+	whitePieces bitboard
+	blackPieces bitboard
 }
 
-func newSeeBoard(pos *Position) seeBoard {
+func newSeeBoard(pos *position) seeBoard {
 	return seeBoard{
-		pawns:       pos.Pawns(),
-		knights:     pos.Knights(),
-		bishops:     pos.Bishops(),
-		rooks:       pos.Rooks(),
-		queens:      pos.Queens(),
-		kings:       pos.Kings(),
-		whitePieces: pos.ColorBB(White),
-		blackPieces: pos.ColorBB(Black),
+		pawns:       pos.pawns(),
+		knights:     pos.knights(),
+		bishops:     pos.bishops(),
+		rooks:       pos.rooks(),
+		queens:      pos.queens(),
+		kings:       pos.kings(),
+		whitePieces: pos.colorBB(white),
+		blackPieces: pos.colorBB(black),
 	}
 }
 
-func (b *seeBoard) piecesOfType(p Piece) *Bitboard {
+func (b *seeBoard) piecesOfType(p piece) *bitboard {
 	switch p {
-	case Pawn:
+	case pawn:
 		return &b.pawns
-	case Knight:
+	case knight:
 		return &b.knights
-	case Bishop:
+	case bishop:
 		return &b.bishops
-	case Rook:
+	case rook:
 		return &b.rooks
-	case Queen:
+	case queen:
 		return &b.queens
-	case King:
+	case king:
 		return &b.kings
 	}
-	panic("bad piece")
+	return nil
 }
 
-func (b *seeBoard) piecesOfColor(c Color) *Bitboard {
-	if c == White {
+func (b *seeBoard) piecesOfColor(c color) *bitboard {
+	if c == white {
 		return &b.whitePieces
 	}
 	return &b.blackPieces
 }
 
-// EvaluateStaticExchange returns the SEE score for move and whether move gives check.
-func EvaluateStaticExchange(pos *Position, m Move) (int, bool) {
-	var captured Piece
-	if m.Type() == EpCapture {
-		captured = Pawn
+// evaluateStaticExchange returns the SEE score for m and whether m gives check.
+func evaluateStaticExchange(pos *position, m move) (int, bool) {
+	var captured piece
+	if m.kind() == epCapture {
+		captured = pawn
 	} else {
-		captured = pos.PieceAt(m.To())
+		captured = pos.pieceAt(m.to())
 	}
-	pos.MakeMove(m)
-	isChecking := pos.IsInCheck()
-	nextColor := pos.ColorToMove()
+	pos.makeMove(m)
+	isChecking := pos.isInCheck()
+	nextColor := pos.colorToMove()
 	bb := newSeeBoard(pos)
-	pos.UnmakeMove()
+	pos.unmakeMove()
 
-	piece := m.Piece()
-	promoted := m.Promoted()
-	if promoted != NoPiece {
-		score := seeValues[captured] + seeValues[promoted] - seeValues[Pawn] -
-			evaluateSwapOff(&bb, m.To(), nextColor, promoted)
-		return score, isChecking
+	p := m.piece()
+	promoted := m.promoted()
+	if promoted != noPiece {
+		s := seeValues[captured] + seeValues[promoted] - seeValues[pawn] -
+			evaluateSwapOff(&bb, m.to(), nextColor, promoted)
+		return s, isChecking
 	}
-	score := seeValues[captured] - evaluateSwapOff(&bb, m.To(), nextColor, piece)
-	return score, isChecking
+	s := seeValues[captured] - evaluateSwapOff(&bb, m.to(), nextColor, p)
+	return s, isChecking
 }
 
-func evaluateSwapOff(bb *seeBoard, location Square, color Color, pieceOnSquare Piece) int {
-	var pawnAttacks Bitboard
-	if color == White {
-		pawnAttacks = PawnAttacksBlack[location]
+func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare piece) int {
+	var pawnTargets bitboard
+	if color == white {
+		pawnTargets = pawnAttacksBlack[location]
 	} else {
-		pawnAttacks = PawnAttacksWhite[location]
+		pawnTargets = pawnAttacksWhite[location]
 	}
-	knightAttacks := KnightAttacks[location]
-	kingAttacks := KingAttacks[location]
-	squareBB := SquareBB(location)
-
+	knightTargets := knightAttacks[location]
+	kingTargets := kingAttacks[location]
+	sqBB := squareBB(location)
 	occupied := bb.whitePieces | bb.blackPieces
 	var scores [32]int
 	ply := 0
-
 	for ; ply < 32; ply++ {
 		attackingPieces := *bb.piecesOfColor(color)
-		var capturingPiece Piece
-		var attackers Bitboard
-		found := false
+		var capturingPiece piece
+		var attackers, bishopTargets, rookTargets bitboard
 
-		attackers = pawnAttacks & attackingPieces & bb.pawns
-		if attackers != 0 {
-			capturingPiece = Pawn
-			found = true
-		}
-		if !found {
-			attackers = knightAttacks & attackingPieces & bb.knights
-			if attackers != 0 {
-				capturingPiece = Knight
-				found = true
-			}
-		}
-		var bishopAtks, rookAtks Bitboard
-		if !found {
-			bishopAtks = BishopAttacks(occupied, location)
-			attackers = bishopAtks & attackingPieces & bb.bishops
-			if attackers != 0 {
-				capturingPiece = Bishop
-				found = true
-			}
-		}
-		if !found {
-			rookAtks = RookAttacks(occupied, location)
-			attackers = rookAtks & attackingPieces & bb.rooks
-			if attackers != 0 {
-				capturingPiece = Rook
-				found = true
-			}
-		}
-		if !found {
-			if bishopAtks == 0 {
-				bishopAtks = BishopAttacks(occupied, location)
-			}
-			if rookAtks == 0 {
-				rookAtks = RookAttacks(occupied, location)
-			}
-			attackers = (bishopAtks | rookAtks) & attackingPieces & bb.queens
-			if attackers != 0 {
-				capturingPiece = Queen
-				found = true
-			}
-		}
-		if !found {
-			attackers = kingAttacks & attackingPieces & bb.kings
-			if attackers != 0 {
-				capturingPiece = King
-				found = true
-			}
-		}
-		if !found {
-			scores[ply] = 0
-			break
+		attackers = pawnTargets & attackingPieces & bb.pawns
+		if attackers.isNotEmpty() {
+			capturingPiece = pawn
+			goto AttackFound
 		}
 
+		attackers = knightTargets & attackingPieces & bb.knights
+		if attackers.isNotEmpty() {
+			capturingPiece = knight
+			goto AttackFound
+		}
+
+		bishopTargets = bishopAttacks(occupied, location)
+		attackers = bishopTargets & attackingPieces & bb.bishops
+		if attackers.isNotEmpty() {
+			capturingPiece = bishop
+			goto AttackFound
+		}
+
+		rookTargets = rookAttacks(occupied, location)
+		attackers = rookTargets & attackingPieces & bb.rooks
+		if attackers.isNotEmpty() {
+			capturingPiece = rook
+			goto AttackFound
+		}
+		attackers = (bishopTargets | rookTargets) & attackingPieces & bb.queens
+		if attackers.isNotEmpty() {
+			capturingPiece = queen
+			goto AttackFound
+		}
+
+		attackers = kingTargets & attackingPieces & bb.kings
+		if attackers.isNotEmpty() {
+			capturingPiece = king
+			goto AttackFound
+		}
+
+		// No more attacks
+		scores[ply] = 0
+		break
+
+	AttackFound:
 		// Use only the LSB attacker.
 		lsb := attackers & (-attackers)
-		enemy := EnemyOf(color)
-		*bb.piecesOfType(pieceOnSquare) ^= squareBB
-		*bb.piecesOfColor(enemy) ^= squareBB
-		*bb.piecesOfType(capturingPiece) ^= lsb | squareBB
-		*bb.piecesOfColor(color) ^= lsb | squareBB
+		enemy := enemyOf(color)
+		*bb.piecesOfType(pieceOnSquare) ^= sqBB
+		*bb.piecesOfColor(enemy) ^= sqBB
+		*bb.piecesOfType(capturingPiece) ^= lsb | sqBB
+		*bb.piecesOfColor(color) ^= lsb | sqBB
 		occupied ^= lsb
-
 		scores[ply] = seeValues[pieceOnSquare]
 		pieceOnSquare = capturingPiece
 		color = enemy
 
 		// Pawn promotion on back rank.
-		if pieceOnSquare == Pawn && (squareBB&(Rank1|Rank8)) != 0 {
-			pieceOnSquare = Queen
-			bb.pawns ^= squareBB
-			bb.queens ^= squareBB
+		if pieceOnSquare == pawn && (sqBB & (rank1 | rank8)).isNotEmpty() {
+			pieceOnSquare = queen
+			bb.pawns ^= sqBB
+			bb.queens ^= sqBB
 		}
 	}
 

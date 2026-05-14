@@ -144,12 +144,29 @@ var perftEPD = []string{
 	"r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - -;D5 164075551;D6 6923051137",
 }
 
-type perftCase struct {
+func perft(pos *position, depth int) uint64 {
+	if depth == 0 {
+		return 1
+	}
+	moves := pos.generateLegalMoves()
+	if depth == 1 {
+		return uint64(len(moves))
+	}
+	var nodes uint64
+	for _, move := range moves {
+		pos.makeMove(move)
+		nodes += perft(pos, depth-1)
+		pos.unmakeMove()
+	}
+	return nodes
+}
+
+type perftTest struct {
 	depth int
 	nodes uint64
 }
 
-func parseEPD(s string) (fen string, cases []perftCase) {
+func parseEPD(s string) (fen string, cases []perftTest) {
 	idx := strings.IndexByte(s, ';')
 	if idx < 0 {
 		return strings.TrimSpace(s), nil
@@ -164,13 +181,13 @@ func parseEPD(s string) (fen string, cases []perftCase) {
 		depth, err1 := strconv.Atoi(token[1:space])
 		nodes, err2 := strconv.ParseUint(token[space+1:], 10, 64)
 		if err1 == nil && err2 == nil {
-			cases = append(cases, perftCase{depth, nodes})
+			cases = append(cases, perftTest{depth, nodes})
 		}
 	}
 	return
 }
 
-func TestPerft(t *testing.T) {
+func testPerft(t *testing.T) {
 	maxDepth := 99
 	if testing.Short() {
 		maxDepth = 5
@@ -187,9 +204,9 @@ func TestPerft(t *testing.T) {
 			}
 			tc := tc
 			t.Run(fmt.Sprintf("%03d/d%d", i+1, tc.depth), func(t *testing.T) {
-				pos := PositionFromFen(fen)
+				pos := positionFromFen(fen)
 				start := time.Now()
-				got := Perft(&pos, tc.depth)
+				got := perft(&pos, tc.depth)
 				elapsed := time.Since(start)
 				mnps := float64(got) / elapsed.Seconds() / 1e6
 				t.Logf("%-75s  nodes=%-12d  time=%-10s  %.1f Mnps", fen, got, elapsed.Round(time.Millisecond), mnps)
@@ -210,9 +227,27 @@ func TestPerft(t *testing.T) {
 
 // BenchmarkPerft7 times perft(7) on the start position.
 func BenchmarkPerft7(b *testing.B) {
-	pos := PositionFromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+	pos := positionFromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Perft(&pos, 7)
+		perft(&pos, 7)
+	}
+}
+
+func TestSearch(t *testing.T) {
+	maxDepth := 10
+	if testing.Short() {
+		maxDepth = 9
+	}
+	for _, s := range perftEPD {
+		fen := s[:strings.IndexRune(s, ';')]
+		t.Logf("\n\r%s\n", fen)
+		game := NewGame()
+		game.newGameFromFen(fen)
+		game.openingBook.clearOpeningBook()
+		game.timeControl.clockType = clockFixedDepth
+		game.timeControl.depth = maxDepth
+		game.startThinking()
+		game.wg.Wait()
 	}
 }

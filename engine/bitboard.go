@@ -2,45 +2,43 @@ package engine
 
 import "math/bits"
 
-type Bitboard uint64
+type bitboard uint64
 
 const (
-	NoSqs    Bitboard = 0
-	AllSqs   Bitboard = ^Bitboard(0)
-	Rank1    Bitboard = 0x00000000000000FF
-	Rank2    Bitboard = Rank1 << 8
-	Rank3    Bitboard = Rank2 << 8
-	Rank4    Bitboard = Rank3 << 8
-	Rank5    Bitboard = Rank4 << 8
-	Rank6    Bitboard = Rank5 << 8
-	Rank7    Bitboard = Rank6 << 8
-	Rank8    Bitboard = Rank7 << 8
-	FileA    Bitboard = 0x0101010101010101
-	FileB    Bitboard = FileA << 1
-	FileC    Bitboard = FileB << 1
-	FileD    Bitboard = FileC << 1
-	FileE    Bitboard = FileD << 1
-	FileF    Bitboard = FileE << 1
-	FileG    Bitboard = FileF << 1
-	FileH    Bitboard = FileG << 1
-	NotFileA Bitboard = ^FileA
-	NotFileH Bitboard = ^FileH
-	WhiteSqs Bitboard = 0x55AA55AA55AA55AA
-	BlackSqs Bitboard = ^WhiteSqs
+	rank1    bitboard = 0x00000000000000FF
+	rank2    bitboard = rank1 << 8
+	rank3    bitboard = rank2 << 8
+	rank4    bitboard = rank3 << 8
+	rank5    bitboard = rank4 << 8
+	rank6    bitboard = rank5 << 8
+	rank7    bitboard = rank6 << 8
+	rank8    bitboard = rank7 << 8
+	fileA    bitboard = 0x0101010101010101
+	fileB    bitboard = fileA << 1
+	fileC    bitboard = fileB << 1
+	fileD    bitboard = fileC << 1
+	fileE    bitboard = fileD << 1
+	fileF    bitboard = fileE << 1
+	fileG    bitboard = fileF << 1
+	fileH    bitboard = fileG << 1
+	notFileA bitboard = ^fileA
+	notFileH bitboard = ^fileH
+	whiteSqs bitboard = 0x55AA55AA55AA55AA
+	blackSqs bitboard = ^whiteSqs
 )
 
-func SquareBB(s Square) Bitboard              { return Bitboard(1) << s }
-func (b Bitboard) IsEmpty() bool              { return b == 0 }
-func (b Bitboard) IsNotEmpty() bool           { return b != 0 }
-func (b Bitboard) PopCount() int              { return bits.OnesCount64(uint64(b)) }
-func (b Bitboard) Lsb() Square                { return Square(bits.TrailingZeros64(uint64(b))) }
-func (b Bitboard) Msb() Square                { return Square(63 - bits.LeadingZeros64(uint64(b))) }
-func (b Bitboard) ShiftNorth() Bitboard       { return b << 8 }
-func (b Bitboard) ShiftSouth() Bitboard       { return b >> 8 }
-func (b Bitboard) ShiftEast() Bitboard        { return (b & NotFileH) << 1 }
-func (b Bitboard) ShiftWest() Bitboard        { return (b & NotFileA) >> 1 }
-func (b Bitboard) ShiftNortheast() Bitboard   { return (b & NotFileH) << 9 }
-func (b Bitboard) ShiftNorthwest() Bitboard   { return (b & NotFileA) << 7 }
-func (b Bitboard) ShiftSoutheast() Bitboard   { return (b & NotFileH) >> 7 }
-func (b Bitboard) ShiftSouthwest() Bitboard   { return (b & NotFileA) >> 9 }
-func (b Bitboard) PopLsb() (Bitboard, Square) { s := b.Lsb(); return b & (b - 1), s }
+func squareBB(s square) bitboard            { return bitboard(1) << s }
+func (b bitboard) isEmpty() bool            { return b == 0 }
+func (b bitboard) isNotEmpty() bool         { return b != 0 }
+func (b bitboard) popCount() int            { return bits.OnesCount64(uint64(b)) }
+func (b bitboard) lsb() square              { return square(bits.TrailingZeros64(uint64(b))) }
+func (b bitboard) msb() square              { return square(63 - bits.LeadingZeros64(uint64(b))) }
+func (b bitboard) shiftNorth() bitboard     { return b << 8 }
+func (b bitboard) shiftSouth() bitboard     { return b >> 8 }
+func (b bitboard) shiftEast() bitboard      { return (b & notFileH) << 1 }
+func (b bitboard) shiftWest() bitboard      { return (b & notFileA) >> 1 }
+func (b bitboard) shiftNortheast() bitboard { return (b & notFileH) << 9 }
+func (b bitboard) shiftNorthwest() bitboard { return (b & notFileA) << 7 }
+func (b bitboard) shiftSoutheast() bitboard { return (b & notFileH) >> 7 }
+func (b bitboard) shiftSouthwest() bitboard { return (b & notFileA) >> 9 }
+func (b *bitboard) popLsb() square          { s := b.lsb(); *b &= (*b - 1); return s }
