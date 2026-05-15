@@ -187,7 +187,7 @@ func parseEPD(s string) (fen string, cases []perftTest) {
 	return
 }
 
-func testPerft(t *testing.T) {
+func TestPerft(t *testing.T) {
 	maxDepth := 99
 	if testing.Short() {
 		maxDepth = 5
@@ -247,7 +247,9 @@ func TestSearch(t *testing.T) {
 		game.openingBook.clearOpeningBook()
 		game.timeControl.clockType = clockFixedDepth
 		game.timeControl.depth = maxDepth
+		dbgxClear()
 		game.startThinking()
 		game.wg.Wait()
+		dbgxPrint()
 	}
 }

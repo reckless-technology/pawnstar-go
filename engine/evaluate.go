@@ -129,6 +129,12 @@ func (pos *position) score(endgame bool) int {
 	}
 	wScore := pos.scoreWhite + kingTable[pos.kingLocn[white]^rankFlip]
 	bScore := pos.scoreBlack + kingTable[pos.kingLocn[black]]
+
+	// Bonus for pawns in front of the king protecting him
+	if !endgame {
+		wScore += 10 * (pos.pawns() & pos.colors[white] & kingPawnShelterWhite[pos.kingLocation(white)]).popCount()
+		wScore += 10 * (pos.pawns() & pos.colors[black] & kingPawnShelterBlack[pos.kingLocation(black)]).popCount()
+	}
 	if pos.colorToMove() == white {
 		return wScore - bScore
 	}

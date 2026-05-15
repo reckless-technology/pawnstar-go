@@ -91,15 +91,15 @@ func (g *Game) isDrawByRepetition() bool {
 	return g.pos.isDrawByRepetition()
 }
 
+var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
+
 func (g *Game) scoreAndSortMoves(moves []move, ply int) {
-	pos := g.currentPosition()
-	pieceVals := [7]int{0, 100, 300, 300, 500, 900, 10000}
-	for i := 0; i < len(moves); i++ {
-		m := moves[i]
-		s := pieceVals[pos.pieceAt(m.to())]*10000 -
-			pieceVals[pos.pieceAt(m.from())]*1000 +
-			int(g.historyTable.getCount(ply, m))
-		moves[i] = m.withScore(s)
+	for i := range moves {
+		move := moves[i]
+		s := (pieceVals[move.captured()] * 10000) -
+			(pieceVals[move.piece()] * 1000) +
+			int(g.historyTable.getCount(ply, move))
+		moves[i] = move.withScore(s)
 	}
 	sortMovesUnstable(moves)
 }

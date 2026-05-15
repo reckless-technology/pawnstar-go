@@ -7,12 +7,14 @@ import (
 )
 
 // variation is a line of play (principal variation).
-type variation []move
+type variation struct {
+	moves []move
+}
 
 func copyVariation(dst *variation, src variation, best move) {
-	*dst = (*dst)[:0]
-	*dst = append(*dst, best)
-	*dst = append(*dst, src...)
+	dst.moves = dst.moves[:0]
+	dst.moves = append(dst.moves, best)
+	dst.moves = append(dst.moves, src.moves...)
 }
 
 // searchSingleMove plays m, searches recursively, undoes, and returns the score.
@@ -24,9 +26,11 @@ func searchSingleMove(game *Game, depth, ply, alpha, beta int, m move, pv *varia
 	var score int
 	if beta > alpha+1 && moveIdx > 0 && !wasInCheck && !isChecking {
 		// Try principal variation search.
+		dbgx.pvsAttempts++
 		score = -searchAlphaBeta(game, childDepth, ply+1, -alpha-1, -alpha, pv)
 		if score > alpha {
 			// PVS failed.
+			dbgx.pvsFails++
 			score = -searchAlphaBeta(game, childDepth, ply+1, -beta, -alpha, pv)
 		}
 	} else {
@@ -46,8 +50,8 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		return searchCancelledScore
 	}
 
-	pos := game.currentPosition()
-	if pos.isDrawByMaterial() || game.isDrawByFiftyMoves() || game.isDrawByRepetition() {
+	position := game.currentPosition()
+	if position.isDrawByMaterial() || game.isDrawByFiftyMoves() || game.isDrawByRepetition() {
 		return drawScore
 	}
 
@@ -56,37 +60,41 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	}
 
 	// Transposition table lookup.
-	tt, isTransposition := game.transpositionTable.find(pos.getHash())
+	tt, isTransposition := game.transpositionTable.find(position.getHash())
 	if isTransposition && int(tt.depth) >= depth {
 		switch tt.nodeType {
 		case nodeCut:
 			if tt.move.score() >= beta {
-				tt.move.score()
+				dbgx.tableHitBeta++
+				return tt.move.score()
 			}
 		case nodeAll:
-			if tt.move.score() < alpha {
-				tt.move.score()
+			if tt.move.score() <= alpha {
+				dbgx.tableHitAlpha++
+				return tt.move.score()
 			}
 		case nodePV:
+			dbgx.tableHitPV++
 			depth++
 		}
 	}
 
 	// Enter quiescence at depth <= 0.
-	if depth <= 0 && !pos.isInCheck() {
+	if depth <= 0 && !position.isInCheck() {
 		return searchQuiescent(game, depth, ply, alpha, beta)
 	}
 
 	// Null move pruning.
-	if !pos.isNullMove() &&
-		!pos.isInCheck() &&
+	if !position.isNullMove() &&
+		!position.isInCheck() &&
 		beta == alpha+1 &&
-		pos.colorBB(pos.colorToMove()).popCount() > 3 {
+		position.colorBB(position.colorToMove()).popCount() > 3 {
 		evalScore := evaluatePosition(game, alpha, beta)
 		if evalScore >= beta {
 			var dummy variation
 			game.makeNullMove()
-			score := -searchAlphaBeta(game, depth-3, ply+1, -beta, -alpha, &dummy)
+			dbgx.nullMoveAttempts++
+			score := -searchAlphaBeta(game, depth-4, ply+1, -beta, -alpha, &dummy)
 			game.undoMove()
 			if game.isCancelPending {
 				return searchCancelledScore
@@ -94,6 +102,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			if score >= beta {
 				return beta
 			}
+			dbgx.nullMoveFails++
 		}
 	}
 
@@ -109,7 +118,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			return searchCancelledScore
 		}
 		if score >= beta {
-			game.transpositionTable.record(&transposition{pos.getHash(), tt.move.withScore(score), int16(depth), nodeCut, false})
+			game.transpositionTable.record(&transposition{position.getHash(), tt.move.withScore(score), int16(depth), nodeCut, false})
 			game.historyTable.recordGoodMove(ply, tt.move)
 			return score
 		}
@@ -122,9 +131,9 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		}
 	}
 
-	moves := pos.generateLegalMoves()
+	moves := position.generateLegalMoves()
 	if len(moves) == 0 {
-		if pos.isInCheck() {
+		if position.isInCheck() {
 			return checkmatedScore + ply
 		}
 		return drawScore
@@ -140,28 +149,32 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		// Late move reduction.
 		childDepth := depth
 		if moveIdx > 3 &&
-			!pos.isInCheck() &&
+			!position.isInCheck() &&
 			!m.isChecking() &&
 			depth > 2 &&
 			beta == alpha+1 &&
 			m.piece() != pawn &&
 			m.captured() == noPiece {
+			dbgx.lmrAttempts++
 			childDepth--
 			if depth > 3 && moveIdx > 6 {
+				dbgx.lmr2Attempts++
 				childDepth--
 			}
 		}
 
 		score := searchSingleMove(game, childDepth, ply, alpha, beta, m, &pv, moveIdx)
 		if score > alpha && childDepth < depth {
+			dbgx.lmrFails++
 			score = searchSingleMove(game, depth, ply, alpha, beta, m, &pv, moveIdx)
 		}
 		if game.isCancelPending {
 			return searchCancelledScore
 		}
 		if score >= beta {
-			game.transpositionTable.record(&transposition{pos.getHash(), m.withScore(score), int16(depth), nodeCut, false})
+			game.transpositionTable.record(&transposition{position.getHash(), m.withScore(score), int16(depth), nodeCut, false})
 			game.historyTable.recordGoodMove(ply, m)
+			dbgx.betaCutoffs++
 			return score
 		}
 		if score > bestScore {
@@ -176,11 +189,11 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	}
 
 	if hasRaisedAlpha {
-		game.transpositionTable.record(&transposition{pos.getHash(), bestMove.withScore(alpha), int16(depth), nodePV, false})
+		game.transpositionTable.record(&transposition{position.getHash(), bestMove.withScore(alpha), int16(depth), nodePV, false})
 		game.historyTable.recordGoodMove(ply, bestMove)
 		copyVariation(parentPV, pv, bestMove)
 	} else {
-		game.transpositionTable.record(&transposition{pos.getHash(), bestMove.withScore(alpha), int16(depth), nodeAll, false})
+		game.transpositionTable.record(&transposition{position.getHash(), bestMove.withScore(alpha), int16(depth), nodeAll, false})
 	}
 	return bestScore
 }
@@ -271,7 +284,7 @@ func searchRootNode(g *Game) move {
 
 	// Initial shallow pass to get move ordering.
 	var initPV variation
-	for i := 0; i < len(moves); i++ {
+	for i := range moves {
 		m := moves[i]
 		score := searchSingleMove(g, startDepth, 0, initialAlpha, initialBeta, m, &initPV, i)
 		moves[i] = m.withScore(score)
@@ -301,7 +314,7 @@ func searchRootNode(g *Game) move {
 				bestMove = m
 				copyVariation(&principalVariation, childPV, bestMove)
 				pvStr := pvString(principalVariation)
-				fmt.Printf("info depth %d score cp %d time %d nodes %d pv %s\n",
+				fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
 					depth, alpha, time.Since(startTime).Milliseconds(), g.nodeCount, pvStr)
 			}
 		}
@@ -335,18 +348,18 @@ func searchRootNode(g *Game) move {
 
 func pvString(pv variation) string {
 	var b strings.Builder
-	for i, m := range pv {
+	for i, move := range pv.moves {
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-		b.WriteString(m.String())
+		b.WriteString(move.String())
 	}
 	return b.String()
 }
 
 func allSame(moves []move, best move) bool {
-	for _, m := range moves {
-		if !m.equal(best) {
+	for _, move := range moves {
+		if !move.equal(best) {
 			return false
 		}
 	}
@@ -354,8 +367,8 @@ func allSame(moves []move, best move) bool {
 }
 
 func allScoreStable(moves []move, best move) bool {
-	for _, m := range moves {
-		if absInt(m.score()-best.score()) > scoreInstabilityThresh {
+	for _, move := range moves {
+		if absInt(move.score()-best.score()) > scoreInstabilityThresh {
 			return false
 		}
 	}
