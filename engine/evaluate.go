@@ -135,6 +135,7 @@ func (pos *position) score(endgame bool) int {
 		wScore += 10 * (pos.pawns() & pos.colors[white] & kingPawnShelterWhite[pos.kingLocation(white)]).popCount()
 		wScore += 10 * (pos.pawns() & pos.colors[black] & kingPawnShelterBlack[pos.kingLocation(black)]).popCount()
 	}
+
 	if pos.colorToMove() == white {
 		return wScore - bScore
 	}

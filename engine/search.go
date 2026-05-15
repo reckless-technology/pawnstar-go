@@ -302,7 +302,7 @@ func searchRootNode(g *Game) move {
 		g.nodeCount = 0
 		bestMoves = append(bestMoves, bestMove)
 
-		for i := 0; i < len(moves); i++ {
+		for i := range moves {
 			m := moves[i]
 			score := searchSingleMove(g, depth, 0, alpha, initialBeta, m, &childPV, i)
 			moves[i] = m.withScore(score)
