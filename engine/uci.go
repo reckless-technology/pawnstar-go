@@ -38,6 +38,8 @@ func (g *Game) HandleCommand(line string) bool {
 	return false
 }
 
+// uciPosition handles the "position" command, setting the position from a FEN
+// string or the standard starting position, then applying any supplied move list.
 func (g *Game) uciPosition(args []string) {
 	fen := startFen
 	movesIdx := -1
@@ -70,6 +72,7 @@ func (g *Game) uciPosition(args []string) {
 	}
 }
 
+// uciGo handles the "go" command, parsing the clock parameters and starting the search.
 func (g *Game) uciGo(args []string) {
 	tc := &g.timeControl
 	color := g.pos.colorToMove()

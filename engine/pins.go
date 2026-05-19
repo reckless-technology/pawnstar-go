@@ -1,11 +1,18 @@
 package engine
 
-// pins tracks pinned pieces and their allowed destination squares.
+// pins records which friendly pieces are absolutely pinned to the king and, for
+// each pinned square, the set of squares the piece may legally move to.
 type pins struct {
-	pinned  bitboard
-	allowed [64]bitboard
+	pinned  bitboard     // squares occupied by pinned pieces
+	allowed [64]bitboard // allowed[sq] is the legal destination set for the pinned piece on sq
 }
 
+// computePins finds all absolutely pinned pieces for the side to move.
+//
+// A piece is pinned if it is the sole occupant between the king and an enemy
+// slider on a shared ray.  For each such piece, the legal destination set is
+// restricted to that ray (including the pinner's square, so the pinner can be
+// captured).
 func computePins(pos *position) pins {
 	var p pins
 	color := pos.colorToMove()
@@ -14,7 +21,7 @@ func computePins(pos *position) pins {
 	kingLocation := pos.kingLocn[color]
 	intervening := &interveningSquares[kingLocation]
 
-	// Candidate pinners: enemy sliders that are on a bishop/rook ray from the king.
+	// Candidate pinners: enemy sliders on a bishop or rook ray from the king.
 	enemySliders := (bishopAttacksEmpty[kingLocation] & (pos.bishops() | pos.queens())) |
 		(rookAttacksEmpty[kingLocation] & (pos.rooks() | pos.queens()))
 	enemySliders &= ^friendlyPieces
@@ -33,6 +40,8 @@ func computePins(pos *position) pins {
 	return p
 }
 
+// allowedSquares returns the squares that the piece on sq may legally move to,
+// accounting for pin constraints.  Returns all squares for an unpinned piece.
 func (p *pins) allowedSquares(sq square) bitboard {
 	if (squareBB(sq) & p.pinned).isNotEmpty() {
 		return p.allowed[sq]

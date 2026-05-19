@@ -2,8 +2,12 @@ package engine
 
 import "math/bits"
 
+// bitboard is a 64-bit integer where each bit represents one square.
+// Bit 0 = a1, bit 7 = h1, bit 8 = a2, …, bit 63 = h8
+// (little-endian rank mapping: files A–H occupy bits 0–7 within each rank).
 type bitboard uint64
 
+// Rank and file masks used throughout move generation and evaluation.
 const (
 	rank1    bitboard = 0x00000000000000FF
 	rank2    bitboard = rank1 << 8
@@ -23,16 +27,23 @@ const (
 	fileH    bitboard = fileG << 1
 	notFileA bitboard = ^fileA
 	notFileH bitboard = ^fileH
-	whiteSqs bitboard = 0x55AA55AA55AA55AA
-	blackSqs bitboard = ^whiteSqs
+	whiteSqs bitboard = 0x55AA55AA55AA55AA // light squares
+	blackSqs bitboard = ^whiteSqs           // dark squares
 )
 
-func squareBB(s square) bitboard            { return bitboard(1) << s }
-func (b bitboard) isEmpty() bool            { return b == 0 }
-func (b bitboard) isNotEmpty() bool         { return b != 0 }
-func (b bitboard) popCount() int            { return bits.OnesCount64(uint64(b)) }
-func (b bitboard) lsb() square              { return square(bits.TrailingZeros64(uint64(b))) }
-func (b bitboard) msb() square              { return square(63 - bits.LeadingZeros64(uint64(b))) }
+// squareBB returns a bitboard with only sq's bit set.
+func squareBB(s square) bitboard    { return bitboard(1) << s }
+func (b bitboard) isEmpty() bool    { return b == 0 }
+func (b bitboard) isNotEmpty() bool { return b != 0 }
+func (b bitboard) popCount() int    { return bits.OnesCount64(uint64(b)) }
+
+// lsb returns the index of the least-significant set bit (lowest square number).
+func (b bitboard) lsb() square { return square(bits.TrailingZeros64(uint64(b))) }
+
+// msb returns the index of the most-significant set bit (highest square number).
+func (b bitboard) msb() square { return square(63 - bits.LeadingZeros64(uint64(b))) }
+
+// Directional shifts. East and west shifts mask off the wrapping file before shifting.
 func (b bitboard) shiftNorth() bitboard     { return b << 8 }
 func (b bitboard) shiftSouth() bitboard     { return b >> 8 }
 func (b bitboard) shiftEast() bitboard      { return (b & notFileH) << 1 }
@@ -41,4 +52,6 @@ func (b bitboard) shiftNortheast() bitboard { return (b & notFileH) << 9 }
 func (b bitboard) shiftNorthwest() bitboard { return (b & notFileA) << 7 }
 func (b bitboard) shiftSoutheast() bitboard { return (b & notFileH) >> 7 }
 func (b bitboard) shiftSouthwest() bitboard { return (b & notFileA) >> 9 }
-func (b *bitboard) popLsb() square          { s := b.lsb(); *b &= (*b - 1); return s }
+
+// popLsb clears the least-significant set bit and returns its square index.
+func (b *bitboard) popLsb() square { s := b.lsb(); *b &= (*b - 1); return s }

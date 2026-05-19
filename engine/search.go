@@ -17,7 +17,10 @@ func copyVariation(dst *variation, src variation, best move) {
 	dst.moves = append(dst.moves, src.moves...)
 }
 
-// searchSingleMove plays m, searches recursively, undoes, and returns the score.
+// searchSingleMove plays m, calls searchAlphaBeta recursively, undoes the move,
+// and returns the score.  When the position is not a PV node and the move is not
+// the first tried, a null-window PVS search is attempted first; if it fails high,
+// a full-window re-search is performed.
 func searchSingleMove(game *Game, depth, ply, alpha, beta int, m move, pv *variation, moveIdx int) int {
 	wasInCheck := game.currentPosition().isInCheck()
 	childDepth := depth - 1
@@ -29,7 +32,7 @@ func searchSingleMove(game *Game, depth, ply, alpha, beta int, m move, pv *varia
 		dbgx.pvsAttempts++
 		score = -searchAlphaBeta(game, childDepth, ply+1, -alpha-1, -alpha, pv)
 		if score > alpha {
-			// PVS failed.
+			// PVS failed high — re-search with full window.
 			dbgx.pvsFails++
 			score = -searchAlphaBeta(game, childDepth, ply+1, -beta, -alpha, pv)
 		}
@@ -40,7 +43,18 @@ func searchSingleMove(game *Game, depth, ply, alpha, beta int, m move, pv *varia
 	return score
 }
 
-// searchAlphaBeta is the main alpha-beta recursive function.
+// searchAlphaBeta is the main recursive alpha-beta function.
+//
+// Techniques applied (in order):
+//   - Periodic time check every 65 536 nodes.
+//   - Draw detection: material, 50-move rule, repetition.
+//   - Transposition table lookup: Cut/All nodes prune; PV nodes extend depth by 1.
+//   - Quiescence search at depth ≤ 0 (when not in check).
+//   - Null-move pruning with R = 4 (skipped in check, zugzwang-risk positions, non-null windows).
+//   - TT move tried before generating all legal moves.
+//   - Late move reduction: −1 ply for moves 4+, −2 ply additionally for moves 7+ (quiet, non-check, depth > 2).
+//   - LMR re-search at full depth if the reduced search exceeds alpha.
+//   - TT write with Cut/All/PV node type on exit.
 func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variation) int {
 	game.nodeCount++
 	if (game.nodeCount&0xFFFF) == 0 &&
@@ -74,17 +88,22 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 				return tt.move.score()
 			}
 		case nodePV:
+			// PV hit: search deeper so the PV is fully verified.
 			dbgx.tableHitPV++
 			depth++
 		}
 	}
 
-	// Enter quiescence at depth <= 0.
+	// Enter quiescence at depth <= 0 (unless in check, which quiescence handles
+	// by re-entering alpha-beta at the same depth).
 	if depth <= 0 && !position.isInCheck() {
 		return searchQuiescent(game, depth, ply, alpha, beta)
 	}
 
-	// Null move pruning.
+	// Null-move pruning: skip our turn and search at depth−4.  If the result still
+	// beats beta, the position is likely good enough to prune.  Skipped when:
+	// already in a null-move position, in check, not a null window, or the side
+	// has ≤ 3 pieces (zugzwang risk).
 	if !position.isNullMove() &&
 		!position.isInCheck() &&
 		beta == alpha+1 &&
@@ -143,7 +162,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 
 	for moveIdx, m := range moves {
 		if isTransposition && m.equal(tt.move) {
-			continue
+			continue // already searched above
 		}
 
 		// Late move reduction.
@@ -165,6 +184,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 
 		score := searchSingleMove(game, childDepth, ply, alpha, beta, m, &pv, moveIdx)
 		if score > alpha && childDepth < depth {
+			// LMR re-search: the move was good despite the reduction.
 			dbgx.lmrFails++
 			score = searchSingleMove(game, depth, ply, alpha, beta, m, &pv, moveIdx)
 		}
@@ -198,7 +218,9 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	return bestScore
 }
 
-// Quiescent search - captures and pawn promotions only.
+// searchQuiescent extends the search by generating captures and promotions until
+// the position is quiet.  An in-check position re-enters searchAlphaBeta at the
+// same depth (no depth decrement) so that all evasions are considered.
 func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 	if ply >= maxPly {
 		return evaluatePosition(game, alpha, beta)
@@ -206,9 +228,9 @@ func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 	pos := game.currentPosition()
 	if pos.isInCheck() {
 		var dummy variation
-		// Can't handle checks in quiescent search.
 		return searchAlphaBeta(game, depth, ply, alpha, beta, &dummy)
 	}
+	// Stand-pat: if the static eval already beats beta we can prune.
 	score := evaluatePosition(game, alpha, beta)
 	if score >= beta {
 		return score
@@ -242,6 +264,16 @@ func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 }
 
 // searchRootNode performs iterative-deepening search and returns the best move.
+//
+// If the opening book contains a move for the current position, it is returned
+// immediately.  Otherwise, an initial pass at startDepth (3) scores and orders
+// the legal moves, then deepening continues until the time limit, a forced
+// mate/loss, or an early-exit heuristic triggers.
+//
+// Early-exit conditions (Standard clock only):
+//   - Best move consistent AND score stable across all completed depths: exit if elapsed > ¼ of budget.
+//   - Either condition alone: exit if elapsed > ½ of budget.
+//   - Hard stop if elapsed > budget.
 func searchRootNode(g *Game) move {
 	// Check opening book.
 	bookMove := g.openingBook.getMove(g.currentPosition().getHash())
@@ -282,7 +314,7 @@ func searchRootNode(g *Game) move {
 	var principalVariation variation
 	var bestMoves []move
 
-	// Initial shallow pass to get move ordering.
+	// Initial shallow pass to get move ordering before deepening.
 	var initPV variation
 	for i := range moves {
 		m := moves[i]
@@ -357,6 +389,7 @@ func pvString(pv variation) string {
 	return b.String()
 }
 
+// allSame returns true if every move in moves has the same identity as best.
 func allSame(moves []move, best move) bool {
 	for _, move := range moves {
 		if !move.equal(best) {
@@ -366,6 +399,8 @@ func allSame(moves []move, best move) bool {
 	return true
 }
 
+// allScoreStable returns true if every move in moves has a score within
+// scoreInstabilityThresh centipawns of best's score.
 func allScoreStable(moves []move, best move) bool {
 	for _, move := range moves {
 		if absInt(move.score()-best.score()) > scoreInstabilityThresh {

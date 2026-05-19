@@ -1,11 +1,11 @@
 package engine
 
-// bishopAttacks returns squares attacked by a bishop on sq given occupied squares.
+// bishopAttacks returns the squares attacked by a bishop on sq given the occupied squares.
 func bishopAttacks(occ bitboard, sq square) bitboard {
 	return bishopTable[sq][(uint64(occ&bishopMask[sq])*bishopMagic[sq])>>bishopShift[sq]]
 }
 
-// rookAttacks returns squares attacked by a rook on sq given occupied squares.
+// rookAttacks returns the squares attacked by a rook on sq given the occupied squares.
 func rookAttacks(occ bitboard, sq square) bitboard {
 	return rookTable[sq][(uint64(occ&rookMask[sq])*rookMagic[sq])>>rookShift[sq]]
 }
@@ -20,7 +20,8 @@ var (
 	bishopTable [64][]bitboard
 )
 
-// Magic numbers found offline with seed 1337. It was taking over 400ms to compute them at startup.
+// Magic numbers found offline with seed 1337.  Pre-computing them avoids the
+// ~400 ms startup cost of searching for them at runtime.
 var rookMagic = [64]uint64{
 	0x2280024000142482, 0x0040002000100040, 0x01801000A0018008, 0x8100050010000822,
 	0x2200020020081004, 0x02000A0054031008, 0x0280020001000080, 0x0480088007402100,
@@ -59,6 +60,10 @@ var bishopMagic = [64]uint64{
 	0x408280415120220C, 0x0100004010020898, 0x0005410808451440, 0x4060182101003200,
 }
 
+// initMagics builds the rook and bishop magic lookup tables.
+// For each square it enumerates all relevant occupancy subsets, computes the
+// corresponding attack set with a classical ray-sliding function, then stores
+// the result at the index given by the magic hash.
 func initMagics() {
 	var occupancies [4096]bitboard
 	var target_squares [4096]bitboard
@@ -88,12 +93,17 @@ func initMagics() {
 	}
 }
 
+// fillMagicTable stores each (occupancy, attack-set) pair into table at the
+// index given by the magic hash: index = (occ * magic) >> shift.
 func fillMagicTable(magic uint64, occs, refs []bitboard, shift uint, table []bitboard) {
 	for i, occ := range occs {
 		table[(uint64(occ)*magic)>>shift] = refs[i]
 	}
 }
 
+// enumerateOccupancies generates all 2^n subsets of mask (where n = popcount(mask))
+// using the Carry-Rippler technique, stores each subset in occupancies and its
+// corresponding attack set (from attackFn) in targets, and returns n.
 func enumerateOccupancies(mask bitboard, occupancies, targets []bitboard, attackFn func(bitboard, square) bitboard, sq square) int {
 	count := 0
 	occupancy := bitboard(0)
@@ -109,9 +119,16 @@ func enumerateOccupancies(mask bitboard, occupancies, targets []bitboard, attack
 	return count
 }
 
+// lsbX and msbX are sentinel-safe wrappers around lsb/msb for use in
+// rookAttacksClassic and bishopAttacksClassic.  When the input bitboard is empty
+// (no blocker in a direction) they return a fixed boundary square so that the
+// XOR trick still produces the correct full ray.
 func lsbX(b bitboard) square { return (b | 0x8000000000000000).lsb() }
 func msbX(b bitboard) square { return (b | 1).msb() }
 
+// rookAttacksClassic computes rook attacks from sq on occ using classical ray
+// subtraction.  Used only during magic table initialisation; the hot path uses
+// the precomputed lookup in rookAttacks.
 func rookAttacksClassic(occ bitboard, sq square) bitboard {
 	result := rookAttacksEmpty[sq]
 	result ^= northOf[lsbX(northOf[sq]&occ)]
@@ -121,6 +138,8 @@ func rookAttacksClassic(occ bitboard, sq square) bitboard {
 	return result
 }
 
+// bishopAttacksClassic computes bishop attacks from sq on occ using classical ray
+// subtraction.  Used only during magic table initialisation.
 func bishopAttacksClassic(occ bitboard, sq square) bitboard {
 	result := bishopAttacksEmpty[sq]
 	result ^= northeastOf[lsbX(northeastOf[sq]&occ)]

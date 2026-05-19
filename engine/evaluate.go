@@ -1,8 +1,8 @@
 package engine
 
 // Piece-square tables from https://www.chessprogramming.org/Simplified_Evaluation_Function
-// Stored with wiki rank 8 at low indices, rank 1 at high indices (index 0 = a1 convention).
-// Black reads the table directly; White reads via sq^rankFlip (0x38).
+// Stored with rank 8 at low indices, rank 1 at high indices.
+// Black reads the table directly; White reads via sq^rankFlip (0x38) to mirror ranks.
 
 var pawnSquare = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -59,6 +59,8 @@ var queenSquare = [64]int{
 	-20, -10, -10, -5, -5, -10, -10, -20,
 }
 
+// King tables are phase-dependent and therefore not maintained incrementally.
+// kingSqMidgame rewards castling; kingSqEndgame rewards centralisation.
 var kingSqMidgame = [64]int{
 	-30, -40, -40, -50, -50, -40, -40, -30,
 	-30, -40, -40, -50, -50, -40, -40, -30,
@@ -81,8 +83,8 @@ var kingSqEndgame = [64]int{
 	-50, -30, -30, -30, -30, -30, -30, -50,
 }
 
-// isEndgame returns true when neither side has a queen, or each side that has
-// a queen has at most one additional minor piece and no rooks.
+// isEndgame returns true when neither side has a queen, or every side that has a
+// queen also has no rooks and at most one minor piece.
 func isEndgame(pos *position) bool {
 	for c := white; c <= black; c++ {
 		friendlyPieces := pos.colorBB(c)
@@ -99,8 +101,9 @@ func isEndgame(pos *position) bool {
 
 var flips = [2]square{rankFlip, 0}
 
-// pstValue returns material + piece-square bonus for a piece at a square.
-// Returns 0 for king; king PST is phase-dependent and handled separately in Score.
+// pstValue returns material value plus piece-square bonus for piece p of color c
+// on sq.  Returns 0 for the king; the king's PST is phase-dependent and applied
+// separately in score.
 func pstValue(c color, p piece, sq square) int {
 	flip := flips[c]
 	switch p {
@@ -119,7 +122,9 @@ func pstValue(c color, p piece, sq square) int {
 }
 
 // score returns material + PST score relative to the side to move.
-// scoreWhite/scoreBlack track all non-king pieces incrementally; king PST is looked up here.
+// scoreWhite/scoreBlack accumulate all non-king piece values incrementally;
+// king PST and pawn shelter are computed here because they are phase-dependent
+// or too cheap to bother with incremental updates.
 func (pos *position) score(endgame bool) int {
 	var kingTable *[64]int
 	if endgame {
@@ -130,7 +135,7 @@ func (pos *position) score(endgame bool) int {
 	wScore := pos.scoreWhite + kingTable[pos.kingLocn[white]^rankFlip]
 	bScore := pos.scoreBlack + kingTable[pos.kingLocn[black]]
 
-	// Bonus for pawns in front of the king protecting him
+	// Pawn shelter: +10 cp per pawn directly in front of the king (midgame only).
 	if !endgame {
 		wScore += 10 * (pos.pawns() & pos.colors[white] & kingPawnShelterWhite[pos.kingLocation(white)]).popCount()
 		wScore += 10 * (pos.pawns() & pos.colors[black] & kingPawnShelterBlack[pos.kingLocation(black)]).popCount()
@@ -143,6 +148,7 @@ func (pos *position) score(endgame bool) int {
 }
 
 // evaluatePosition scores the position from the side-to-move's perspective.
+// Returns drawScore for positions with insufficient material.
 func evaluatePosition(game *Game, _, _ int) int {
 	pos := game.currentPosition()
 	if pos.isDrawByMaterial() {

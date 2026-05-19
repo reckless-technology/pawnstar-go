@@ -1,18 +1,27 @@
 package engine
 
+// square identifies a board square as an integer in [0, 63].
+// a1 = 0, h1 = 7, a2 = 8, …, h8 = 63 (same encoding as the move bit layout).
 type square uint8
 
-func squareXY(x, y int) square  { return square(x + (8 * y)) }
-func (s square) file() uint8    { return (uint8(s) & 7) }
-func (s square) rank() uint8    { return (uint8(s) >> 3) }
+// squareXY constructs a square from file x (0 = a … 7 = h) and rank y (0 = rank 1 … 7 = rank 8).
+func squareXY(x, y int) square { return square(x + (8 * y)) }
+func (s square) file() uint8   { return uint8(s) & 7 }
+func (s square) rank() uint8   { return uint8(s) >> 3 }
+
+// String returns the square name in algebraic notation, e.g. "e4".
 func (s square) String() string { return string([]byte{'a' + byte(s.file()), '1' + byte(s.rank())}) }
 
+// squareFromString parses an algebraic square name such as "e4".
 func squareFromString(str string) square {
 	f := int(str[0]|0x20) - 'a'
 	r := int(str[1]) - '1'
 	return squareXY(f, r)
 }
 
+// noSquare is the null sentinel for optional square fields (e.g. the en-passant target
+// square when no double pawn push was just played).  Its numeric value (0 = a1) never
+// arises in those contexts.
 const noSquare square = 0
 
 const (

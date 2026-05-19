@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+// irreversibleState holds the fields that cannot be reconstructed from a move
+// alone and must be saved before makeMove and restored by unmakeMove.
 type irreversibleState struct {
 	hash     uint64
 	checkers bitboard
@@ -16,19 +18,28 @@ type irreversibleState struct {
 	flags    uint8
 }
 
+// position is the central board state, mutated in place during search.
+//
+// Bitboards and the squares array are always kept in sync.  Piece-square table
+// scores (scoreWhite, scoreBlack) are maintained incrementally by addPiece,
+// removePiece, and movePiece so that evaluation is a simple subtraction at leaf
+// nodes.  The Zobrist hash is similarly maintained incrementally.
+//
+// The stateStack records the irreversible fields pushed by makeMove and popped
+// by unmakeMove, allowing the position to be restored without copying the struct.
 type position struct {
-	pieces     [6]bitboard
-	colors     [2]bitboard
-	squares    [64]piece
-	checkers   bitboard
-	hash       uint64
+	pieces     [6]bitboard        // indexed by piece-1 (pawn=0 … king=5)
+	colors     [2]bitboard        // indexed by color (white=0, black=1)
+	squares    [64]piece          // O(1) piece lookup by square
+	checkers   bitboard           // squares of pieces giving check to the side to move
+	hash       uint64             // Zobrist hash of the current position
 	stateStack []irreversibleState
-	scoreWhite int
-	scoreBlack int
-	kingLocn   [2]square
-	epSquare   square
-	halfMove   uint8
-	fullMove   uint8
+	scoreWhite int // incremental material + PST score for White (excludes king)
+	scoreBlack int // incremental material + PST score for Black (excludes king)
+	kingLocn   [2]square          // king location per side; updated separately from pieces[]
+	epSquare   square             // en-passant target square, or noSquare
+	halfMove   uint8              // half-move clock (for 50-move rule)
+	fullMove   uint8              // full-move number minus 1 (stored 0-based)
 	castling   castlingRights
 	flags      uint8
 }
@@ -61,6 +72,8 @@ func (pos *position) rooks() bitboard             { return pos.pieces[rook-1] }
 func (pos *position) queens() bitboard            { return pos.pieces[queen-1] }
 func (pos *position) kings() bitboard             { return pos.pieces[king-1] }
 
+// addPiece places p of color c on sq and updates the bitboards, squares array,
+// Zobrist hash, and incremental PST score.
 func (pos *position) addPiece(c color, p piece, sq square) {
 	bb := squareBB(sq)
 	pos.pieces[p-1] |= bb
@@ -74,6 +87,7 @@ func (pos *position) addPiece(c color, p piece, sq square) {
 	}
 }
 
+// removePiece removes the piece of color c on sq and updates the same fields.
 func (pos *position) removePiece(c color, p piece, sq square) {
 	bb := squareBB(sq)
 	pos.pieces[p-1] &^= bb
@@ -87,6 +101,7 @@ func (pos *position) removePiece(c color, p piece, sq square) {
 	}
 }
 
+// movePiece slides piece p of color c from from to to, updating all incremental state.
 func (pos *position) movePiece(c color, p piece, from, to square) {
 	fromBB, toBB := squareBB(from), squareBB(to)
 	fromTo := fromBB | toBB
@@ -102,6 +117,7 @@ func (pos *position) movePiece(c color, p piece, from, to square) {
 	}
 }
 
+// attacksTo returns the bitboard of pieces of color c that attack sq.
 func (pos *position) attacksTo(sq square, c color) bitboard {
 	occ := pos.occupied()
 	var result bitboard
@@ -122,6 +138,7 @@ func (pos *position) isAttacked(sq square, by color) bool {
 	return pos.attacksTo(sq, by).isNotEmpty()
 }
 
+// positionFromFen constructs a position from a FEN string.
 func positionFromFen(fen string) position {
 	pos := position{stateStack: make([]irreversibleState, 0, maxPly)}
 	fields := strings.Fields(fen)
@@ -172,7 +189,7 @@ func positionFromFen(fen string) position {
 		pos.halfMove = uint8(hm)
 	}
 
-	// Full-move number
+	// Full-move number (stored 0-based internally)
 	if len(fields) > 5 {
 		fm, _ := strconv.Atoi(fields[5])
 		pos.fullMove = uint8(fm - 1)
@@ -184,6 +201,8 @@ func positionFromFen(fen string) position {
 	return pos
 }
 
+// computeHash builds the Zobrist hash from scratch.  Used once in positionFromFen;
+// all subsequent updates are applied incrementally in makeMove/unmakeMove.
 func (pos *position) computeHash() uint64 {
 	var h uint64
 	if pos.flags&flagBlackToMove != 0 {
@@ -254,6 +273,8 @@ func (pos *position) toFenString() string {
 	return sb.String()
 }
 
+// makeMove applies m to the position.  All irreversible state is saved onto
+// stateStack so that unmakeMove can restore it exactly.
 func (pos *position) makeMove(m move) {
 	color := pos.colorToMove()
 	prevCastling := pos.castling
@@ -300,11 +321,13 @@ func (pos *position) makeMove(m move) {
 	case pawnDoublePush:
 		pos.halfMove = 0
 		pos.movePiece(color, pawn, from, to)
+		// Set the ep square to the skipped square (midpoint of from and to).
 		pos.epSquare = square((int(from) + int(to)) >> 1)
 		pos.hash ^= enPassantHashes[pos.epSquare]
 
 	case epCapture:
 		pos.halfMove = 0
+		// The captured pawn is on the same rank as from, same file as to.
 		capturedSq := square((int(from) & 0x38) | (int(to) & 0x07))
 		pos.removePiece(enemyOf(color), pawn, capturedSq)
 		pos.movePiece(color, pawn, from, to)
@@ -336,13 +359,15 @@ func (pos *position) makeMove(m move) {
 	pos.checkers = pos.attacksTo(pos.kingLocn[enemyOf(color)], color)
 }
 
+// unmakeMove reverses the last makeMove by popping the state stack and undoing
+// all piece movements.  It must be called in strict LIFO order with makeMove.
 func (pos *position) unmakeMove() {
 	n := len(pos.stateStack)
 	saved := pos.stateStack[n-1]
 	pos.stateStack = pos.stateStack[:n-1]
 
 	pos.flags = saved.flags
-	color := pos.colorToMove() // color that made the move
+	color := pos.colorToMove() // color that made the move being undone
 
 	move := saved.move
 	if !move.isNone() {
@@ -398,6 +423,8 @@ func (pos *position) unmakeMove() {
 	pos.halfMove = saved.halfMove
 }
 
+// makeNullMove passes the turn without moving a piece.  Used by null-move pruning.
+// The position is restored by the normal unmakeMove path (saved move is moveNone).
 func (pos *position) makeNullMove() {
 	pos.stateStack = append(pos.stateStack, irreversibleState{
 		hash:     pos.hash,
@@ -415,8 +442,11 @@ func (pos *position) makeNullMove() {
 	pos.flags ^= flagBlackToMove
 }
 
-// isDrawByRepetition returns true if the current position has appeared twice before
-// in the game history recorded on the stateStack.
+// isDrawByRepetition returns true if the current position has occurred twice
+// before in the game history recorded on stateStack (i.e. three occurrences total).
+// Only positions with the same hash are considered; the search steps back by two
+// plies at a time (same side to move) and stops early at an irreversible move
+// (halfMove == 0).
 func (pos *position) isDrawByRepetition() bool {
 	h := pos.hash
 	k := len(pos.stateStack)
@@ -443,24 +473,24 @@ func (pos *position) isLegal() bool {
 	blackKing := pos.kings() & pos.colors[black]
 	return whiteKing.popCount() == 1 && blackKing.popCount() == 1 &&
 		whiteKing != blackKing &&
-		(kingAttacks[whiteKing.lsb()] & blackKing).isEmpty() &&
+		(kingAttacks[whiteKing.lsb()]&blackKing).isEmpty() &&
 		!pos.isAttacked(pos.kingLocn[enemyOf(color)], color) &&
 		pos.kingLocn[white] == whiteKing.lsb() &&
 		pos.kingLocn[black] == blackKing.lsb()
 }
 
-// isDrawByMaterial returns true when neither side has enough material to checkmate.
+// isDrawByMaterial returns true when neither side has enough material to checkmate:
+// KK, KNK, KBK, or KBKB with both bishops on the same colour.
 func (pos *position) isDrawByMaterial() bool {
 	if pos.pawns().isNotEmpty() || pos.rooks().isNotEmpty() || pos.queens().isNotEmpty() {
 		return false
 	}
 	// Only kings, knights, and/or bishops remain.
-	// Insufficient material: KK, KNK, KBK, KBKB (same colour).
 	minorPieces := pos.knights() | pos.bishops()
 	if minorPieces.popCount() <= 1 {
 		return true
 	}
-	// Two bishops on same colour squares is also a draw.
+	// Two bishops on the same colour squares is also a draw.
 	if pos.knights() == 0 && minorPieces.popCount() == 2 {
 		if minorPieces&whiteSqs == minorPieces || minorPieces&blackSqs == minorPieces {
 			return true

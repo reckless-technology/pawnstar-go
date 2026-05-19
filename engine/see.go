@@ -1,8 +1,12 @@
 package engine
 
-// seeValues uses nominal 1-3-3-5-9 material values for SEE.
+// seeValues uses simplified 1-3-3-5-9 material values for the exchange evaluator.
+// These are intentionally coarser than the search piece values to keep SEE fast.
 var seeValues = [7]int{0, 100, 300, 300, 500, 900, 10000}
 
+// seeBoard is a lightweight copy of the piece bitboards used during SEE so that
+// pieces can be removed as the exchange sequence is simulated without mutating
+// the real position.
 type seeBoard struct {
 	pawns       bitboard
 	knights     bitboard
@@ -52,7 +56,9 @@ func (b *seeBoard) piecesOfColor(c color) *bitboard {
 	return &b.blackPieces
 }
 
-// evaluateStaticExchange returns the SEE score for m and whether m gives check.
+// evaluateStaticExchange returns the SEE score for m (positive = winning capture)
+// and whether m gives check.  The score accounts for all recaptures on the target
+// square by the least-valuable available attacker on each side in turn.
 func evaluateStaticExchange(pos *position, m move) (int, bool) {
 	var captured piece
 	if m.kind() == epCapture {
@@ -77,6 +83,11 @@ func evaluateStaticExchange(pos *position, m move) (int, bool) {
 	return s, isChecking
 }
 
+// evaluateSwapOff simulates the sequence of recaptures on location starting with
+// color playing pieceOnSquare.  Returns the gain for the side that just captured,
+// accounting for the fact that each side will only recapture when it is beneficial.
+// Uses the classic "negamax unwind" technique: scores are computed forward then
+// propagated backward so each side can choose whether to recapture.
 func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare piece) int {
 	var pawnTargets bitboard
 	if color == white {
@@ -132,12 +143,12 @@ func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare p
 			goto AttackFound
 		}
 
-		// No more attacks
+		// No more attackers for this side.
 		scores[ply] = 0
 		break
 
 	AttackFound:
-		// Use only the LSB attacker.
+		// Use only the least-valuable attacker (LSB of attackers).
 		lsb := attackers & (-attackers)
 		enemy := enemyOf(color)
 		*bb.piecesOfType(pieceOnSquare) ^= sqBB
@@ -149,15 +160,15 @@ func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare p
 		pieceOnSquare = capturingPiece
 		color = enemy
 
-		// Pawn promotion on back rank.
-		if pieceOnSquare == pawn && (sqBB & (rank1 | rank8)).isNotEmpty() {
+		// Pawn reaching the back rank promotes to queen.
+		if pieceOnSquare == pawn && (sqBB&(rank1|rank8)).isNotEmpty() {
 			pieceOnSquare = queen
 			bb.pawns ^= sqBB
 			bb.queens ^= sqBB
 		}
 	}
 
-	// Unwind: propagate values back.
+	// Unwind: each side only recaptures if it is profitable.
 	for ply--; ply >= 0; ply-- {
 		scores[ply] -= scores[ply+1]
 		if scores[ply] < 0 {
