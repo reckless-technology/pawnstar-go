@@ -66,11 +66,11 @@ func evaluateStaticExchange(pos *position, m move) (int, bool) {
 	} else {
 		captured = pos.pieceAt(m.to())
 	}
-	pos.makeMove(m)
-	isChecking := pos.isInCheck()
-	nextColor := pos.colorToMove()
-	bb := newSeeBoard(pos)
-	pos.unmakeMove()
+	child := *pos
+	child.makeMove(m)
+	isChecking := child.isInCheck()
+	nextColor := child.colorToMove()
+	bb := newSeeBoard(&child)
 
 	p := m.piece()
 	promoted := m.promoted()

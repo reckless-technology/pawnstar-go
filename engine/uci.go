@@ -75,7 +75,7 @@ func (g *Game) uciPosition(args []string) {
 // uciGo handles the "go" command, parsing the clock parameters and starting the search.
 func (g *Game) uciGo(args []string) {
 	tc := &g.timeControl
-	color := g.pos.colorToMove()
+	color := g.currentPosition().colorToMove()
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "wtime":

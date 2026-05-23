@@ -6,40 +6,26 @@ import (
 	"strings"
 )
 
-// irreversibleState holds the fields that cannot be reconstructed from a move
-// alone and must be saved before makeMove and restored by unmakeMove.
-type irreversibleState struct {
-	hash     uint64
-	checkers bitboard
-	move     move
-	castling castlingRights
-	epSquare square
-	halfMove uint8
-	flags    uint8
-}
-
-// position is the central board state, mutated in place during search.
+// position is the central board state.  It is a value type: makeMove and
+// makeNullMove modify a copy of the position; the caller is responsible for
+// maintaining the game-history stack in Game.posStack.
 //
 // Bitboards and the squares array are always kept in sync.  Piece-square table
 // scores (scoreWhite, scoreBlack) are maintained incrementally by addPiece,
 // removePiece, and movePiece so that evaluation is a simple subtraction at leaf
 // nodes.  The Zobrist hash is similarly maintained incrementally.
-//
-// The stateStack records the irreversible fields pushed by makeMove and popped
-// by unmakeMove, allowing the position to be restored without copying the struct.
 type position struct {
-	pieces     [6]bitboard        // indexed by piece-1 (pawn=0 … king=5)
-	colors     [2]bitboard        // indexed by color (white=0, black=1)
-	squares    [64]piece          // O(1) piece lookup by square
-	checkers   bitboard           // squares of pieces giving check to the side to move
-	hash       uint64             // Zobrist hash of the current position
-	stateStack []irreversibleState
-	scoreWhite int // incremental material + PST score for White (excludes king)
-	scoreBlack int // incremental material + PST score for Black (excludes king)
-	kingLocn   [2]square          // king location per side; updated separately from pieces[]
-	epSquare   square             // en-passant target square, or noSquare
-	halfMove   uint8              // half-move clock (for 50-move rule)
-	fullMove   uint8              // full-move number minus 1 (stored 0-based)
+	pieces     [6]bitboard // indexed by piece-1 (pawn=0 … king=5)
+	colors     [2]bitboard // indexed by color (white=0, black=1)
+	squares    [64]piece   // O(1) piece lookup by square
+	checkers   bitboard    // squares of pieces giving check to the side to move
+	hash       uint64      // Zobrist hash of the current position
+	scoreWhite int         // incremental material + PST score for White (excludes king)
+	scoreBlack int         // incremental material + PST score for Black (excludes king)
+	kingLocn   [2]square   // king location per side; updated separately from pieces[]
+	epSquare   square      // en-passant target square, or noSquare
+	halfMove   uint8       // half-move clock (for 50-move rule)
+	fullMove   uint8       // full-move number minus 1 (stored 0-based)
 	castling   castlingRights
 	flags      uint8
 }
@@ -140,7 +126,7 @@ func (pos *position) isAttacked(sq square, by color) bool {
 
 // positionFromFen constructs a position from a FEN string.
 func positionFromFen(fen string) position {
-	pos := position{stateStack: make([]irreversibleState, 0, maxPly)}
+	pos := position{}
 	fields := strings.Fields(fen)
 
 	// Pieces
@@ -202,7 +188,7 @@ func positionFromFen(fen string) position {
 }
 
 // computeHash builds the Zobrist hash from scratch.  Used once in positionFromFen;
-// all subsequent updates are applied incrementally in makeMove/unmakeMove.
+// all subsequent updates are applied incrementally in makeMove.
 func (pos *position) computeHash() uint64 {
 	var h uint64
 	if pos.flags&flagBlackToMove != 0 {
@@ -273,21 +259,11 @@ func (pos *position) toFenString() string {
 	return sb.String()
 }
 
-// makeMove applies m to the position.  All irreversible state is saved onto
-// stateStack so that unmakeMove can restore it exactly.
+// makeMove applies m to the position.  The caller is responsible for saving
+// the previous position before calling (copy-make pattern).
 func (pos *position) makeMove(m move) {
 	color := pos.colorToMove()
 	prevCastling := pos.castling
-
-	pos.stateStack = append(pos.stateStack, irreversibleState{
-		hash:     pos.hash,
-		checkers: pos.checkers,
-		castling: pos.castling,
-		epSquare: pos.epSquare,
-		halfMove: pos.halfMove,
-		flags:    pos.flags,
-		move:     m,
-	})
 
 	from, to, piece := m.from(), m.to(), m.piece()
 	pos.flags &= ^flagNullMove
@@ -359,111 +335,14 @@ func (pos *position) makeMove(m move) {
 	pos.checkers = pos.attacksTo(pos.kingLocn[enemyOf(color)], color)
 }
 
-// unmakeMove reverses the last makeMove by popping the state stack and undoing
-// all piece movements.  It must be called in strict LIFO order with makeMove.
-func (pos *position) unmakeMove() {
-	n := len(pos.stateStack)
-	saved := pos.stateStack[n-1]
-	pos.stateStack = pos.stateStack[:n-1]
-
-	pos.flags = saved.flags
-	color := pos.colorToMove() // color that made the move being undone
-
-	move := saved.move
-	if !move.isNone() {
-		from, to, piece := move.from(), move.to(), move.piece()
-		enemy := enemyOf(color)
-		switch move.kind() {
-
-		case nonCapture, pawnSinglePush, pawnDoublePush:
-			pos.movePiece(color, piece, to, from)
-
-		case capture:
-			pos.movePiece(color, piece, to, from)
-			pos.addPiece(enemy, move.captured(), to)
-
-		case promotionKnight, promotionBishop, promotionRook, promotionQueen:
-			pos.removePiece(color, move.promoted(), to)
-			pos.addPiece(color, pawn, from)
-			if move.captured() != noPiece {
-				pos.addPiece(enemy, move.captured(), to)
-			}
-
-		case epCapture:
-			capturedSq := square((int(from) & 0x38) | (int(to) & 0x07))
-			pos.movePiece(color, pawn, to, from)
-			pos.addPiece(enemy, pawn, capturedSq)
-
-		case castling:
-			switch to {
-			case g1:
-				pos.movePiece(white, king, g1, e1)
-				pos.movePiece(white, rook, f1, h1)
-			case c1:
-				pos.movePiece(white, king, c1, e1)
-				pos.movePiece(white, rook, d1, a1)
-			case g8:
-				pos.movePiece(black, king, g8, e8)
-				pos.movePiece(black, rook, f8, h8)
-			case c8:
-				pos.movePiece(black, king, c8, e8)
-				pos.movePiece(black, rook, d8, a8)
-			}
-		}
-		pos.kingLocn[color] = (pos.kings() & pos.colors[color]).lsb()
-		if color == black {
-			pos.fullMove--
-		}
-	}
-
-	pos.hash = saved.hash
-	pos.checkers = saved.checkers
-	pos.castling = saved.castling
-	pos.epSquare = saved.epSquare
-	pos.halfMove = saved.halfMove
-}
-
 // makeNullMove passes the turn without moving a piece.  Used by null-move pruning.
-// The position is restored by the normal unmakeMove path (saved move is moveNone).
+// The caller is responsible for saving the previous position before calling.
 func (pos *position) makeNullMove() {
-	pos.stateStack = append(pos.stateStack, irreversibleState{
-		hash:     pos.hash,
-		checkers: pos.checkers,
-		castling: pos.castling,
-		epSquare: pos.epSquare,
-		halfMove: pos.halfMove,
-		flags:    pos.flags,
-		move:     moveNone(),
-	})
 	pos.hash ^= enPassantHashes[pos.epSquare]
 	pos.hash ^= blackMoveHash
 	pos.epSquare = noSquare
 	pos.flags |= flagNullMove
 	pos.flags ^= flagBlackToMove
-}
-
-// isDrawByRepetition returns true if the current position has occurred twice
-// before in the game history recorded on stateStack (i.e. three occurrences total).
-// Only positions with the same hash are considered; the search steps back by two
-// plies at a time (same side to move) and stops early at an irreversible move
-// (halfMove == 0).
-func (pos *position) isDrawByRepetition() bool {
-	h := pos.hash
-	k := len(pos.stateStack)
-	repetitions := 2
-	for i := k - 4; i >= 0; i -= 2 {
-		s := pos.stateStack[i]
-		if s.hash == h {
-			repetitions--
-			if repetitions == 0 {
-				return true
-			}
-		}
-		if s.halfMove == 0 {
-			return false
-		}
-	}
-	return false
 }
 
 // isLegal returns true if the position is a legal chess position.

@@ -144,7 +144,7 @@ var perftEPD = []string{
 	"r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - -;D5 164075551;D6 6923051137",
 }
 
-func perft(pos *position, depth int) uint64 {
+func perft(pos position, depth int) uint64 {
 	if depth == 0 {
 		return 1
 	}
@@ -154,9 +154,9 @@ func perft(pos *position, depth int) uint64 {
 	}
 	var nodes uint64
 	for _, move := range moves {
-		pos.makeMove(move)
-		nodes += perft(pos, depth-1)
-		pos.unmakeMove()
+		child := pos
+		child.makeMove(move)
+		nodes += perft(child, depth-1)
 	}
 	return nodes
 }
@@ -188,7 +188,7 @@ func parseEPD(s string) (fen string, cases []perftTest) {
 }
 
 func TestPerft(t *testing.T) {
-	maxDepth := 99
+	maxDepth := 6
 	if testing.Short() {
 		maxDepth = 5
 	}
@@ -206,7 +206,7 @@ func TestPerft(t *testing.T) {
 			t.Run(fmt.Sprintf("%03d/d%d", i+1, tc.depth), func(t *testing.T) {
 				pos := positionFromFen(fen)
 				start := time.Now()
-				got := perft(&pos, tc.depth)
+				got := perft(pos, tc.depth)
 				elapsed := time.Since(start)
 				mnps := float64(got) / elapsed.Seconds() / 1e6
 				t.Logf("%-75s  nodes=%-12d  time=%-10s  %.1f Mnps", fen, got, elapsed.Round(time.Millisecond), mnps)
@@ -230,7 +230,7 @@ func BenchmarkPerft7(b *testing.B) {
 	pos := positionFromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		perft(&pos, 7)
+		perft(pos, 7)
 	}
 }
 

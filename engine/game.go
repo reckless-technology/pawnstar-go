@@ -27,8 +27,8 @@ func newTimeControl() timeControl {
 }
 
 // Game is the top-level engine state.  It owns the transposition table, history
-// table, opening book, chess clock, and the single position that is mutated
-// in-place during search.  Create one with NewGame and drive it via HandleCommand.
+// table, opening book, chess clock, and a stack of positions for copy-make search.
+// Create one with NewGame and drive it via HandleCommand.
 type Game struct {
 	transpositionTable transpositionTable
 	historyTable       historyTable
@@ -36,7 +36,7 @@ type Game struct {
 	openingBook        openingBook
 	nodeCount          int
 	wg                 sync.WaitGroup
-	pos                position
+	posStack           []position
 	isCancelPending    bool
 }
 
@@ -46,6 +46,7 @@ func NewGame() *Game {
 		transpositionTable: newTranspositionTable(hashTableMB),
 		timeControl:        newTimeControl(),
 		openingBook:        loadOpeningBook(),
+		posStack:           make([]position, 0, 512),
 	}
 	g.newGameFromFen(startFen)
 	return g
@@ -53,25 +54,27 @@ func NewGame() *Game {
 
 // newGameFromFen resets the engine state to the position described by fen.
 func (g *Game) newGameFromFen(fen string) {
-	g.pos = positionFromFen(fen)
+	g.posStack = g.posStack[:0]
+	g.posStack = append(g.posStack, positionFromFen(fen))
 	g.nodeCount = 0
 	g.isCancelPending = false
 	g.timeControl = newTimeControl()
-	g.pos.stateStack = g.pos.stateStack[:0]
 }
 
 func (g *Game) currentPosition() *position {
-	return &g.pos
+	return &g.posStack[len(g.posStack)-1]
 }
 
 func (g *Game) playMove(m move) {
-	g.pos.makeMove(m)
+	pos := g.posStack[len(g.posStack)-1]
+	pos.makeMove(m)
+	g.posStack = append(g.posStack, pos)
 }
 
 // playMoveString finds the legal move matching UCI string s, plays it, and returns it.
 // Returns moveNone if s does not match any legal move.
 func (g *Game) playMoveString(s string) move {
-	moves := g.pos.generateLegalMoves()
+	moves := g.currentPosition().generateLegalMoves()
 	for _, move := range moves {
 		if move.String() == s {
 			g.playMove(move)
@@ -82,21 +85,43 @@ func (g *Game) playMoveString(s string) move {
 }
 
 func (g *Game) makeNullMove() {
-	g.pos.makeNullMove()
+	pos := g.posStack[len(g.posStack)-1]
+	pos.makeNullMove()
+	g.posStack = append(g.posStack, pos)
 }
 
 func (g *Game) undoMove() {
-	if len(g.pos.stateStack) > 0 {
-		g.pos.unmakeMove()
+	if len(g.posStack) > 1 {
+		g.posStack = g.posStack[:len(g.posStack)-1]
 	}
 }
 
 func (g *Game) isDrawByFiftyMoves() bool {
-	return g.pos.getHalfMove() >= 100
+	return g.currentPosition().getHalfMove() >= 100
 }
 
+// isDrawByRepetition returns true if the current position has occurred twice
+// before in the game history (three occurrences total).  Steps back by two plies
+// at a time (same side to move) and stops early at an irreversible move.
 func (g *Game) isDrawByRepetition() bool {
-	return g.pos.isDrawByRepetition()
+	n := len(g.posStack)
+	if n < 5 {
+		return false
+	}
+	h := g.posStack[n-1].hash
+	repetitions := 2
+	for i := n - 5; i >= 0; i -= 2 {
+		if g.posStack[i].hash == h {
+			repetitions--
+			if repetitions == 0 {
+				return true
+			}
+		}
+		if g.posStack[i].halfMove == 0 {
+			return false
+		}
+	}
+	return false
 }
 
 // pieceVals maps piece type to centipawn value, used in move scoring (MVV-LVA).

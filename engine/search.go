@@ -64,8 +64,8 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		return searchCancelledScore
 	}
 
-	position := game.currentPosition()
-	if position.isDrawByMaterial() || game.isDrawByFiftyMoves() || game.isDrawByRepetition() {
+	pos := *game.currentPosition()
+	if pos.isDrawByMaterial() || game.isDrawByFiftyMoves() || game.isDrawByRepetition() {
 		return drawScore
 	}
 
@@ -74,7 +74,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	}
 
 	// Transposition table lookup.
-	tt, isTransposition := game.transpositionTable.find(position.getHash())
+	tt, isTransposition := game.transpositionTable.find(pos.getHash())
 	if isTransposition && int(tt.depth) >= depth {
 		switch tt.nodeType {
 		case nodeCut:
@@ -96,7 +96,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 
 	// Enter quiescence at depth <= 0 (unless in check, which quiescence handles
 	// by re-entering alpha-beta at the same depth).
-	if depth <= 0 && !position.isInCheck() {
+	if depth <= 0 && !pos.isInCheck() {
 		return searchQuiescent(game, depth, ply, alpha, beta)
 	}
 
@@ -104,10 +104,10 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	// beats beta, the position is likely good enough to prune.  Skipped when:
 	// already in a null-move position, in check, not a null window, or the side
 	// has ≤ 3 pieces (zugzwang risk).
-	if !position.isNullMove() &&
-		!position.isInCheck() &&
+	if !pos.isNullMove() &&
+		!pos.isInCheck() &&
 		beta == alpha+1 &&
-		position.colorBB(position.colorToMove()).popCount() > 3 {
+		pos.colorBB(pos.colorToMove()).popCount() > 3 {
 		evalScore := evaluatePosition(game, alpha, beta)
 		if evalScore >= beta {
 			var dummy variation
@@ -137,7 +137,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			return searchCancelledScore
 		}
 		if score >= beta {
-			game.transpositionTable.record(&transposition{position.getHash(), tt.move.withScore(score), int16(depth), nodeCut, false})
+			game.transpositionTable.record(&transposition{pos.getHash(), tt.move.withScore(score), int16(depth), nodeCut, false})
 			game.historyTable.recordGoodMove(ply, tt.move)
 			return score
 		}
@@ -150,9 +150,9 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		}
 	}
 
-	moves := position.generateLegalMoves()
+	moves := pos.generateLegalMoves()
 	if len(moves) == 0 {
-		if position.isInCheck() {
+		if pos.isInCheck() {
 			return checkmatedScore + ply
 		}
 		return drawScore
@@ -168,7 +168,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		// Late move reduction.
 		childDepth := depth
 		if moveIdx > 3 &&
-			!position.isInCheck() &&
+			!pos.isInCheck() &&
 			!m.isChecking() &&
 			depth > 2 &&
 			beta == alpha+1 &&
@@ -192,7 +192,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			return searchCancelledScore
 		}
 		if score >= beta {
-			game.transpositionTable.record(&transposition{position.getHash(), m.withScore(score), int16(depth), nodeCut, false})
+			game.transpositionTable.record(&transposition{pos.getHash(), m.withScore(score), int16(depth), nodeCut, false})
 			game.historyTable.recordGoodMove(ply, m)
 			dbgx.betaCutoffs++
 			return score
@@ -209,11 +209,11 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	}
 
 	if hasRaisedAlpha {
-		game.transpositionTable.record(&transposition{position.getHash(), bestMove.withScore(alpha), int16(depth), nodePV, false})
+		game.transpositionTable.record(&transposition{pos.getHash(), bestMove.withScore(alpha), int16(depth), nodePV, false})
 		game.historyTable.recordGoodMove(ply, bestMove)
 		copyVariation(parentPV, pv, bestMove)
 	} else {
-		game.transpositionTable.record(&transposition{position.getHash(), bestMove.withScore(alpha), int16(depth), nodeAll, false})
+		game.transpositionTable.record(&transposition{pos.getHash(), bestMove.withScore(alpha), int16(depth), nodeAll, false})
 	}
 	return bestScore
 }
@@ -225,7 +225,7 @@ func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 	if ply >= maxPly {
 		return evaluatePosition(game, alpha, beta)
 	}
-	pos := game.currentPosition()
+	pos := *game.currentPosition()
 	if pos.isInCheck() {
 		var dummy variation
 		return searchAlphaBeta(game, depth, ply, alpha, beta, &dummy)
