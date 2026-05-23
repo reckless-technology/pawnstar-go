@@ -89,7 +89,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			}
 		case nodePV:
 			// PV hit: search deeper so the PV is fully verified.
-			dbgx.tableHitPV++
+			dbgx.tableHitPv++
 			depth++
 		}
 	}
@@ -174,10 +174,10 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			beta == alpha+1 &&
 			m.piece() != pawn &&
 			m.captured() == noPiece {
-			dbgx.lmrAttempts++
+			dbgx.lmrAttempts1++
 			childDepth--
 			if depth > 3 && moveIdx > 6 {
-				dbgx.lmr2Attempts++
+				dbgx.lmrAttempts2++
 				childDepth--
 			}
 		}
