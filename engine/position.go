@@ -11,23 +11,28 @@ import (
 // maintaining the game-history stack in Game.posStack.
 //
 // Bitboards and the squares array are always kept in sync.  Piece-square table
-// scores (scoreWhite, scoreBlack) are maintained incrementally by addPiece,
+// scores ([2]int indexed by color) are maintained incrementally by addPiece,
 // removePiece, and movePiece so that evaluation is a simple subtraction at leaf
 // nodes.  The Zobrist hash is similarly maintained incrementally.
 type position struct {
-	pieces     [6]bitboard // indexed by piece-1 (pawn=0 … king=5)
-	colors     [2]bitboard // indexed by color (white=0, black=1)
-	squares    [64]piece   // O(1) piece lookup by square
-	checkers   bitboard    // squares of pieces giving check to the side to move
-	hash       uint64      // Zobrist hash of the current position
-	scoreWhite int         // incremental material + PST score for White (excludes king)
-	scoreBlack int         // incremental material + PST score for Black (excludes king)
-	kingLocn   [2]square   // king location per side; updated separately from pieces[]
-	epSquare   square      // en-passant target square, or noSquare
-	halfMove   uint8       // half-move clock (for 50-move rule)
-	fullMove   uint8       // full-move number minus 1 (stored 0-based)
-	castling   castlingRights
-	flags      uint8
+	pawns       bitboard
+	knights     bitboard
+	bishops     bitboard
+	rooks       bitboard
+	queens      bitboard
+	kings       bitboard
+	whitePieces bitboard
+	blackPieces bitboard
+	squares     [64]piece // O(1) piece lookup by square
+	checkers    bitboard  // squares of pieces giving check to the side to move
+	hash        zobrist   // Zobrist hash of the current position
+	scores      [2]int    // incremental material + PST score per color (excludes king)
+	kingLocn    [2]square // king location per side; updated separately from piece BBs
+	epSquare    square    // en-passant target square, or noSquare
+	halfMove    uint8     // half-move clock (for 50-move rule)
+	fullMove    uint8     // full-move number minus 1 (stored 0-based)
+	castling    castlingRights
+	flags       uint8
 }
 
 const (
@@ -43,64 +48,75 @@ func (pos *position) colorToMove() color {
 }
 
 func (pos *position) isNullMove() bool            { return pos.flags&flagNullMove != 0 }
-func (pos *position) getHash() uint64             { return pos.hash }
 func (pos *position) isInCheck() bool             { return pos.checkers.isNotEmpty() }
-func (pos *position) getHalfMove() int            { return int(pos.halfMove) }
 func (pos *position) kingLocation(c color) square { return pos.kingLocn[c] }
 func (pos *position) pieceAt(sq square) piece     { return pos.squares[sq] }
-func (pos *position) pieceBB(p piece) bitboard    { return pos.pieces[p-1] }
-func (pos *position) colorBB(c color) bitboard    { return pos.colors[c] }
-func (pos *position) occupied() bitboard          { return pos.colors[white] | pos.colors[black] }
-func (pos *position) pawns() bitboard             { return pos.pieces[pawn-1] }
-func (pos *position) knights() bitboard           { return pos.pieces[knight-1] }
-func (pos *position) bishops() bitboard           { return pos.pieces[bishop-1] }
-func (pos *position) rooks() bitboard             { return pos.pieces[rook-1] }
-func (pos *position) queens() bitboard            { return pos.pieces[queen-1] }
-func (pos *position) kings() bitboard             { return pos.pieces[king-1] }
+func (pos *position) occupied() bitboard          { return pos.whitePieces | pos.blackPieces }
+
+func (pos *position) piecesOfColor(c color) bitboard {
+	if c == white {
+		return pos.whitePieces
+	}
+	return pos.blackPieces
+}
+
+func (pos *position) piecesOfColorPtr(c color) *bitboard {
+	if c == white {
+		return &pos.whitePieces
+	}
+	return &pos.blackPieces
+}
+
+// piecesOfType returns a pointer to the bitboard for piece type p.
+// Used internally wherever the piece type is only known at runtime.
+func (pos *position) piecesOfType(p piece) *bitboard {
+	switch p {
+	case pawn:
+		return &pos.pawns
+	case knight:
+		return &pos.knights
+	case bishop:
+		return &pos.bishops
+	case rook:
+		return &pos.rooks
+	case queen:
+		return &pos.queens
+	default:
+		return &pos.kings
+	}
+}
 
 // addPiece places p of color c on sq and updates the bitboards, squares array,
 // Zobrist hash, and incremental PST score.
 func (pos *position) addPiece(c color, p piece, sq square) {
 	bb := squareBB(sq)
-	pos.pieces[p-1] |= bb
-	pos.colors[c] |= bb
+	*pos.piecesOfType(p) |= bb
+	*pos.piecesOfColorPtr(c) |= bb
 	pos.hash ^= pieceSquareHashes[c][p-1][sq]
 	pos.squares[sq] = p
-	if c == white {
-		pos.scoreWhite += pstValue(c, p, sq)
-	} else {
-		pos.scoreBlack += pstValue(c, p, sq)
-	}
+	pos.scores[c] += pstValue(c, p, sq)
 }
 
 // removePiece removes the piece of color c on sq and updates the same fields.
 func (pos *position) removePiece(c color, p piece, sq square) {
 	bb := squareBB(sq)
-	pos.pieces[p-1] &^= bb
-	pos.colors[c] &^= bb
+	*pos.piecesOfType(p) &^= bb
+	*pos.piecesOfColorPtr(c) &^= bb
 	pos.hash ^= pieceSquareHashes[c][p-1][sq]
 	pos.squares[sq] = noPiece
-	if c == white {
-		pos.scoreWhite -= pstValue(c, p, sq)
-	} else {
-		pos.scoreBlack -= pstValue(c, p, sq)
-	}
+	pos.scores[c] -= pstValue(c, p, sq)
 }
 
 // movePiece slides piece p of color c from from to to, updating all incremental state.
 func (pos *position) movePiece(c color, p piece, from, to square) {
 	fromBB, toBB := squareBB(from), squareBB(to)
 	fromTo := fromBB | toBB
-	pos.pieces[p-1] ^= fromTo
-	pos.colors[c] ^= fromTo
+	*pos.piecesOfType(p) ^= fromTo
+	*pos.piecesOfColorPtr(c) ^= fromTo
 	pos.hash ^= pieceSquareHashes[c][p-1][from] ^ pieceSquareHashes[c][p-1][to]
 	pos.squares[from] = noPiece
 	pos.squares[to] = p
-	if c == white {
-		pos.scoreWhite += pstValue(c, p, to) - pstValue(c, p, from)
-	} else {
-		pos.scoreBlack += pstValue(c, p, to) - pstValue(c, p, from)
-	}
+	pos.scores[c] += pstValue(c, p, to) - pstValue(c, p, from)
 }
 
 // attacksTo returns the bitboard of pieces of color c that attack sq.
@@ -108,15 +124,15 @@ func (pos *position) attacksTo(sq square, c color) bitboard {
 	occ := pos.occupied()
 	var result bitboard
 	if c == white {
-		result = pawnAttacksBlack[sq] & pos.pawns()
+		result = pawnAttacksBlack[sq] & pos.pawns
 	} else {
-		result = pawnAttacksWhite[sq] & pos.pawns()
+		result = pawnAttacksWhite[sq] & pos.pawns
 	}
-	result |= knightAttacks[sq] & pos.knights()
-	result |= kingAttacks[sq] & pos.kings()
-	result |= rookAttacks(occ, sq) & (pos.rooks() | pos.queens())
-	result |= bishopAttacks(occ, sq) & (pos.bishops() | pos.queens())
-	result &= pos.colors[c]
+	result |= knightAttacks[sq] & pos.knights
+	result |= kingAttacks[sq] & pos.kings
+	result |= rookAttacks(occ, sq) & (pos.rooks | pos.queens)
+	result |= bishopAttacks(occ, sq) & (pos.bishops | pos.queens)
+	result &= pos.piecesOfColor(c)
 	return result
 }
 
@@ -156,8 +172,8 @@ func positionFromFen(fen string) position {
 		pos.flags |= flagBlackToMove
 	}
 
-	pos.kingLocn[white] = (pos.kings() & pos.colors[white]).lsb()
-	pos.kingLocn[black] = (pos.kings() & pos.colors[black]).lsb()
+	pos.kingLocn[white] = (pos.kings & pos.whitePieces).lsb()
+	pos.kingLocn[black] = (pos.kings & pos.blackPieces).lsb()
 
 	// Castling rights
 	if len(fields) > 2 {
@@ -189,20 +205,20 @@ func positionFromFen(fen string) position {
 
 // computeHash builds the Zobrist hash from scratch.  Used once in positionFromFen;
 // all subsequent updates are applied incrementally in makeMove.
-func (pos *position) computeHash() uint64 {
-	var h uint64
+func (pos *position) computeHash() zobrist {
+	var h zobrist
 	if pos.flags&flagBlackToMove != 0 {
 		h ^= blackMoveHash
 	}
 	h ^= pos.castling.hash()
 	h ^= enPassantHashes[pos.epSquare]
 	for p := pawn; p <= king; p++ {
-		b := pos.pieceBB(p) & pos.colors[white]
+		b := *pos.piecesOfType(p) & pos.whitePieces
 		for b.isNotEmpty() {
 			sq := b.popLsb()
 			h ^= pieceSquareHashes[white][p-1][sq]
 		}
-		b = pos.pieceBB(p) & pos.colors[black]
+		b = *pos.piecesOfType(p) & pos.blackPieces
 		for b.isNotEmpty() {
 			sq := b.popLsb()
 			h ^= pieceSquareHashes[black][p-1][sq]
@@ -226,7 +242,7 @@ func (pos *position) toFenString() string {
 					numEmpty = 0
 				}
 				p := pos.squares[sq]
-				isWhite := (pos.colors[white] & squareBB(sq)).isNotEmpty()
+				isWhite := (pos.whitePieces & squareBB(sq)).isNotEmpty()
 				ch := " PNBRQK"[p]
 				if !isWhite {
 					ch = " pnbrqk"[p]
@@ -331,7 +347,7 @@ func (pos *position) makeMove(m move) {
 	if color == black {
 		pos.fullMove++
 	}
-	pos.kingLocn[color] = (pos.kings() & pos.colors[color]).lsb()
+	pos.kingLocn[color] = (pos.kings & pos.piecesOfColor(color)).lsb()
 	pos.checkers = pos.attacksTo(pos.kingLocn[enemyOf(color)], color)
 }
 
@@ -348,11 +364,11 @@ func (pos *position) makeNullMove() {
 // isLegal returns true if the position is a legal chess position.
 func (pos *position) isLegal() bool {
 	color := pos.colorToMove()
-	whiteKing := pos.kings() & pos.colors[white]
-	blackKing := pos.kings() & pos.colors[black]
+	whiteKing := pos.kings & pos.whitePieces
+	blackKing := pos.kings & pos.blackPieces
 	return whiteKing.popCount() == 1 && blackKing.popCount() == 1 &&
 		whiteKing != blackKing &&
-		(kingAttacks[whiteKing.lsb()]&blackKing).isEmpty() &&
+		(kingAttacks[whiteKing.lsb()] & blackKing).isEmpty() &&
 		!pos.isAttacked(pos.kingLocn[enemyOf(color)], color) &&
 		pos.kingLocn[white] == whiteKing.lsb() &&
 		pos.kingLocn[black] == blackKing.lsb()
@@ -361,16 +377,16 @@ func (pos *position) isLegal() bool {
 // isDrawByMaterial returns true when neither side has enough material to checkmate:
 // KK, KNK, KBK, or KBKB with both bishops on the same colour.
 func (pos *position) isDrawByMaterial() bool {
-	if pos.pawns().isNotEmpty() || pos.rooks().isNotEmpty() || pos.queens().isNotEmpty() {
+	if pos.pawns.isNotEmpty() || pos.rooks.isNotEmpty() || pos.queens.isNotEmpty() {
 		return false
 	}
 	// Only kings, knights, and/or bishops remain.
-	minorPieces := pos.knights() | pos.bishops()
+	minorPieces := pos.knights | pos.bishops
 	if minorPieces.popCount() <= 1 {
 		return true
 	}
 	// Two bishops on the same colour squares is also a draw.
-	if pos.knights() == 0 && minorPieces.popCount() == 2 {
+	if pos.knights == 0 && minorPieces.popCount() == 2 {
 		if minorPieces&whiteSqs == minorPieces || minorPieces&blackSqs == minorPieces {
 			return true
 		}

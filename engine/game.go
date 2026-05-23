@@ -97,7 +97,7 @@ func (g *Game) undoMove() {
 }
 
 func (g *Game) isDrawByFiftyMoves() bool {
-	return g.currentPosition().getHalfMove() >= 100
+	return g.currentPosition().halfMove >= 100
 }
 
 // isDrawByRepetition returns true if the current position has occurred twice

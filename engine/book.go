@@ -12,14 +12,14 @@ var bookData string
 
 // openingBook maps position Zobrist hashes to candidate next moves.
 type openingBook struct {
-	moves map[uint64][]move
+	moves map[zobrist][]move
 }
 
 // loadOpeningBook parses the embedded book.txt and builds the hash→moves index.
 // Each line is a sequence of moves from the starting position; for every prefix
 // of a line, the next move is recorded as a candidate for that position's hash.
 func loadOpeningBook() openingBook {
-	b := openingBook{moves: make(map[uint64][]move)}
+	b := openingBook{moves: make(map[zobrist][]move)}
 	scanner := bufio.NewScanner(strings.NewReader(bookData))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -32,7 +32,7 @@ func loadOpeningBook() openingBook {
 			if m.isNone() {
 				break
 			}
-			hash := pos.getHash()
+			hash := pos.hash
 			b.moves[hash] = append(b.moves[hash], m)
 			pos.makeMove(m)
 		}
@@ -46,7 +46,7 @@ func (book *openingBook) clearOpeningBook() {
 
 // getMove returns a randomly chosen book move for hash, or moveNone if the
 // position is not in the book.  Random selection gives variety across games.
-func (b openingBook) getMove(hash uint64) move {
+func (b openingBook) getMove(hash zobrist) move {
 	candidates := b.moves[hash]
 	if len(candidates) == 0 {
 		return moveNone()

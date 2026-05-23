@@ -18,7 +18,7 @@ func (cr castlingRights) mayBlackCastleKingside() bool  { return cr&castleBlackK
 func (cr castlingRights) mayBlackCastleQueenside() bool { return cr&castleBlackQueenside != 0 }
 
 // hash returns the Zobrist contribution of the current castling rights.
-func (cr castlingRights) hash() uint64 { return castlingRightsHashes[cr] }
+func (cr castlingRights) hash() zobrist { return castlingRightsHashes[cr] }
 
 // afterMove returns the castling rights remaining after m is played.
 // A move from or to a rook's home square strips the corresponding right; a move

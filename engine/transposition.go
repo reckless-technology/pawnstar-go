@@ -12,7 +12,7 @@ const (
 // transposition is a cached search result.  The score is packed into the move's
 // upper 32 bits (via move.withScore) so no separate score field is needed.
 type transposition struct {
-	hash     uint64
+	hash     zobrist
 	move     move // best move found; upper 32 bits hold the score
 	depth    int16
 	nodeType nodeType
@@ -39,8 +39,8 @@ func newTranspositionTable(megabytes int) transpositionTable {
 }
 
 // find returns the entry for hash if one exists (collision check included).
-func (tt *transpositionTable) find(hash uint64) (transposition, bool) {
-	e := &tt.table[hash%uint64(len(tt.table))]
+func (tt *transpositionTable) find(hash zobrist) (transposition, bool) {
+	e := &tt.table[hash%zobrist(len(tt.table))]
 	if e.hash == hash {
 		return *e, true
 	}
@@ -51,7 +51,7 @@ func (tt *transpositionTable) find(hash uint64) (transposition, bool) {
 // replace if the slot is empty, the existing entry is old (from a previous
 // search), the new entry is at least as deep, or the new entry is a PV node.
 func (tt *transpositionTable) record(t *transposition) {
-	idx := t.hash % uint64(len(tt.table))
+	idx := t.hash % zobrist(len(tt.table))
 	existing := &tt.table[idx]
 	if existing.hash == 0 || existing.isOld || t.depth >= existing.depth || t.nodeType == nodePV {
 		*existing = *t

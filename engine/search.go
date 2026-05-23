@@ -74,7 +74,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	}
 
 	// Transposition table lookup.
-	tt, isTransposition := game.transpositionTable.find(pos.getHash())
+	tt, isTransposition := game.transpositionTable.find(pos.hash)
 	if isTransposition && int(tt.depth) >= depth {
 		switch tt.nodeType {
 		case nodeCut:
@@ -107,7 +107,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	if !pos.isNullMove() &&
 		!pos.isInCheck() &&
 		beta == alpha+1 &&
-		pos.colorBB(pos.colorToMove()).popCount() > 3 {
+		pos.piecesOfColor(pos.colorToMove()).popCount() > 3 {
 		evalScore := evaluatePosition(game, alpha, beta)
 		if evalScore >= beta {
 			var dummy variation
@@ -137,7 +137,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			return searchCancelledScore
 		}
 		if score >= beta {
-			game.transpositionTable.record(&transposition{pos.getHash(), tt.move.withScore(score), int16(depth), nodeCut, false})
+			game.transpositionTable.record(&transposition{pos.hash, tt.move.withScore(score), int16(depth), nodeCut, false})
 			game.historyTable.recordGoodMove(ply, tt.move)
 			return score
 		}
@@ -192,7 +192,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			return searchCancelledScore
 		}
 		if score >= beta {
-			game.transpositionTable.record(&transposition{pos.getHash(), m.withScore(score), int16(depth), nodeCut, false})
+			game.transpositionTable.record(&transposition{pos.hash, m.withScore(score), int16(depth), nodeCut, false})
 			game.historyTable.recordGoodMove(ply, m)
 			dbgx.betaCutoffs++
 			return score
@@ -209,11 +209,11 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	}
 
 	if hasRaisedAlpha {
-		game.transpositionTable.record(&transposition{pos.getHash(), bestMove.withScore(alpha), int16(depth), nodePV, false})
+		game.transpositionTable.record(&transposition{pos.hash, bestMove.withScore(alpha), int16(depth), nodePV, false})
 		game.historyTable.recordGoodMove(ply, bestMove)
 		copyVariation(parentPV, pv, bestMove)
 	} else {
-		game.transpositionTable.record(&transposition{pos.getHash(), bestMove.withScore(alpha), int16(depth), nodeAll, false})
+		game.transpositionTable.record(&transposition{pos.hash, bestMove.withScore(alpha), int16(depth), nodeAll, false})
 	}
 	return bestScore
 }
@@ -276,7 +276,7 @@ func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 //   - Hard stop if elapsed > budget.
 func searchRootNode(g *Game) move {
 	// Check opening book.
-	bookMove := g.openingBook.getMove(g.currentPosition().getHash())
+	bookMove := g.openingBook.getMove(g.currentPosition().hash)
 	if bookMove != moveNone() {
 		return bookMove
 	}

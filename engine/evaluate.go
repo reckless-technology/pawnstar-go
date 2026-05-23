@@ -128,12 +128,12 @@ func pstValue(c color, p piece, sq square) int {
 // queen also has no rooks and at most one minor piece.
 func isEndgame(pos *position) bool {
 	for c := white; c <= black; c++ {
-		friendly := pos.colorBB(c)
-		if (pos.queens() & friendly).isEmpty() {
+		friendly := pos.piecesOfColor(c)
+		if (pos.queens & friendly).isEmpty() {
 			continue
 		}
-		if (pos.rooks()&friendly).popCount() > 0 ||
-			((pos.knights()|pos.bishops())&friendly).popCount() > 1 {
+		if (pos.rooks&friendly).popCount() > 0 ||
+			((pos.knights|pos.bishops)&friendly).popCount() > 1 {
 			return false
 		}
 	}
@@ -151,8 +151,8 @@ type pawnStructure struct {
 
 // determinePawnStructure classifies all pawns of color c into structural categories.
 func determinePawnStructure(pos *position, c color) pawnStructure {
-	friendlyPawns := pos.pawns() & pos.colorBB(c)
-	enemyPawns := pos.pawns() ^ friendlyPawns
+	friendlyPawns := pos.pawns & pos.piecesOfColor(c)
+	enemyPawns := pos.pawns ^ friendlyPawns
 	var ps pawnStructure
 
 	if c == white {
@@ -206,7 +206,7 @@ func determinePawnStructure(pos *position, c color) pawnStructure {
 
 // evalMaterialExtra returns a bishop-pair bonus (+30 cp) when both color bishops are present.
 func evalMaterialExtra(pos *position, c color) int {
-	bishops := pos.bishops() & pos.colorBB(c)
+	bishops := pos.bishops & pos.piecesOfColor(c)
 	if bishops&whiteSqs != 0 && bishops&blackSqs != 0 {
 		return 30
 	}
@@ -231,16 +231,16 @@ func evalPawnStructure(ps *pawnStructure, c color) int {
 // evalMobility scores bishop and rook mobility for color c.
 // Bishop squares defended by enemy pawns are excluded from the count.
 func evalMobility(pos *position, c color, ps *[2]pawnStructure) int {
-	friendly := pos.colorBB(c)
+	friendly := pos.piecesOfColor(c)
 	occ := pos.occupied()
 	enemyDefended := ps[enemyOf(c)].defended
 	score := 0
-	for b := pos.bishops() & friendly; b.isNotEmpty(); {
+	for b := pos.bishops & friendly; b.isNotEmpty(); {
 		sq := b.popLsb()
 		attacks := bishopAttacks(occ, sq) & ^friendly & ^enemyDefended
 		score += bishopAttackScores[attacks.popCount()]
 	}
-	for r := pos.rooks() & friendly; r.isNotEmpty(); {
+	for r := pos.rooks & friendly; r.isNotEmpty(); {
 		sq := r.popLsb()
 		attacks := rookAttacks(occ, sq) & ^friendly
 		score += rookAttackScores[attacks.popCount()]
@@ -252,10 +252,10 @@ func evalMobility(pos *position, c color, ps *[2]pawnStructure) int {
 // and a bonus for friendly non-pawn pieces near the king.
 func evalKing(pos *position, c color, endgame bool) int {
 	flip := flips[c]
-	friendly := pos.colorBB(c)
+	friendly := pos.piecesOfColor(c)
 	enemyColor := enemyOf(c)
-	friendlyPawns := friendly & pos.pawns()
-	enemyPawns := pos.colorBB(enemyColor) & pos.pawns()
+	friendlyPawns := friendly & pos.pawns
+	enemyPawns := pos.piecesOfColor(enemyColor) & pos.pawns
 	kingLoc := pos.kingLocn[c]
 
 	var pstScore int
@@ -293,10 +293,10 @@ func evalKing(pos *position, c color, endgame bool) int {
 		if (kingFile & friendlyPawns).isEmpty() {
 			safetyScore -= 15
 		}
-		if adjW := kingFile.shiftWest(); adjW.isNotEmpty() && (adjW&friendlyPawns).isEmpty() {
+		if adjW := kingFile.shiftWest(); adjW.isNotEmpty() && (adjW & friendlyPawns).isEmpty() {
 			safetyScore -= 10
 		}
-		if adjE := kingFile.shiftEast(); adjE.isNotEmpty() && (adjE&friendlyPawns).isEmpty() {
+		if adjE := kingFile.shiftEast(); adjE.isNotEmpty() && (adjE & friendlyPawns).isEmpty() {
 			safetyScore -= 10
 		}
 	}
@@ -319,8 +319,8 @@ func evaluatePosition(game *Game, alpha, beta int) int {
 		return drawScore
 	}
 
-	wScore := pos.scoreWhite + evalMaterialExtra(pos, white)
-	bScore := pos.scoreBlack + evalMaterialExtra(pos, black)
+	wScore := pos.scores[white] + evalMaterialExtra(pos, white)
+	bScore := pos.scores[black] + evalMaterialExtra(pos, black)
 
 	// Early exit: if material alone is far outside the search window, skip full eval.
 	matScore := wScore - bScore

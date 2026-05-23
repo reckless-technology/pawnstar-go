@@ -20,14 +20,14 @@ type seeBoard struct {
 
 func newSeeBoard(pos *position) seeBoard {
 	return seeBoard{
-		pawns:       pos.pawns(),
-		knights:     pos.knights(),
-		bishops:     pos.bishops(),
-		rooks:       pos.rooks(),
-		queens:      pos.queens(),
-		kings:       pos.kings(),
-		whitePieces: pos.colorBB(white),
-		blackPieces: pos.colorBB(black),
+		pawns:       pos.pawns,
+		knights:     pos.knights,
+		bishops:     pos.bishops,
+		rooks:       pos.rooks,
+		queens:      pos.queens,
+		kings:       pos.kings,
+		whitePieces: pos.piecesOfColor(white),
+		blackPieces: pos.piecesOfColor(black),
 	}
 }
 
@@ -161,7 +161,7 @@ func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare p
 		color = enemy
 
 		// Pawn reaching the back rank promotes to queen.
-		if pieceOnSquare == pawn && (sqBB&(rank1|rank8)).isNotEmpty() {
+		if pieceOnSquare == pawn && (sqBB & (rank1 | rank8)).isNotEmpty() {
 			pieceOnSquare = queen
 			bb.pawns ^= sqBB
 			bb.queens ^= sqBB

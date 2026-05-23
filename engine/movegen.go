@@ -28,9 +28,9 @@ func (pos *position) generateLegalCaptures() []move {
 func (pos *position) generateMoves(color color, doAllMoves bool) []move {
 	moves := make([]move, 0, 64)
 	occupied := pos.occupied()
-	friendlyPieces := pos.colors[color]
+	friendlyPieces := pos.piecesOfColor(color)
 	enemyPieces := occupied ^ friendlyPieces
-	enemyPawns := pos.pawns() & enemyPieces
+	enemyPawns := pos.pawns & enemyPieces
 	kingLocation := pos.kingLocn[color]
 
 	// Build forbidden squares for the king by computing all enemy attacks
@@ -43,7 +43,7 @@ func (pos *position) generateMoves(color color, doAllMoves bool) []move {
 	}
 	occExceptKing := occupied ^ squareBB(kingLocation)
 	for piece := knight; piece <= king; piece++ {
-		for b := pos.pieceBB(piece) & enemyPieces; b.isNotEmpty(); {
+		for b := *pos.piecesOfType(piece) & enemyPieces; b.isNotEmpty(); {
 			s := b.popLsb()
 			forbidden |= pieceAttacks(piece, occExceptKing, s)
 		}
@@ -79,7 +79,7 @@ func (pos *position) generateMoves(color color, doAllMoves bool) []move {
 
 	// Piece moves (knight, bishop, rook, queen).
 	for piece := knight; piece <= queen; piece++ {
-		for b := pos.pieceBB(piece) & friendlyPieces; b.isNotEmpty(); {
+		for b := *pos.piecesOfType(piece) & friendlyPieces; b.isNotEmpty(); {
 			from := b.popLsb()
 			attacks := pieceAttacks(piece, occupied, from) & pinInfo.allowedSquares(from)
 			for captures := attacks & allowedCaptures; captures.isNotEmpty(); {
@@ -100,23 +100,23 @@ func (pos *position) generateMoves(color color, doAllMoves bool) []move {
 	if doAllMoves && !pos.isInCheck() {
 		if color == white {
 			if pos.castling.mayWhiteCastleKingside() &&
-				(occupied&(squareBB(f1)|squareBB(g1))).isEmpty() &&
+				(occupied & (squareBB(f1) | squareBB(g1))).isEmpty() &&
 				!pos.isAttacked(f1, black) && !pos.isAttacked(g1, black) {
 				moves = append(moves, moveCastling(e1, g1))
 			}
 			if pos.castling.mayWhiteCastleQueenside() &&
-				(occupied&(squareBB(b1)|squareBB(c1)|squareBB(d1))).isEmpty() &&
+				(occupied & (squareBB(b1) | squareBB(c1) | squareBB(d1))).isEmpty() &&
 				!pos.isAttacked(d1, black) && !pos.isAttacked(c1, black) {
 				moves = append(moves, moveCastling(e1, c1))
 			}
 		} else {
 			if pos.castling.mayBlackCastleKingside() &&
-				(occupied&(squareBB(f8)|squareBB(g8))).isEmpty() &&
+				(occupied & (squareBB(f8) | squareBB(g8))).isEmpty() &&
 				!pos.isAttacked(f8, white) && !pos.isAttacked(g8, white) {
 				moves = append(moves, moveCastling(e8, g8))
 			}
 			if pos.castling.mayBlackCastleQueenside() &&
-				(occupied&(squareBB(b8)|squareBB(c8)|squareBB(d8))).isEmpty() &&
+				(occupied & (squareBB(b8) | squareBB(c8) | squareBB(d8))).isEmpty() &&
 				!pos.isAttacked(d8, white) && !pos.isAttacked(c8, white) {
 				moves = append(moves, moveCastling(e8, c8))
 			}
@@ -141,7 +141,7 @@ func (pos *position) generateMoves(color color, doAllMoves bool) []move {
 	)
 
 	if color == white {
-		pawns = pos.pawns() & friendlyPieces
+		pawns = pos.pawns & friendlyPieces
 		singlePushes = pawns.shiftNorth() & ^occupied
 		doublePushes = singlePushes.shiftNorth() & ^occupied & rank4
 		capturesWest = pawns.shiftNorthwest() & enemyPieces
@@ -154,7 +154,7 @@ func (pos *position) generateMoves(color color, doAllMoves bool) []move {
 		eastDelta = 9
 		promoRank = rank8
 	} else {
-		pawns = pos.pawns() & friendlyPieces
+		pawns = pos.pawns & friendlyPieces
 		singlePushes = pawns.shiftSouth() & ^occupied
 		doublePushes = singlePushes.shiftSouth() & ^occupied & rank5
 		capturesWest = pawns.shiftSouthwest() & enemyPieces
@@ -248,13 +248,13 @@ func (pos *position) generateMoves(color color, doAllMoves bool) []move {
 		to := pos.epSquare
 		// The captured pawn is on the source rank, destination file.
 		capturedSq := square((from & 0x38) | (to & 0x07))
-		if (pinInfo.allowedSquares(from)&squareBB(to)).isNotEmpty() &&
-			(allowedCaptures&squareBB(capturedSq)).isNotEmpty() {
+		if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() &&
+			(allowedCaptures & squareBB(capturedSq)).isNotEmpty() {
 			// Check for a horizontal discovered check through the king's rank.
 			if kingLocation.rank() == from.rank() {
 				pseudoOcc := occupied ^ squareBB(capturedSq) ^ squareBB(from)
 				horizontalAttacks := rookAttacks(pseudoOcc, kingLocation) & (westOf[kingLocation] | eastOf[kingLocation])
-				if (horizontalAttacks & pos.colors[enemyOf(color)] & (pos.rooks() | pos.queens())).isNotEmpty() {
+				if (horizontalAttacks & pos.piecesOfColor(enemyOf(color)) & (pos.rooks | pos.queens)).isNotEmpty() {
 					continue
 				}
 			}

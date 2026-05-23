@@ -44,12 +44,14 @@ var (
 // pin detection.
 var interveningSquares [64][64]bitboard
 
+type zobrist uint64
+
 // Zobrist hashing tables.
 var (
-	pieceSquareHashes    [2][6][64]uint64 // [color][piece-1][square]
-	castlingRightsHashes [16]uint64
-	enPassantHashes      [64]uint64 // non-zero only for ep-target squares (ranks 3 and 6)
-	blackMoveHash        uint64     // XORed into the hash when Black is to move
+	pieceSquareHashes    [2][6][64]zobrist // [color][piece-1][square]
+	castlingRightsHashes [16]zobrist
+	enPassantHashes      [64]zobrist // non-zero only for ep-target squares (ranks 3 and 6)
+	blackMoveHash        zobrist     // XORed into the hash when Black is to move
 )
 
 // init runs all table initialisation in dependency order at program startup.
@@ -197,18 +199,18 @@ func initZobrist() {
 	for c := range 2 {
 		for p := range 6 {
 			for sq := range 64 {
-				pieceSquareHashes[c][p][sq] = rng.Uint64()
+				pieceSquareHashes[c][p][sq] = zobrist(rng.Uint64())
 			}
 		}
 	}
 	for i := range castlingRightsHashes {
-		castlingRightsHashes[i] = rng.Uint64()
+		castlingRightsHashes[i] = zobrist(rng.Uint64())
 	}
 	// En-passant hashes are only needed for ranks 3 and 6 (the ep-target squares).
 	for i := range square(64) {
 		if i.rank() == 2 || i.rank() == 5 {
-			enPassantHashes[i] = rng.Uint64()
+			enPassantHashes[i] = zobrist(rng.Uint64())
 		}
 	}
-	blackMoveHash = rng.Uint64()
+	blackMoveHash = zobrist(rng.Uint64())
 }
