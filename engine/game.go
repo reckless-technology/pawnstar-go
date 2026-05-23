@@ -66,9 +66,9 @@ func (g *Game) currentPosition() *position {
 }
 
 func (g *Game) playMove(m move) {
-	pos := g.posStack[len(g.posStack)-1]
+	g.posStack = append(g.posStack, g.posStack[len(g.posStack)-1])
+	pos := &g.posStack[len(g.posStack)-1]
 	pos.makeMove(m)
-	g.posStack = append(g.posStack, pos)
 }
 
 // playMoveString finds the legal move matching UCI string s, plays it, and returns it.
@@ -85,9 +85,9 @@ func (g *Game) playMoveString(s string) move {
 }
 
 func (g *Game) makeNullMove() {
-	pos := g.posStack[len(g.posStack)-1]
+	g.posStack = append(g.posStack, g.posStack[len(g.posStack)-1])
+	pos := &g.posStack[len(g.posStack)-1]
 	pos.makeNullMove()
-	g.posStack = append(g.posStack, pos)
 }
 
 func (g *Game) undoMove() {

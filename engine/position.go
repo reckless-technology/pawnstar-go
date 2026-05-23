@@ -31,8 +31,8 @@ type position struct {
 	epSquare    square    // en-passant target square, or noSquare
 	halfMove    uint8     // half-move clock (for 50-move rule)
 	fullMove    uint8     // full-move number minus 1 (stored 0-based)
-	castling    castlingRights
 	flags       uint8
+	castling    castlingRights
 }
 
 const (
@@ -41,16 +41,14 @@ const (
 )
 
 func (pos *position) colorToMove() color {
-	if pos.flags&flagBlackToMove != 0 {
+	if (pos.flags & flagBlackToMove) != 0 {
 		return black
 	}
 	return white
 }
 
-func (pos *position) isNullMove() bool            { return pos.flags&flagNullMove != 0 }
+func (pos *position) isNullMove() bool            { return (pos.flags & flagNullMove) != 0 }
 func (pos *position) isInCheck() bool             { return pos.checkers.isNotEmpty() }
-func (pos *position) kingLocation(c color) square { return pos.kingLocn[c] }
-func (pos *position) pieceAt(sq square) piece     { return pos.squares[sq] }
 func (pos *position) occupied() bitboard          { return pos.whitePieces | pos.blackPieces }
 
 func (pos *position) piecesOfColor(c color) bitboard {

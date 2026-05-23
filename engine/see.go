@@ -64,7 +64,7 @@ func evaluateStaticExchange(pos *position, m move) (int, bool) {
 	if m.kind() == epCapture {
 		captured = pawn
 	} else {
-		captured = pos.pieceAt(m.to())
+		captured = pos.squares[m.to()]
 	}
 	child := *pos
 	child.makeMove(m)

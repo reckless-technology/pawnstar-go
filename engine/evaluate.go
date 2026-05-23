@@ -207,7 +207,7 @@ func determinePawnStructure(pos *position, c color) pawnStructure {
 // evalMaterialExtra returns a bishop-pair bonus (+30 cp) when both color bishops are present.
 func evalMaterialExtra(pos *position, c color) int {
 	bishops := pos.bishops & pos.piecesOfColor(c)
-	if bishops&whiteSqs != 0 && bishops&blackSqs != 0 {
+	if (bishops&whiteSqs) != 0 && (bishops&blackSqs) != 0 {
 		return 30
 	}
 	return 0
