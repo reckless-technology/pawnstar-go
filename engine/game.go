@@ -55,6 +55,38 @@ func NewGame() *Game {
 	return game
 }
 
+// HandleCommand processes a single UCI command line.
+// Returns true if the engine should quit.
+// This is the public interface to the game engine.
+func (game *Game) HandleCommand(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	fields := strings.Fields(line)
+	switch fields[0] {
+	case "uci":
+		fmt.Println("id name Pawnstar-Go")
+		fmt.Println("id author Jonny Reckless")
+		fmt.Println("uciok")
+	case "isready":
+		fmt.Println("readyok")
+	case "ucinewgame":
+		game.stopThinking()
+		game.newGameFromFen(startFen)
+	case "position":
+		game.uciPosition(fields[1:])
+	case "go":
+		game.uciGo(fields[1:])
+	case "stop":
+		game.stopThinking()
+	case "quit":
+		game.stopThinking()
+		return true
+	}
+	return false
+}
+
 // newGameFromFen resets the engine state to the position described by fen.
 func (game *Game) newGameFromFen(fen string) {
 	game.posStack = game.posStackData[:0]
@@ -215,37 +247,6 @@ func (game *Game) searchEntry() {
 	} else {
 		fmt.Println("bestmove 0000")
 	}
-}
-
-// HandleCommand processes a single UCI command line.
-// Returns true if the engine should quit.
-func (game *Game) HandleCommand(line string) bool {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return false
-	}
-	fields := strings.Fields(line)
-	switch fields[0] {
-	case "uci":
-		fmt.Println("id name Pawnstar-Go")
-		fmt.Println("id author Jonny Reckless")
-		fmt.Println("uciok")
-	case "isready":
-		fmt.Println("readyok")
-	case "ucinewgame":
-		game.stopThinking()
-		game.newGameFromFen(startFen)
-	case "position":
-		game.uciPosition(fields[1:])
-	case "go":
-		game.uciGo(fields[1:])
-	case "stop":
-		game.stopThinking()
-	case "quit":
-		game.stopThinking()
-		return true
-	}
-	return false
 }
 
 // uciPosition handles the "position" command, setting the position from a FEN

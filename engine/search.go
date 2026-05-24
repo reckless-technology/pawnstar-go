@@ -131,13 +131,13 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	hasRaisedAlpha := false
 
 	if isTransposition && trans.move.fromTo() != 0 {
-		dbgx.ttMove++
+		dbgx.tableMove++
 		score := searchSingleMove(game, depth, ply, alpha, beta, trans.move, &pv, 0)
 		if game.isCancelPending {
 			return searchCancelledScore
 		}
 		if score >= beta {
-			dbgx.ttMoveBetaCutoff++
+			dbgx.tableMoveBetaCutoff++
 			game.transpositionTable.record(&transposition{pos.hash, trans.move.withScore(score), int16(depth), nodeCut, false})
 			game.historyTable.recordGoodMove(ply, trans.move)
 			return score
@@ -145,7 +145,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		bestScore = score
 		bestMove = trans.move
 		if score > alpha {
-			dbgx.ttMoveRaiseAlpha++
+			dbgx.tableMoveRaiseAlpha++
 			alpha = score
 			hasRaisedAlpha = true
 			game.historyTable.recordGoodMove(ply, trans.move)
@@ -335,13 +335,13 @@ func searchRootNode(game *Game) move {
 			break
 		}
 		sortMovesStable(moves)
-		var childPV variation
+		var pv variation
 		alpha := initialAlpha
 		game.nodeCount = 0
 		bestMoves = append(bestMoves, bestMove)
 
 		for i, move := range moves {
-			score := searchSingleMove(game, depth, 0, alpha, initialBeta, move, &childPV, i)
+			score := searchSingleMove(game, depth, 0, alpha, initialBeta, move, &pv, i)
 			moves[i] = move.withScore(score)
 			if game.isCancelPending {
 				return bestMove
@@ -349,7 +349,7 @@ func searchRootNode(game *Game) move {
 			if score > alpha {
 				alpha = score
 				bestMove = move
-				copyVariation(&principalVariation, childPV, bestMove)
+				copyVariation(&principalVariation, pv, bestMove)
 				pvStr := pvString(principalVariation)
 				fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
 					depth, alpha, time.Since(startTime).Milliseconds(), game.nodeCount, pvStr)

@@ -29,9 +29,8 @@ const (
 	pawnDoublePush  moveType = iota
 	epCapture       moveType = iota
 	castling        moveType = iota
+	isCheckingBit   move     = 1 << 22
 )
-
-const isCheckingBit int64 = 1 << 22
 
 func constructMove(from, to square, p piece, mt moveType, captured piece) move {
 	return move(int64(to) | int64(from)<<6 | int64(p)<<12 | int64(captured)<<15 | int64(mt)<<18)
@@ -39,7 +38,7 @@ func constructMove(from, to square, p piece, mt moveType, captured piece) move {
 
 // Constructor helpers — each encodes the move type and fills in fixed fields.
 func moveNonCapture(from, to square, p piece) move {
-	return constructMove(from, to, p, nonCapture, noPiece)
+	return move(int64(to) | int64(from)<<6 | int64(p)<<12)
 }
 func moveCapture(from, to square, p, captured piece) move {
 	return constructMove(from, to, p, capture, captured)
@@ -69,7 +68,7 @@ func (m move) piece() piece     { return piece((m >> 12) & 0x07) }
 func (m move) captured() piece  { return piece((m >> 15) & 0x07) }
 func (m move) kind() moveType   { return moveType((m >> 18) & 0x0F) }
 func (m move) score() int       { return int(m >> 32) }
-func (m move) isChecking() bool { return (int64(m) & isCheckingBit) != 0 }
+func (m move) isChecking() bool { return (m & isCheckingBit) != 0 }
 
 // fromTo returns the combined from+to index (bits 0–11) used as a hash key in
 // the history table.
@@ -97,7 +96,7 @@ func (m move) withScore(s int) move {
 
 // equal compares move identity (from/to/piece/kind/captured), ignoring the score.
 func (m move) equal(other move) bool {
-	return (int64(m) & 0x3FFFFF) == (int64(other) & 0x3FFFFF)
+	return (m & 0x3FFFFF) == (other & 0x3FFFFF)
 }
 
 // String returns the move in UCI long-algebraic notation ("e2e4", "e7e8q", "0000" for null).

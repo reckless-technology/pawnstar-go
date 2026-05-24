@@ -69,10 +69,7 @@ func initMagics() {
 	var target_squares [4096]bitboard
 
 	for sq := range square(64) {
-		mask := (northOf[sq] & ^rank8) |
-			(southOf[sq] & ^rank1) |
-			(eastOf[sq] & ^fileH) |
-			(westOf[sq] & ^fileA)
+		mask := (northOf[sq] & ^rank8) | (southOf[sq] & ^rank1) | (eastOf[sq] & ^fileH) | (westOf[sq] & ^fileA)
 		rookMask[sq] = mask
 		rookShift[sq] = uint(64 - mask.popCount())
 		rookTable[sq] = make([]bitboard, 1<<mask.popCount())
@@ -81,10 +78,8 @@ func initMagics() {
 	}
 
 	for sq := range square(64) {
-		mask := (northeastOf[sq] & ^(rank8 | fileH)) |
-			(northwestOf[sq] & ^(rank8 | fileA)) |
-			(southeastOf[sq] & ^(rank1 | fileH)) |
-			(southwestOf[sq] & ^(rank1 | fileA))
+		mask := (northeastOf[sq] & ^(rank8 | fileH)) | (northwestOf[sq] & ^(rank8 | fileA)) |
+			(southeastOf[sq] & ^(rank1 | fileH)) | (southwestOf[sq] & ^(rank1 | fileA))
 		bishopMask[sq] = mask
 		bishopShift[sq] = uint(64 - mask.popCount())
 		bishopTable[sq] = make([]bitboard, 1<<mask.popCount())

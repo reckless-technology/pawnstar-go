@@ -21,9 +21,6 @@ type debugX struct {
 	evalCutoffBeta       uint
 	evalCutoffAlpha      uint
 	evalHashHits         uint
-	ttMove               uint
-	ttMoveBetaCutoff     uint
-	ttMoveRaiseAlpha     uint
 	nodesCut             uint // beta cutoffs (fail-high nodes)
 	nodesPvChanged       uint
 	nodesPv              uint
@@ -31,6 +28,9 @@ type debugX struct {
 	tableHitAlpha        uint // TT hits that pruned: stored score ≤ alpha (All node)
 	tableHitBeta         uint // TT hits that pruned: stored score ≥ beta (Cut node)
 	tableHitPv           uint // TT hits on PV nodes (search depth incremented by 1)
+	tableMove            uint
+	tableMoveBetaCutoff  uint
+	tableMoveRaiseAlpha  uint
 	nullMoveAttempts     uint // times null-move pruning was attempted
 	nullMoveFails        uint // times the null-move score did not reach beta
 	lmrAttempts1         uint // times single-ply late-move reduction was applied

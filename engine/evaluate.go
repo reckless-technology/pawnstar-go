@@ -343,8 +343,8 @@ func evaluatePosition(game *Game, alpha, beta int) int {
 	ps := [2]pawnStructure{determinePawnStructure(pos, white), determinePawnStructure(pos, black)}
 	wScore += evalPawnStructure(&ps[white], white)
 	bScore += evalPawnStructure(&ps[black], black)
-	// wScore += evalMobility(pos, white, &ps)
-	// bScore += evalMobility(pos, black, &ps)
+	wScore += evalMobility(pos, white, &ps)
+	bScore += evalMobility(pos, black, &ps)
 	wScore += evalKing(pos, white, endgame)
 	bScore += evalKing(pos, black, endgame)
 

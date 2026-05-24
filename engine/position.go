@@ -47,9 +47,9 @@ func (pos *position) colorToMove() color {
 	return white
 }
 
-func (pos *position) isNullMove() bool            { return (pos.flags & flagNullMove) != 0 }
-func (pos *position) isInCheck() bool             { return pos.checkers.isNotEmpty() }
-func (pos *position) occupied() bitboard          { return pos.whitePieces | pos.blackPieces }
+func (pos *position) isNullMove() bool   { return (pos.flags & flagNullMove) != 0 }
+func (pos *position) isInCheck() bool    { return pos.checkers.isNotEmpty() }
+func (pos *position) occupied() bitboard { return pos.whitePieces | pos.blackPieces }
 
 func (pos *position) piecesOfColor(c color) bitboard {
 	if c == white {
@@ -88,8 +88,8 @@ func (pos *position) piecesOfType(p piece) *bitboard {
 // Zobrist hash, and incremental PST score.
 func (pos *position) addPiece(c color, p piece, sq square) {
 	bb := squareBB(sq)
-	*pos.piecesOfType(p) |= bb
-	*pos.piecesOfColorPtr(c) |= bb
+	*pos.piecesOfType(p) ^= bb
+	*pos.piecesOfColorPtr(c) ^= bb
 	pos.hash ^= pieceSquareHashes[c][p-1][sq]
 	pos.squares[sq] = p
 	pos.scores[c] += pstValue(c, p, sq)
@@ -98,8 +98,8 @@ func (pos *position) addPiece(c color, p piece, sq square) {
 // removePiece removes the piece of color c on sq and updates the same fields.
 func (pos *position) removePiece(c color, p piece, sq square) {
 	bb := squareBB(sq)
-	*pos.piecesOfType(p) &^= bb
-	*pos.piecesOfColorPtr(c) &^= bb
+	*pos.piecesOfType(p) ^= bb
+	*pos.piecesOfColorPtr(c) ^= bb
 	pos.hash ^= pieceSquareHashes[c][p-1][sq]
 	pos.squares[sq] = noPiece
 	pos.scores[c] -= pstValue(c, p, sq)
@@ -204,25 +204,25 @@ func positionFromFen(fen string) position {
 // computeHash builds the Zobrist hash from scratch.  Used once in positionFromFen;
 // all subsequent updates are applied incrementally in makeMove.
 func (pos *position) computeHash() zobrist {
-	var h zobrist
+	var hash zobrist
 	if pos.flags&flagBlackToMove != 0 {
-		h ^= blackMoveHash
+		hash ^= blackMoveHash
 	}
-	h ^= pos.castling.hash()
-	h ^= enPassantHashes[pos.epSquare]
+	hash ^= pos.castling.hash()
+	hash ^= enPassantHashes[pos.epSquare]
 	for p := pawn; p <= king; p++ {
 		b := *pos.piecesOfType(p) & pos.whitePieces
 		for b.isNotEmpty() {
 			sq := b.popLsb()
-			h ^= pieceSquareHashes[white][p-1][sq]
+			hash ^= pieceSquareHashes[white][p-1][sq]
 		}
 		b = *pos.piecesOfType(p) & pos.blackPieces
 		for b.isNotEmpty() {
 			sq := b.popLsb()
-			h ^= pieceSquareHashes[black][p-1][sq]
+			hash ^= pieceSquareHashes[black][p-1][sq]
 		}
 	}
-	return h
+	return hash
 }
 
 func (pos *position) toFenString() string {
@@ -312,13 +312,13 @@ func (pos *position) makeMove(m move) {
 		pos.halfMove = 0
 		pos.movePiece(color, pawn, from, to)
 		// Set the ep square to the skipped square (midpoint of from and to).
-		pos.epSquare = square((int(from) + int(to)) >> 1)
+		pos.epSquare = (from + to) >> 1
 		pos.hash ^= enPassantHashes[pos.epSquare]
 
 	case epCapture:
 		pos.halfMove = 0
 		// The captured pawn is on the same rank as from, same file as to.
-		capturedSq := square((int(from) & 0x38) | (int(to) & 0x07))
+		capturedSq := (from & 0x38) | (to & 0x07)
 		pos.removePiece(enemyOf(color), pawn, capturedSq)
 		pos.movePiece(color, pawn, from, to)
 
