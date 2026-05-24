@@ -144,13 +144,13 @@ func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare p
 
 	AttackFound:
 		// Use only the least-valuable attacker (LSB of attackers).
-		lsb := attackers & (-attackers)
+		attacker := attackers & (-attackers)
 		enemy := enemyOf(color)
 		*bb.piecesOfType(pieceOnSquare) ^= sqBB
 		*bb.piecesOfColor(enemy) ^= sqBB
-		*bb.piecesOfType(capturingPiece) ^= lsb | sqBB
-		*bb.piecesOfColor(color) ^= lsb | sqBB
-		occupied ^= lsb
+		*bb.piecesOfType(capturingPiece) ^= attacker | sqBB
+		*bb.piecesOfColor(color) ^= attacker | sqBB
+		occupied ^= attacker
 		scores[ply] = seeValues[pieceOnSquare]
 		pieceOnSquare = capturingPiece
 		color = enemy
