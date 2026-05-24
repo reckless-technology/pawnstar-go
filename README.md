@@ -149,7 +149,7 @@ An alpha/beta material early-exit skips the full evaluation when the material sc
 
 ### Opening book
 
-`OpeningBook` ([engine/book.go](engine/book.go)) embeds [engine/book.txt](engine/book.txt) (385 lines from TSCP) at compile time via `//go:embed`. `LoadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves. `GetMove` returns a random candidate, giving variety across games.
+`openingBook` ([engine/book.go](engine/book.go)) reads [book.txt](book.txt) (385 lines from TSCP) from the same directory as the binary at startup. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves; an absent file silently produces an empty book. `getMove` returns a random candidate, giving variety across games.
 
 ### History heuristic
 
