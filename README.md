@@ -85,7 +85,6 @@ Move lists are plain `[]move` slices allocated with `make([]move, 0, 64)` per ca
 3. Build the forbidden-square set for the king (attacked squares, including X-ray attacks through the king via temporarily clearing the king from occupancy).
 4. For single check, restrict non-king moves to interpositions and captures of the checker.
 5. Apply pin constraints via `Pins.AllowedSquares(from)` — returns the ray the piece may move along, or all squares if unpinned.
-6. Delegate pawn moves to `genPawnMoves`, which handles single/double pushes, captures, promotions, and en passant (with horizontal-pin detection for en passant).
 
 ### Search
 

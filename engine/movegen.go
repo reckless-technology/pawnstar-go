@@ -10,6 +10,14 @@ func (position *position) generateLegalCaptures() []move {
 	return position.generateMoves(position.colorToMove, false)
 }
 
+// Usaed for castling legality detection.
+const (
+	f1g1bb   bitboard = bitboard(1)<<f1 | bitboard(1)<<g1
+	f8g8bb   bitboard = bitboard(1)<<f8 | bitboard(1)<<g8
+	b1c1d1bb bitboard = bitboard(1)<<b1 | bitboard(1)<<c1 | bitboard(1)<<d1
+	b8c8d8bb bitboard = bitboard(1)<<b8 | bitboard(1)<<c8 | bitboard(1)<<d8
+)
+
 // generateMoves returns legal moves for color.  When doAllMoves is false only
 // captures and promotions are generated (used for quiescence search).
 //
@@ -100,23 +108,23 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 	if doAllMoves && !position.isInCheck() {
 		if color == white {
 			if position.castling.mayWhiteCastleKingside() &&
-				(occupied & (squareBB(f1) | squareBB(g1))).isEmpty() &&
+				(occupied & f1g1bb).isEmpty() &&
 				!position.isAttacked(f1, black) && !position.isAttacked(g1, black) {
 				moves = append(moves, moveCastling(e1, g1))
 			}
 			if position.castling.mayWhiteCastleQueenside() &&
-				(occupied & (squareBB(b1) | squareBB(c1) | squareBB(d1))).isEmpty() &&
+				(occupied & b1c1d1bb).isEmpty() &&
 				!position.isAttacked(d1, black) && !position.isAttacked(c1, black) {
 				moves = append(moves, moveCastling(e1, c1))
 			}
 		} else {
 			if position.castling.mayBlackCastleKingside() &&
-				(occupied & (squareBB(f8) | squareBB(g8))).isEmpty() &&
+				(occupied & f8g8bb).isEmpty() &&
 				!position.isAttacked(f8, white) && !position.isAttacked(g8, white) {
 				moves = append(moves, moveCastling(e8, g8))
 			}
 			if position.castling.mayBlackCastleQueenside() &&
-				(occupied & (squareBB(b8) | squareBB(c8) | squareBB(d8))).isEmpty() &&
+				(occupied & b8c8d8bb).isEmpty() &&
 				!position.isAttacked(d8, white) && !position.isAttacked(c8, white) {
 				moves = append(moves, moveCastling(e8, c8))
 			}
