@@ -255,7 +255,7 @@ func evalKing(pos *position, color color, endgame bool) int {
 	enemyColor := enemyOf(color)
 	friendlyPawns := friendly & pos.pawns
 	enemyPawns := pos.piecesOfColor(enemyColor) & pos.pawns
-	kingLocation := pos.kingLocn[color]
+	kingLocation := pos.kingLocation[color]
 
 	var pstScore int
 	if endgame {
@@ -327,7 +327,7 @@ func evaluatePosition(game *Game, alpha, beta int) int {
 
 	// Early exit: if material alone is far outside the search window, skip full eval.
 	matScore := wScore - bScore
-	if pos.colorToMove() == black {
+	if pos.colorToMove == black {
 		matScore = -matScore
 	}
 	if matScore > (beta + 200) {
@@ -348,7 +348,7 @@ func evaluatePosition(game *Game, alpha, beta int) int {
 	wScore += evalKing(pos, white, endgame)
 	bScore += evalKing(pos, black, endgame)
 
-	if pos.colorToMove() == white {
+	if pos.colorToMove == white {
 		entry.hash = pos.hash
 		entry.score = wScore - bScore
 		return wScore - bScore

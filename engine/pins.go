@@ -15,10 +15,10 @@ type pins struct {
 // captured).
 func computePins(pos *position) pins {
 	var p pins
-	color := pos.colorToMove()
+	color := pos.colorToMove
 	occupied := pos.occupied()
 	friendlyPieces := pos.piecesOfColor(color)
-	kingLocation := pos.kingLocn[color]
+	kingLocation := pos.kingLocation[color]
 	intervening := &interveningSquares[kingLocation]
 
 	// Candidate pinners: enemy sliders on a bishop or rook ray from the king.

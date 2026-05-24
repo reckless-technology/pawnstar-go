@@ -103,9 +103,9 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	// beats beta, the position is likely good enough to prune.  Skipped when:
 	// already in a null-move position, in check, not a null window, or the side
 	// has ≤ 3 pieces (zugzwang risk).
-	if !pos.isNullMove() && !pos.isInCheck() && beta == alpha+1 && pos.piecesOfColor(pos.colorToMove()).popCount() > 3 {
+	if !pos.isNullMove() && !pos.isInCheck() && beta == alpha+1 && pos.piecesOfColor(pos.colorToMove).popCount() > 3 {
 		pstScore := pos.scores[white] - pos.scores[black]
-		if pos.colorToMove() == black {
+		if pos.colorToMove == black {
 			pstScore = -pstScore
 		}
 		if pstScore >= (beta + 200) {

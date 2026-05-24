@@ -166,7 +166,7 @@ var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
 // Score = captured_value × 10000 − moving_piece_value × 1000 + history_count,
 // giving priority to captures (MVV-LVA) and historically good quiet moves.
 func (game *Game) scoreAndSortMovesX(moves []move, ply int) {
-	color := game.currentPosition().colorToMove()
+	color := game.currentPosition().colorToMove
 	for i, move := range moves {
 		score := (pieceVals[move.captured()] * 10) - pieceVals[move.piece()]
 		score += pstValue(color, move.piece(), move.to()) - pstValue(color, move.piece(), move.from())
@@ -180,7 +180,7 @@ func (game *Game) scoreAndSortMoves(moves []move, ply int) {
 	// Determine all squares attacked by the enemy
 	position := game.currentPosition()
 	occupied := position.occupied()
-	color := position.colorToMove()
+	color := position.colorToMove
 	enemyColor := enemyOf(color)
 	enemyPieces := position.piecesOfColor(enemyColor)
 	enemyPawns := enemyPieces & position.pawns
@@ -286,7 +286,7 @@ func (game *Game) uciPosition(args []string) {
 // uciGo handles the "go" command, parsing the clock parameters and starting the search.
 func (game *Game) uciGo(args []string) {
 	tc := &game.timeControl
-	color := game.currentPosition().colorToMove()
+	color := game.currentPosition().colorToMove
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "wtime":

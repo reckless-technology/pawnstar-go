@@ -46,7 +46,8 @@ The struct holds:
 - Named bitboard fields: `pawns`, `knights`, `bishops`, `rooks`, `queens`, `kings`, `whitePieces`, `blackPieces`
 - `squares[64]piece` — O(1) piece lookup by square
 - `scores[2]int` — incremental material + PST totals per side (excludes king; updated by `addPiece`/`removePiece`/`movePiece`)
-- `kingLocn[2]square` — king locations (updated separately because king PST is phase-dependent)
+- `kingLocation[2]square` — king locations (updated separately because king PST is phase-dependent)
+- `colorToMove color` — side to move as a direct field
 - Zobrist hash maintained incrementally
 
 `Bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for common set operations (`popCount`, `lsb`, `clearLsb`, shifts in all eight directions).
