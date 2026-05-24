@@ -10,7 +10,7 @@ func (position *position) generateLegalCaptures() []move {
 	return position.generateMoves(position.colorToMove, false)
 }
 
-// Usaed for castling legality detection.
+// Used for castling legality detection.
 const (
 	f1g1bb   bitboard = bitboard(1)<<f1 | bitboard(1)<<g1
 	f8g8bb   bitboard = bitboard(1)<<f8 | bitboard(1)<<g8

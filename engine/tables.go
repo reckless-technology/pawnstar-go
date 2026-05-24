@@ -2,6 +2,20 @@ package engine
 
 import "math/rand"
 
+type zobrist uint64
+type shiftFn func(bitboard) bitboard
+type attackFn func(bitboard, square) bitboard
+
+// bishopAttacks returns the squares attacked by a bishop on sq given the occupied squares.
+func bishopAttacks(occ bitboard, sq square) bitboard {
+	return bishopTable[sq][(uint64(occ&bishopMask[sq])*bishopMagic[sq])>>bishopShift[sq]]
+}
+
+// rookAttacks returns the squares attacked by a rook on sq given the occupied squares.
+func rookAttacks(occ bitboard, sq square) bitboard {
+	return rookTable[sq][(uint64(occ&rookMask[sq])*rookMagic[sq])>>rookShift[sq]]
+}
+
 // Precomputed ray tables: for each square, the set of squares in each direction.
 var (
 	northOf     [64]bitboard
@@ -44,8 +58,6 @@ var (
 // pin detection.
 var interveningSquares [64][64]bitboard
 
-type zobrist uint64
-
 // Zobrist hashing tables.
 var (
 	pieceSquareHashes    [2][6][64]zobrist // [color][piece-1][square]
@@ -64,8 +76,6 @@ func init() {
 	initZobrist()
 	initCastleMasks()
 }
-
-type shiftFn func(bitboard) bitboard
 
 var shiftFns = map[direction]shiftFn{
 	north:     bitboard.shiftNorth,
@@ -105,14 +115,8 @@ func initRays() {
 
 // kingFill returns the set of squares one king-step from any bit set in b.
 func kingFill(b bitboard) bitboard {
-	return b.shiftNorth() |
-		b.shiftNortheast() |
-		b.shiftEast() |
-		b.shiftSoutheast() |
-		b.shiftSouth() |
-		b.shiftSouthwest() |
-		b.shiftWest() |
-		b.shiftNorthwest()
+	return b.shiftNorth() | b.shiftNortheast() | b.shiftEast() | b.shiftSoutheast() |
+		b.shiftSouth() | b.shiftSouthwest() | b.shiftWest() | b.shiftNorthwest()
 }
 
 // initAttacks populates pawn, knight, sliding-piece (empty board), and king attack tables.
@@ -125,14 +129,14 @@ func initAttacks() {
 		pawnAttacksWhite[sq] = b.shiftNorthwest() | b.shiftNortheast()
 		pawnAttacksBlack[sq] = b.shiftSouthwest() | b.shiftSoutheast()
 
-		var ka bitboard
+		var knightTargets bitboard
 		for _, v := range knightVectors {
 			nf, nr := int(f)+v[0], int(r)+v[1]
 			if nf >= 0 && nf < 8 && nr >= 0 && nr < 8 {
-				ka |= squareBB(squareXY(nf, nr))
+				knightTargets |= squareBB(squareXY(nf, nr))
 			}
 		}
-		knightAttacks[sq] = ka
+		knightAttacks[sq] = knightTargets
 
 		bishopAttacksEmpty[sq] = northeastOf[sq] | northwestOf[sq] | southeastOf[sq] | southwestOf[sq]
 		rookAttacksEmpty[sq] = northOf[sq] | southOf[sq] | eastOf[sq] | westOf[sq]
@@ -145,7 +149,7 @@ func initAttacks() {
 
 // initPawnMasks populates all pawn-structure and king-shelter masks.
 func initPawnMasks() {
-	for sq := square(0); sq < 64; sq++ {
+	for sq := range square(64) {
 		b := squareBB(sq)
 		file := fileA << uint(sq.file())
 
@@ -213,16 +217,6 @@ func initZobrist() {
 		}
 	}
 	blackMoveHash = zobrist(rng.Uint64())
-}
-
-// bishopAttacks returns the squares attacked by a bishop on sq given the occupied squares.
-func bishopAttacks(occ bitboard, sq square) bitboard {
-	return bishopTable[sq][(uint64(occ&bishopMask[sq])*bishopMagic[sq])>>bishopShift[sq]]
-}
-
-// rookAttacks returns the squares attacked by a rook on sq given the occupied squares.
-func rookAttacks(occ bitboard, sq square) bitboard {
-	return rookTable[sq][(uint64(occ&rookMask[sq])*rookMagic[sq])>>rookShift[sq]]
 }
 
 var (
@@ -313,13 +307,13 @@ func fillMagicTable(magic uint64, occs, refs []bitboard, shift uint, table []bit
 
 // enumerateOccupancies generates all 2^n subsets of mask (where n = popcount(mask))
 // using the Carry-Rippler technique, stores each subset in occupancies and its
-// corresponding attack set (from attackFn) in targets, and returns n.
-func enumerateOccupancies(mask bitboard, occupancies, targets []bitboard, attackFn func(bitboard, square) bitboard, sq square) int {
+// corresponding attack set (from getAttacks) in targets, and returns n.
+func enumerateOccupancies(mask bitboard, occupancies, targets []bitboard, getAttacks attackFn, sq square) int {
 	count := 0
 	occupancy := bitboard(0)
 	for {
 		occupancies[count] = occupancy
-		targets[count] = attackFn(occupancy, sq)
+		targets[count] = getAttacks(occupancy, sq)
 		count++
 		occupancy = (occupancy - 1) & mask
 		if occupancy == 0 {

@@ -112,7 +112,7 @@ Move lists are plain `[]move` slices allocated with `make([]move, 0, 64)` per ca
 |---|---|
 | Principal variation search (PVS) | Null-window on moves 2+ when not in check; re-search full window on fail-high |
 | Null-move pruning | R = 4; skipped if in check, position is already null-move, window is not null (`beta ≠ alpha + 1`), or side has ≤ 3 pieces |
-| Late move reduction (LMR) | Reduce by 1 for moves 4+ (non-capture, non-check, non-pawn, depth > 2); reduce by 2 additionally for moves 7+ at depth > 3; re-search at full depth if score exceeds alpha |
+| Late move reduction (LMR) | Reduce by 1 from the 2nd move onward (non-capture, non-check, non-pawn/king, depth > 2); reduce by 2 additionally from move index 7 (depth > 3, zero history count); re-search at full depth if score exceeds alpha |
 | Check extension | In quiescence, an in-check position re-enters `searchAlphaBeta` at the same depth instead of standing pat |
 | Transposition table | Hit on PV node increments depth by 1; Cut/All hits return early if score is conclusive |
 

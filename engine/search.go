@@ -52,7 +52,8 @@ func searchSingleMove(game *Game, depth, ply, alpha, beta int, m move, pv *varia
 //   - Quiescence search at depth ≤ 0 (when not in check).
 //   - Null-move pruning with R = 4 (skipped in check, zugzwang-risk positions, non-null windows).
 //   - TT move tried before generating all legal moves.
-//   - Late move reduction: −1 ply for moves 4+, −2 ply additionally for moves 7+ (quiet, non-check, depth > 2).
+//   - Late move reduction: −1 ply from the 2nd move onward (moveIdx > 0, quiet, non-check, non-pawn/king, depth > 2);
+//     −2 ply additionally from moveIdx 7 (depth > 3, zero history count).
 //   - LMR re-search at full depth if the reduced search exceeds alpha.
 //   - TT write with Cut/All/PV node type on exit.
 func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variation) int {
