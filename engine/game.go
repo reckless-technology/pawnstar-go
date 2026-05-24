@@ -2,6 +2,8 @@ package engine
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,88 +39,88 @@ type Game struct {
 	openingBook        openingBook
 	nodeCount          int
 	wg                 sync.WaitGroup
+	posStackData       [512]position
 	posStack           []position
 	isCancelPending    bool
 }
 
 // NewGame creates an engine instance ready to accept UCI commands.
 func NewGame() *Game {
-	g := &Game{
+	game := &Game{
 		transpositionTable: newTranspositionTable(hashTableMB),
 		timeControl:        newTimeControl(),
 		openingBook:        loadOpeningBook(),
-		posStack:           make([]position, 0, 512),
 	}
-	g.newGameFromFen(startFen)
-	return g
+	game.newGameFromFen(startFen)
+	return game
 }
 
 // newGameFromFen resets the engine state to the position described by fen.
-func (g *Game) newGameFromFen(fen string) {
-	g.posStack = g.posStack[:0]
-	g.posStack = append(g.posStack, positionFromFen(fen))
-	g.nodeCount = 0
-	g.isCancelPending = false
-	g.timeControl = newTimeControl()
+func (game *Game) newGameFromFen(fen string) {
+	game.posStack = game.posStackData[:0]
+	game.posStack = append(game.posStack, positionFromFen(fen))
+	game.nodeCount = 0
+	game.isCancelPending = false
+	game.timeControl = newTimeControl()
 }
 
-func (g *Game) currentPosition() *position {
-	return &g.posStack[len(g.posStack)-1]
+func (game *Game) currentPosition() *position {
+	return &game.posStack[len(game.posStack)-1]
 }
 
-func (g *Game) playMove(m move) {
-	g.posStack = append(g.posStack, g.posStack[len(g.posStack)-1])
-	pos := &g.posStack[len(g.posStack)-1]
+func (game *Game) playMove(m move) {
+	game.posStack = append(game.posStack, game.posStack[len(game.posStack)-1])
+	pos := &game.posStack[len(game.posStack)-1]
 	pos.makeMove(m)
 }
 
 // playMoveString finds the legal move matching UCI string s, plays it, and returns it.
 // Returns moveNone if s does not match any legal move.
-func (g *Game) playMoveString(s string) move {
-	moves := g.currentPosition().generateLegalMoves()
+func (game *Game) playMoveString(s string) move {
+	moves := game.currentPosition().generateLegalMoves()
 	for _, move := range moves {
 		if move.String() == s {
-			g.playMove(move)
+			game.playMove(move)
 			return move
 		}
 	}
 	return moveNone()
 }
 
-func (g *Game) makeNullMove() {
-	g.posStack = append(g.posStack, g.posStack[len(g.posStack)-1])
-	pos := &g.posStack[len(g.posStack)-1]
+func (game *Game) makeNullMove() {
+	game.posStack = append(game.posStack, game.posStack[len(game.posStack)-1])
+	pos := &game.posStack[len(game.posStack)-1]
 	pos.makeNullMove()
 }
 
-func (g *Game) undoMove() {
-	if len(g.posStack) > 1 {
-		g.posStack = g.posStack[:len(g.posStack)-1]
+func (game *Game) undoMove() {
+	if len(game.posStack) > 1 {
+		game.posStack = game.posStack[:len(game.posStack)-1]
 	}
 }
 
-func (g *Game) isDrawByFiftyMoves() bool {
-	return g.currentPosition().halfMove >= 100
+func (game *Game) isDrawByFiftyMoves() bool {
+	return game.currentPosition().halfMove >= 100
 }
 
 // isDrawByRepetition returns true if the current position has occurred twice
 // before in the game history (three occurrences total).  Steps back by two plies
 // at a time (same side to move) and stops early at an irreversible move.
-func (g *Game) isDrawByRepetition() bool {
-	n := len(g.posStack)
+func (game *Game) isDrawByRepetition() bool {
+	n := len(game.posStack)
 	if n < 5 {
 		return false
 	}
-	h := g.posStack[n-1].hash
+	h := game.posStack[n-1].hash
 	repetitions := 2
 	for i := n - 5; i >= 0; i -= 2 {
-		if g.posStack[i].hash == h {
+		if game.posStack[i].hash == h {
 			repetitions--
 			if repetitions == 0 {
 				return true
 			}
 		}
-		if g.posStack[i].halfMove == 0 {
+		if game.posStack[i].halfMove == 0 {
 			return false
 		}
 	}
@@ -131,20 +133,20 @@ var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
 // scoreAndSortMoves assigns a sort score to each move and sorts descending.
 // Score = captured_value × 10000 − moving_piece_value × 1000 + history_count,
 // giving priority to captures (MVV-LVA) and historically good quiet moves.
-func (g *Game) scoreAndSortMoves(moves []move, ply int) {
-	color := g.currentPosition().colorToMove()
+func (game *Game) scoreAndSortMovesX(moves []move, ply int) {
+	color := game.currentPosition().colorToMove()
 	for i, move := range moves {
 		score := (pieceVals[move.captured()] * 10) - pieceVals[move.piece()]
 		score += pstValue(color, move.piece(), move.to()) - pstValue(color, move.piece(), move.from())
-		score = (score * 1000) + int(g.historyTable.getCount(ply, move))
+		score = (score * 1000) + int(game.historyTable.getCount(ply, move))
 		moves[i] = move.withScore(score)
 	}
 	sortMovesUnstable(moves)
 }
 
-func (g *Game) scoreAndSortMovesExtra(moves []move, ply int) {
+func (game *Game) scoreAndSortMoves(moves []move, ply int) {
 	// Determine all squares attacked by the enemy
-	position := g.currentPosition()
+	position := game.currentPosition()
 	occupied := position.occupied()
 	color := position.colorToMove()
 	enemyColor := enemyOf(color)
@@ -178,7 +180,7 @@ func (g *Game) scoreAndSortMovesExtra(moves []move, ply int) {
 			score = pieceVals[captured] + pieceVals[promoted]
 		}
 		score += pstValue(color, piece, move.to()) - pstValue(color, piece, move.from())
-		score = score*1000 + int(g.historyTable.getCount(ply, move))
+		score = score*1000 + int(game.historyTable.getCount(ply, move))
 		moves[i] = move.withScore(score)
 	}
 	sortMovesUnstable(moves)
@@ -186,31 +188,142 @@ func (g *Game) scoreAndSortMovesExtra(moves []move, ply int) {
 
 // startThinking launches a search goroutine for the current position and time
 // control.  Any previously running search is stopped first.
-func (g *Game) startThinking() {
-	g.stopThinking()
-	g.isCancelPending = false
-	g.wg.Add(1)
+func (game *Game) startThinking() {
+	game.stopThinking()
+	game.isCancelPending = false
+	game.wg.Add(1)
 	go func() {
-		g.searchEntry()
-		g.wg.Done()
+		game.searchEntry()
+		game.wg.Done()
 	}()
 }
 
 // stopThinking signals the search goroutine to halt and blocks until it exits.
-func (g *Game) stopThinking() {
-	g.isCancelPending = true
-	g.wg.Wait()
-	g.isCancelPending = false
+func (game *Game) stopThinking() {
+	game.isCancelPending = true
+	game.wg.Wait()
+	game.isCancelPending = false
 }
 
 // searchEntry is the body of the search goroutine.  It runs the search, plays the
 // best move on the internal position, and prints the UCI bestmove response.
-func (g *Game) searchEntry() {
-	m := searchRootNode(g)
+func (game *Game) searchEntry() {
+	m := searchRootNode(game)
 	if m != moveNone() {
-		g.playMove(m)
+		game.playMove(m)
 		fmt.Println("bestmove " + m.String())
 	} else {
 		fmt.Println("bestmove 0000")
 	}
+}
+
+// HandleCommand processes a single UCI command line.
+// Returns true if the engine should quit.
+func (game *Game) HandleCommand(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	fields := strings.Fields(line)
+	switch fields[0] {
+	case "uci":
+		fmt.Println("id name Pawnstar-Go")
+		fmt.Println("id author Jonny Reckless")
+		fmt.Println("uciok")
+	case "isready":
+		fmt.Println("readyok")
+	case "ucinewgame":
+		game.stopThinking()
+		game.newGameFromFen(startFen)
+	case "position":
+		game.uciPosition(fields[1:])
+	case "go":
+		game.uciGo(fields[1:])
+	case "stop":
+		game.stopThinking()
+	case "quit":
+		game.stopThinking()
+		return true
+	}
+	return false
+}
+
+// uciPosition handles the "position" command, setting the position from a FEN
+// string or the standard starting position, then applying any supplied move list.
+func (game *Game) uciPosition(args []string) {
+	fen := startFen
+	movesIdx := -1
+	if len(args) > 0 {
+		switch args[0] {
+		case "startpos":
+			for i, a := range args {
+				if a == "moves" {
+					movesIdx = i + 1
+					break
+				}
+			}
+		case "fen":
+			i := 1
+			for i < len(args) && args[i] != "moves" {
+				i++
+			}
+			fen = strings.Join(args[1:i], " ")
+			if i < len(args) {
+				movesIdx = i + 1
+			}
+		}
+	}
+	game.stopThinking()
+	game.newGameFromFen(fen)
+	if movesIdx >= 0 {
+		for _, mv := range args[movesIdx:] {
+			game.playMoveString(mv)
+		}
+	}
+}
+
+// uciGo handles the "go" command, parsing the clock parameters and starting the search.
+func (game *Game) uciGo(args []string) {
+	tc := &game.timeControl
+	color := game.currentPosition().colorToMove()
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "wtime":
+			if color == white {
+				tc.clockType = clockStandard
+				if v, err := strconv.Atoi(args[i+1]); err == nil {
+					tc.timeRemaining = time.Duration(v) * time.Millisecond
+				}
+			}
+			i++
+		case "btime":
+			if color == black {
+				tc.clockType = clockStandard
+				if v, err := strconv.Atoi(args[i+1]); err == nil {
+					tc.timeRemaining = time.Duration(v) * time.Millisecond
+				}
+			}
+			i++
+		case "movestogo":
+			if v, err := strconv.Atoi(args[i+1]); err == nil {
+				tc.numMovesRemaining = v
+			}
+			i++
+		case "depth":
+			tc.clockType = clockFixedDepth
+			if v, err := strconv.Atoi(args[i+1]); err == nil {
+				tc.depth = v
+			}
+			i++
+		case "movetime":
+			tc.clockType = clockFixedTime
+			if v, err := strconv.Atoi(args[i+1]); err == nil {
+				tc.timeRemaining = time.Duration(v) * time.Millisecond
+			}
+			i++
+		case "infinite":
+			tc.clockType = clockInfinite
+		}
+	}
+	game.startThinking()
 }

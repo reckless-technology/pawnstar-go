@@ -40,7 +40,7 @@ python3 ../pawnstar-rs/game.py
 
 ### Board representation
 
-`position` ([engine/position.go](engine/position.go)) is a value type; `makeMove` and `makeNullMove` operate on a caller-owned copy. `Game` maintains a `posStack []position` history stack; undoing a move is a slice truncation — there is no unmake logic.
+`position` ([engine/position.go](engine/position.go)) is a value type; `makeMove` and `makeNullMove` operate on a caller-owned copy. `Game` maintains a `posStack []position` history stack backed by an embedded `posStackData [512]position` array (no heap allocation); undoing a move is a slice truncation — there is no unmake logic.
 
 The struct holds:
 - Named bitboard fields: `pawns`, `knights`, `bishops`, `rooks`, `queens`, `kings`, `whitePieces`, `blackPieces`
@@ -157,7 +157,7 @@ An alpha/beta material early-exit skips the full evaluation when the material sc
 
 ### UCI protocol
 
-`Game.HandleCommand` ([engine/uci.go](engine/uci.go)) processes commands on the calling goroutine. Supported:
+`Game.HandleCommand` ([engine/game.go](engine/game.go)) processes commands on the calling goroutine. Supported:
 
 | Command | Notes |
 |---|---|

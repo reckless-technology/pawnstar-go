@@ -73,18 +73,18 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	}
 
 	// Transposition table lookup.
-	tt, isTransposition := game.transpositionTable.find(pos.hash)
-	if isTransposition && int(tt.depth) >= depth {
-		switch tt.nodeType {
+	trans, isTransposition := game.transpositionTable.find(pos.hash)
+	if isTransposition && int(trans.depth) >= depth {
+		switch trans.nodeType {
 		case nodeCut:
-			if tt.move.score() >= beta {
+			if trans.move.score() >= beta {
 				dbgx.tableHitBeta++
-				return tt.move.score()
+				return trans.move.score()
 			}
 		case nodeAll:
-			if tt.move.score() <= alpha {
+			if trans.move.score() <= alpha {
 				dbgx.tableHitAlpha++
-				return tt.move.score()
+				return trans.move.score()
 			}
 		case nodePV:
 			// PV hit: search deeper so the PV is fully verified.
@@ -109,9 +109,9 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			pstScore = -pstScore
 		}
 		if pstScore >= (beta + 200) {
-			var dummy variation
 			game.makeNullMove()
 			dbgx.nullMoveAttempts++
+			var dummy variation
 			score := -searchAlphaBeta(game, depth-4, ply+1, -beta, -alpha, &dummy)
 			game.undoMove()
 			if game.isCancelPending {
@@ -130,25 +130,25 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	bestScore := initialAlpha
 	hasRaisedAlpha := false
 
-	if isTransposition && tt.move.fromTo() != 0 {
+	if isTransposition && trans.move.fromTo() != 0 {
 		dbgx.ttMove++
-		score := searchSingleMove(game, depth, ply, alpha, beta, tt.move, &pv, 0)
+		score := searchSingleMove(game, depth, ply, alpha, beta, trans.move, &pv, 0)
 		if game.isCancelPending {
 			return searchCancelledScore
 		}
 		if score >= beta {
 			dbgx.ttMoveBetaCutoff++
-			game.transpositionTable.record(&transposition{pos.hash, tt.move.withScore(score), int16(depth), nodeCut, false})
-			game.historyTable.recordGoodMove(ply, tt.move)
+			game.transpositionTable.record(&transposition{pos.hash, trans.move.withScore(score), int16(depth), nodeCut, false})
+			game.historyTable.recordGoodMove(ply, trans.move)
 			return score
 		}
 		bestScore = score
-		bestMove = tt.move
+		bestMove = trans.move
 		if score > alpha {
 			dbgx.ttMoveRaiseAlpha++
 			alpha = score
 			hasRaisedAlpha = true
-			game.historyTable.recordGoodMove(ply, tt.move)
+			game.historyTable.recordGoodMove(ply, trans.move)
 		}
 	}
 
@@ -164,45 +164,45 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 
 	game.scoreAndSortMoves(moves, ply)
 
-	for moveIdx, m := range moves {
-		if isTransposition && m.equal(tt.move) {
+	for moveIdx, move := range moves {
+		if isTransposition && move.equal(trans.move) {
 			continue // already searched above
 		}
 
 		// Late move reduction.
 		childDepth := depth
-		if moveIdx > 3 && !pos.isInCheck() && !m.isChecking() && beta == alpha+1 &&
-			m.piece() != pawn && m.piece() != king && m.captured() == noPiece {
+		if depth > 2 && moveIdx > 0 && !pos.isInCheck() && !move.isChecking() && beta == alpha+1 &&
+			move.piece() != pawn && move.piece() != king && move.captured() == noPiece {
 			dbgx.lmrAttempts1++
 			childDepth--
-			if depth > 3 && moveIdx > 6 && game.historyTable.getCount(ply, m) == 0 {
+			if depth > 3 && moveIdx > 6 && game.historyTable.getCount(ply, move) == 0 {
 				dbgx.lmrAttempts2++
 				childDepth--
 			}
 		}
 
-		score := searchSingleMove(game, childDepth, ply, alpha, beta, m, &pv, moveIdx)
+		score := searchSingleMove(game, childDepth, ply, alpha, beta, move, &pv, moveIdx)
 		if score > alpha && childDepth < depth {
 			dbgx.lmrFails++
-			score = searchSingleMove(game, depth, ply, alpha, beta, m, &pv, moveIdx)
+			score = searchSingleMove(game, depth, ply, alpha, beta, move, &pv, moveIdx)
 		}
 		if game.isCancelPending {
 			return searchCancelledScore
 		}
 		if score >= beta {
-			game.transpositionTable.record(&transposition{pos.hash, m.withScore(score), int16(depth), nodeCut, false})
-			game.historyTable.recordGoodMove(ply, m)
+			game.transpositionTable.record(&transposition{pos.hash, move.withScore(score), int16(depth), nodeCut, false})
+			game.historyTable.recordGoodMove(ply, move)
 			dbgx.nodesCut++
 			return score
 		}
 		if score > bestScore {
 			bestScore = score
-			bestMove = m
+			bestMove = move
 			if score > alpha {
 				dbgx.nodesPvChanged++
 				alpha = score
 				hasRaisedAlpha = true
-				game.historyTable.recordGoodMove(ply, m)
+				game.historyTable.recordGoodMove(ply, move)
 			}
 		}
 	}
@@ -227,7 +227,7 @@ func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 	if ply >= maxPly {
 		return evaluatePosition(game, alpha, beta)
 	}
-	pos := *game.currentPosition()
+	pos := game.currentPosition()
 	if pos.isInCheck() {
 		dbgx.quiescentChecks++
 		var dummy variation
