@@ -28,3 +28,15 @@ func (h *historyTable) getCount(ply int, m move) uint {
 	}
 	return 0
 }
+
+func (h *historyTable) getMaxCount() uint {
+	var maximum uint = 0
+	for i := range maxPly {
+		for j := range 4096 {
+			if h.counts[i][j] > maximum {
+				maximum = h.counts[i][j]
+			}
+		}
+	}
+	return maximum
+}

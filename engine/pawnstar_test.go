@@ -250,6 +250,7 @@ func TestSearch(t *testing.T) {
 		dbgxClear()
 		game.startThinking()
 		game.wg.Wait()
+		dbgx.historyTableMax = game.historyTable.getMaxCount()
 		dbgxPrint()
 	}
 }
