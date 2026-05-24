@@ -39,6 +39,9 @@ type debugX struct {
 	lmrFails             uint // times LMR re-search was required (score > alpha at reduced depth)
 	pvsAttempts          uint // times a PVS null-window search was attempted
 	pvsFails             uint // times PVS failed high and a full-window re-search was needed
+	parallelBatches      uint // times searchMovesParallel was called
+	parallelCutoffs      uint // times a parallel worker found a beta cutoff
+	parallelMovesSaved   uint // total moves handed to parallel workers
 }
 
 var dbgx debugX

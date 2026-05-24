@@ -2,9 +2,11 @@ package engine
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,18 +41,28 @@ type Game struct {
 	openingBook        openingBook
 	nodeCount          int
 	wg                 sync.WaitGroup
+	parallelSlots      chan struct{} // semaphore limiting concurrent search workers
 	posStackData       [512]position
 	posStack           []position
-	isCancelPending    bool
+	isCancelPending    atomic.Bool
 }
 
 // NewGame creates an engine instance ready to accept UCI commands.
 func NewGame() *Game {
+	n := runtime.NumCPU() - 1
+	if n < 1 {
+		n = 1
+	}
+	slots := make(chan struct{}, n)
+	for range n {
+		slots <- struct{}{}
+	}
 	game := &Game{
 		transpositionTable: newTranspositionTable(hashTableMB),
 		timeControl:        newTimeControl(),
 		openingBook:        loadOpeningBook(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
+		parallelSlots:      slots,
 	}
 	game.newGameFromFen(startFen)
 	return game
@@ -93,7 +105,7 @@ func (game *Game) newGameFromFen(fen string) {
 	game.posStack = game.posStackData[:0]
 	game.posStack = append(game.posStack, positionFromFen(fen))
 	game.nodeCount = 0
-	game.isCancelPending = false
+	game.isCancelPending.Store(false)
 	game.timeControl = newTimeControl()
 }
 
@@ -163,28 +175,15 @@ func (game *Game) isDrawByRepetition() bool {
 // pieceVals maps piece type to centipawn value, used in move scoring (MVV-LVA).
 var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
 
-// scoreAndSortMoves assigns a sort score to each move and sorts descending.
-// Score = captured_value × 10000 − moving_piece_value × 1000 + history_count,
-// giving priority to captures (MVV-LVA) and historically good quiet moves.
-func (game *Game) scoreAndSortMovesX(moves []move, ply int) {
-	color := game.currentPosition().colorToMove
-	for i, move := range moves {
-		score := (pieceVals[move.captured()] * 10) - pieceVals[move.piece()]
-		score += pstValue(color, move.piece(), move.to()) - pstValue(color, move.piece(), move.from())
-		score = (score * 1000) + int(game.historyTable.getCount(ply, move))
-		moves[i] = move.withScore(score)
-	}
-	sortMovesUnstable(moves)
-}
 
-func (game *Game) scoreAndSortMoves(moves []move, ply int) {
-	// Determine all squares attacked by the enemy
-	position := game.currentPosition()
-	occupied := position.occupied()
-	color := position.colorToMove
+// scoreAndSortMovesInner assigns sort scores and sorts moves.  It is shared by
+// Game and searchState so parallel workers use the same logic without duplication.
+func scoreAndSortMovesInner(pos *position, history *historyTable, moves []move, ply int) {
+	occupied := pos.occupied()
+	color := pos.colorToMove
 	enemyColor := enemyOf(color)
-	enemyPieces := position.piecesOfColor(enemyColor)
-	enemyPawns := enemyPieces & position.pawns
+	enemyPieces := pos.piecesOfColor(enemyColor)
+	enemyPawns := enemyPieces & pos.pawns
 	var enemyAttacks bitboard
 	if color == white {
 		enemyAttacks = enemyPawns.shiftSouthwest() | enemyPawns.shiftSoutheast()
@@ -194,36 +193,34 @@ func (game *Game) scoreAndSortMoves(moves []move, ply int) {
 	enemyPieces &= ^enemyPawns
 	for enemyPieces != 0 {
 		sq := enemyPieces.popLsb()
-		enemyPiece := position.squares[sq]
-		enemyAttacks |= pieceAttacks(enemyPiece, occupied, sq)
+		enemyAttacks |= pieceAttacks(pos.squares[sq], occupied, sq)
 	}
-	// Now determine provisional approximate score for move based on cpatured and promoted material and PST.
-	// If the target square is attacked by the enemy, assume we lose the moving piece.
-	// This is much cruder than SEE, but it's fast and reasonably accurate for rough move ordering.
-	for i, move := range moves {
-		captured := move.captured()
-		piece := move.piece()
-		promoted := move.promoted()
+	for i, m := range moves {
+		captured := m.captured()
+		piece := m.piece()
+		promoted := m.promoted()
 		var score int
-		if (enemyAttacks & squareBB(move.to())) != 0 {
-			// Enemy attacks destination square
+		if (enemyAttacks & squareBB(m.to())) != 0 {
 			score = pieceVals[captured] - pieceVals[piece] + pieceVals[promoted]
-
 		} else {
 			score = pieceVals[captured] + pieceVals[promoted]
 		}
-		score = score*1000 + int(game.historyTable.getCount(ply, move))
-		score += pstValue(color, piece, move.to()) - pstValue(color, piece, move.from())
-		moves[i] = move.withScore(score)
+		score = score*1000 + int(history.getCount(ply, m))
+		score += pstValue(color, piece, m.to()) - pstValue(color, piece, m.from())
+		moves[i] = m.withScore(score)
 	}
 	sortMovesUnstable(moves)
+}
+
+func (game *Game) scoreAndSortMoves(moves []move, ply int) {
+	scoreAndSortMovesInner(game.currentPosition(), &game.historyTable, moves, ply)
 }
 
 // startThinking launches a search goroutine for the current position and time
 // control.  Any previously running search is stopped first.
 func (game *Game) startThinking() {
 	game.stopThinking()
-	game.isCancelPending = false
+	game.isCancelPending.Store(false)
 	game.wg.Add(1)
 	go func() {
 		game.searchEntry()
@@ -233,9 +230,9 @@ func (game *Game) startThinking() {
 
 // stopThinking signals the search goroutine to halt and blocks until it exits.
 func (game *Game) stopThinking() {
-	game.isCancelPending = true
+	game.isCancelPending.Store(true)
 	game.wg.Wait()
-	game.isCancelPending = false
+	game.isCancelPending.Store(false)
 }
 
 // searchEntry is the body of the search goroutine.  It runs the search, plays the

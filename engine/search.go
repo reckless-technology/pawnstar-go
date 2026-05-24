@@ -21,25 +21,25 @@ func copyVariation(dst *variation, src variation, best move) {
 // and returns the score.  When the position is not a PV node and the move is not
 // the first tried, a null-window PVS search is attempted first; if it fails high,
 // a full-window re-search is performed.
-func searchSingleMove(game *Game, depth, ply, alpha, beta int, m move, pv *variation, moveIdx int) int {
-	wasInCheck := game.currentPosition().isInCheck()
+func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *variation, moveIdx int) int {
+	wasInCheck := ss.currentPosition().isInCheck()
 	childDepth := depth - 1
-	game.playMove(m)
-	isChecking := game.currentPosition().isInCheck()
+	ss.playMove(m)
+	isChecking := ss.currentPosition().isInCheck()
 	var score int
 	if beta > alpha+1 && moveIdx > 0 && !wasInCheck && !isChecking {
 		// Try principal variation search.
 		dbgx.pvsAttempts++
-		score = -searchAlphaBeta(game, childDepth, ply+1, -alpha-1, -alpha, pv)
+		score = -searchAlphaBeta(ss, childDepth, ply+1, -alpha-1, -alpha, pv)
 		if score > alpha {
 			// PVS failed high — re-search with full window.
 			dbgx.pvsFails++
-			score = -searchAlphaBeta(game, childDepth, ply+1, -beta, -alpha, pv)
+			score = -searchAlphaBeta(ss, childDepth, ply+1, -beta, -alpha, pv)
 		}
 	} else {
-		score = -searchAlphaBeta(game, childDepth, ply+1, -beta, -alpha, pv)
+		score = -searchAlphaBeta(ss, childDepth, ply+1, -beta, -alpha, pv)
 	}
-	game.undoMove()
+	ss.undoMove()
 	return score
 }
 
@@ -55,26 +55,28 @@ func searchSingleMove(game *Game, depth, ply, alpha, beta int, m move, pv *varia
 //   - Late move reduction: −1 ply from the 2nd move onward (moveIdx > 0, quiet, non-check, non-pawn/king, depth > 2);
 //     −2 ply additionally from moveIdx 7 (depth > 3, zero history count).
 //   - LMR re-search at full depth if the reduced search exceeds alpha.
+//   - After elder brother search at null-window nodes (depth ≥ 4): remaining moves
+//     searched in parallel via Young Brothers Wait.
 //   - TT write with Cut/All/PV node type on exit.
-func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variation) int {
-	game.nodeCount++
-	if (game.nodeCount&0xFFFF) == 0 && (game.timeControl.clockType == clockStandard || game.timeControl.clockType == clockFixedTime) &&
-		time.Now().After(game.timeControl.stopTime) {
-		game.isCancelPending = true
+func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *variation) int {
+	ss.nodeCount++
+	if (ss.nodeCount&0xFFFF) == 0 && (ss.game.timeControl.clockType == clockStandard || ss.game.timeControl.clockType == clockFixedTime) &&
+		time.Now().After(ss.game.timeControl.stopTime) {
+		ss.game.isCancelPending.Store(true)
 		return searchCancelledScore
 	}
 
-	pos := game.currentPosition()
-	if pos.isDrawByMaterial() || game.isDrawByFiftyMoves() || game.isDrawByRepetition() {
+	pos := ss.currentPosition()
+	if pos.isDrawByMaterial() || ss.isDrawByFiftyMoves() || ss.isDrawByRepetition() {
 		return drawScore
 	}
 
 	if ply >= maxPly {
-		return evaluatePosition(game, alpha, beta)
+		return evaluatePosition(ss, alpha, beta)
 	}
 
 	// Transposition table lookup.
-	trans, isTransposition := game.transpositionTable.find(pos.hash)
+	trans, isTransposition := ss.tt.find(pos.hash)
 	if isTransposition && int(trans.depth) >= depth {
 		switch trans.nodeType {
 		case nodeCut:
@@ -97,7 +99,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 	// Enter quiescence at depth <= 0 (unless in check, which quiescence handles
 	// by re-entering alpha-beta at the same depth).
 	if depth <= 0 && !pos.isInCheck() {
-		return searchQuiescent(game, depth, ply, alpha, beta)
+		return searchQuiescent(ss, depth, ply, alpha, beta)
 	}
 
 	// Null-move pruning: skip our turn and search at depth−4.  If the result still
@@ -110,12 +112,12 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			pstScore = -pstScore
 		}
 		if pstScore >= (beta + 200) {
-			game.makeNullMove()
+			ss.makeNullMove()
 			dbgx.nullMoveAttempts++
 			var dummy variation
-			score := -searchAlphaBeta(game, depth-4, ply+1, -beta, -alpha, &dummy)
-			game.undoMove()
-			if game.isCancelPending {
+			score := -searchAlphaBeta(ss, depth-4, ply+1, -beta, -alpha, &dummy)
+			ss.undoMove()
+			if ss.isCancelled() {
 				return searchCancelledScore
 			}
 			if score >= beta {
@@ -133,14 +135,14 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 
 	if isTransposition && trans.move.fromTo() != 0 {
 		dbgx.tableMove++
-		score := searchSingleMove(game, depth, ply, alpha, beta, trans.move, &pv, 0)
-		if game.isCancelPending {
+		score := searchSingleMove(ss, depth, ply, alpha, beta, trans.move, &pv, 0)
+		if ss.isCancelled() {
 			return searchCancelledScore
 		}
 		if score >= beta {
 			dbgx.tableMoveBetaCutoff++
-			game.transpositionTable.record(&transposition{pos.hash, trans.move.withScore(score), int16(depth), nodeCut, false})
-			game.historyTable.recordGoodMove(ply, trans.move)
+			ss.tt.record(&transposition{pos.hash, trans.move.withScore(score), int16(depth), nodeCut, false})
+			ss.history.recordGoodMove(ply, trans.move)
 			return score
 		}
 		bestScore = score
@@ -149,7 +151,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 			dbgx.tableMoveRaiseAlpha++
 			alpha = score
 			hasRaisedAlpha = true
-			game.historyTable.recordGoodMove(ply, trans.move)
+			ss.history.recordGoodMove(ply, trans.move)
 		}
 	}
 
@@ -163,59 +165,129 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		return drawScore
 	}
 
-	game.scoreAndSortMoves(moves, ply)
+	ss.scoreAndSortMoves(moves, ply)
 
-	for moveIdx, move := range moves {
-		if isTransposition && move.equal(trans.move) {
-			continue // already searched above
+	// Find and search the elder brother (first non-TT move) sequentially.
+	elderIdx := -1
+	elderMove := moveNone()
+	for i, m := range moves {
+		if isTransposition && m.equal(trans.move) {
+			continue
 		}
-
-		// Late move reduction.
+		elderIdx = i
+		elderMove = m
 		childDepth := depth
-		if depth > 2 && moveIdx > 0 && !pos.isInCheck() && !move.isChecking() && beta == alpha+1 &&
-			move.piece() != pawn && move.piece() != king && move.captured() == noPiece {
+		if depth > 2 && i > 0 && !pos.isInCheck() && !m.isChecking() && beta == alpha+1 &&
+			m.piece() != pawn && m.piece() != king && m.captured() == noPiece {
 			dbgx.lmrAttempts1++
 			childDepth--
-			if depth > 3 && moveIdx > 6 && game.historyTable.getCount(ply, move) == 0 {
+			if depth > 3 && i > 6 && ss.history.getCount(ply, m) == 0 {
 				dbgx.lmrAttempts2++
 				childDepth--
 			}
 		}
-
-		score := searchSingleMove(game, childDepth, ply, alpha, beta, move, &pv, moveIdx)
+		score := searchSingleMove(ss, childDepth, ply, alpha, beta, m, &pv, i)
 		if score > alpha && childDepth < depth {
 			dbgx.lmrFails++
-			score = searchSingleMove(game, depth, ply, alpha, beta, move, &pv, moveIdx)
+			score = searchSingleMove(ss, depth, ply, alpha, beta, m, &pv, i)
 		}
-		if game.isCancelPending {
+		if ss.isCancelled() {
 			return searchCancelledScore
 		}
 		if score >= beta {
-			game.transpositionTable.record(&transposition{pos.hash, move.withScore(score), int16(depth), nodeCut, false})
-			game.historyTable.recordGoodMove(ply, move)
+			ss.tt.record(&transposition{pos.hash, m.withScore(score), int16(depth), nodeCut, false})
+			ss.history.recordGoodMove(ply, m)
 			dbgx.nodesCut++
 			return score
 		}
 		if score > bestScore {
 			bestScore = score
-			bestMove = move
+			bestMove = m
 			if score > alpha {
 				dbgx.nodesPvChanged++
 				alpha = score
 				hasRaisedAlpha = true
-				game.historyTable.recordGoodMove(ply, move)
+				ss.history.recordGoodMove(ply, m)
+				copyVariation(parentPV, pv, m)
+			}
+		}
+		break
+	}
+
+	// Search remaining moves — in parallel if eligible, serially otherwise.
+	if elderIdx >= 0 && !ss.isCancelled() && ss.canGoParallel(depth) {
+		// Young Brothers Wait: search all non-elder, non-TT moves in parallel.
+		parallelScore, parallelBest := searchMovesParallel(ss, moves, trans.move, elderMove, depth, ply, alpha, beta)
+		if ss.isCancelled() {
+			return searchCancelledScore
+		}
+		if parallelScore > bestScore {
+			bestScore = parallelScore
+			bestMove = parallelBest
+			if parallelScore > alpha {
+				alpha = parallelScore
+				hasRaisedAlpha = true
+				ss.history.recordGoodMove(ply, parallelBest)
+			}
+		}
+		if parallelScore >= beta {
+			ss.tt.record(&transposition{pos.hash, parallelBest.withScore(parallelScore), int16(depth), nodeCut, false})
+			dbgx.nodesCut++
+			return parallelScore
+		}
+	} else {
+		for moveIdx, m := range moves {
+			if (isTransposition && m.equal(trans.move)) || (elderIdx >= 0 && m.equal(elderMove)) {
+				continue
+			}
+
+			childDepth := depth
+			if depth > 2 && moveIdx > 0 && !pos.isInCheck() && !m.isChecking() && beta == alpha+1 &&
+				m.piece() != pawn && m.piece() != king && m.captured() == noPiece {
+				dbgx.lmrAttempts1++
+				childDepth--
+				if depth > 3 && moveIdx > 6 && ss.history.getCount(ply, m) == 0 {
+					dbgx.lmrAttempts2++
+					childDepth--
+				}
+			}
+
+			score := searchSingleMove(ss, childDepth, ply, alpha, beta, m, &pv, moveIdx)
+			if score > alpha && childDepth < depth {
+				dbgx.lmrFails++
+				score = searchSingleMove(ss, depth, ply, alpha, beta, m, &pv, moveIdx)
+			}
+			if ss.isCancelled() {
+				return searchCancelledScore
+			}
+			if score >= beta {
+				ss.tt.record(&transposition{pos.hash, m.withScore(score), int16(depth), nodeCut, false})
+				ss.history.recordGoodMove(ply, m)
+				dbgx.nodesCut++
+				return score
+			}
+			if score > bestScore {
+				bestScore = score
+				bestMove = m
+				if score > alpha {
+					dbgx.nodesPvChanged++
+					alpha = score
+					hasRaisedAlpha = true
+					ss.history.recordGoodMove(ply, m)
+					copyVariation(parentPV, pv, m)
+				}
 			}
 		}
 	}
 
 	if hasRaisedAlpha {
 		dbgx.nodesPv++
-		game.transpositionTable.record(&transposition{pos.hash, bestMove.withScore(alpha), int16(depth), nodePV, false})
-		game.historyTable.recordGoodMove(ply, bestMove)
+		ss.tt.record(&transposition{pos.hash, bestMove.withScore(alpha), int16(depth), nodePV, false})
+		ss.history.recordGoodMove(ply, bestMove)
 		copyVariation(parentPV, pv, bestMove)
 	} else {
 		dbgx.nodesAll++
-		game.transpositionTable.record(&transposition{pos.hash, bestMove.withScore(bestScore), int16(depth), nodeAll, false})
+		ss.tt.record(&transposition{pos.hash, bestMove.withScore(bestScore), int16(depth), nodeAll, false})
 	}
 	return bestScore
 }
@@ -223,19 +295,19 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 // searchQuiescent extends the search by generating captures and promotions until
 // the position is quiet.  An in-check position re-enters searchAlphaBeta at the
 // same depth (no depth decrement) so that all evasions are considered.
-func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
+func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 	dbgx.quiescentCalls++
 	if ply >= maxPly {
-		return evaluatePosition(game, alpha, beta)
+		return evaluatePosition(ss, alpha, beta)
 	}
-	pos := game.currentPosition()
+	pos := ss.currentPosition()
 	if pos.isInCheck() {
 		dbgx.quiescentChecks++
 		var dummy variation
-		return searchAlphaBeta(game, depth, ply, alpha, beta, &dummy)
+		return searchAlphaBeta(ss, depth, ply, alpha, beta, &dummy)
 	}
 	// Stand-pat: if the static eval already beats beta we can prune.
-	score := evaluatePosition(game, alpha, beta)
+	score := evaluatePosition(ss, alpha, beta)
 	if score >= beta {
 		dbgx.quiescentEvalCutoffs++
 		return score
@@ -245,16 +317,16 @@ func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 	}
 	bestScore := score
 	moves := pos.generateLegalCaptures()
-	game.scoreAndSortMoves(moves, ply)
+	ss.scoreAndSortMoves(moves, ply)
 	for _, m := range moves {
-		game.playMove(m)
-		score = -searchQuiescent(game, depth-1, ply+1, -beta, -alpha)
-		game.undoMove()
-		if game.isCancelPending {
+		ss.playMove(m)
+		score = -searchQuiescent(ss, depth-1, ply+1, -beta, -alpha)
+		ss.undoMove()
+		if ss.isCancelled() {
 			return searchCancelledScore
 		}
 		if score >= beta {
-			game.historyTable.recordGoodMove(ply, m)
+			ss.history.recordGoodMove(ply, m)
 			dbgx.quiescentBetaCutoffs++
 			return score
 		}
@@ -262,7 +334,7 @@ func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 			bestScore = score
 			if score > alpha {
 				alpha = score
-				game.historyTable.recordGoodMove(ply, m)
+				ss.history.recordGoodMove(ply, m)
 			}
 		}
 	}
@@ -314,9 +386,11 @@ func searchRootNode(game *Game) move {
 	}
 
 	startTime := time.Now()
-	game.isCancelPending = false
+	game.isCancelPending.Store(false)
 	game.historyTable.reset()
 	game.transpositionTable.age()
+
+	ss := newSearchStateFromGame(game)
 
 	var principalVariation variation
 	var bestMoves []move
@@ -325,7 +399,7 @@ func searchRootNode(game *Game) move {
 	var initPV variation
 	for i := range moves {
 		m := moves[i]
-		score := searchSingleMove(game, startDepth, 0, initialAlpha, initialBeta, m, &initPV, i)
+		score := searchSingleMove(ss, startDepth, 0, initialAlpha, initialBeta, m, &initPV, i)
 		moves[i] = m.withScore(score)
 	}
 	sortMovesStable(moves)
@@ -338,13 +412,13 @@ func searchRootNode(game *Game) move {
 		sortMovesStable(moves)
 		var pv variation
 		alpha := initialAlpha
-		game.nodeCount = 0
+		ss.nodeCount = 0
 		bestMoves = append(bestMoves, bestMove)
 
 		for i, move := range moves {
-			score := searchSingleMove(game, depth, 0, alpha, initialBeta, move, &pv, i)
+			score := searchSingleMove(ss, depth, 0, alpha, initialBeta, move, &pv, i)
 			moves[i] = move.withScore(score)
-			if game.isCancelPending {
+			if ss.isCancelled() {
 				return bestMove
 			}
 			if score > alpha {
@@ -353,7 +427,7 @@ func searchRootNode(game *Game) move {
 				copyVariation(&principalVariation, pv, bestMove)
 				pvStr := pvString(principalVariation)
 				fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
-					depth, alpha, time.Since(startTime).Milliseconds(), game.nodeCount, pvStr)
+					depth, alpha, time.Since(startTime).Milliseconds(), ss.nodeCount, pvStr)
 			}
 		}
 		if alpha > winThreshold || alpha < loseThreshold {

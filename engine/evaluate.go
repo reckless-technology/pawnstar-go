@@ -314,14 +314,14 @@ func evalKing(pos *position, color color, endgame bool) int {
 // evaluatePosition returns the score from the side-to-move's perspective.
 // Returns drawScore for positions with insufficient material.
 // If the material score alone is more than 200 cp outside [alpha, beta], it returns early.
-func evaluatePosition(game *Game, alpha, beta int) int {
+func evaluatePosition(ss *searchState, alpha, beta int) int {
 	dbgx.evalCalls++
-	pos := game.currentPosition()
+	pos := ss.currentPosition()
 	if pos.isDrawByMaterial() {
 		return drawScore
 	}
 
-	entry := &game.evalTable.entries[pos.hash&zobrist(len(game.evalTable.entries)-1)]
+	entry := &ss.evalTable.entries[pos.hash&zobrist(len(ss.evalTable.entries)-1)]
 	if entry.hash == pos.hash {
 		dbgx.evalHashHits++
 		return entry.score
