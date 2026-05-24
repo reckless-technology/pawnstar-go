@@ -10,7 +10,12 @@ type evalHashEntry struct {
 }
 
 type evalHashTable struct {
-	entries [0x400]evalHashEntry
+	entries []evalHashEntry
+}
+
+// count must be a power of 2
+func newEvalHashTable(count int) evalHashTable {
+	return evalHashTable{entries: make([]evalHashEntry, count)}
 }
 
 var pawnSquare = [64]int{
@@ -316,7 +321,7 @@ func evaluatePosition(game *Game, alpha, beta int) int {
 		return drawScore
 	}
 
-	entry := &game.evalTable.entries[pos.hash&0x3FF]
+	entry := &game.evalTable.entries[pos.hash&zobrist(len(game.evalTable.entries)-1)]
 	if entry.hash == pos.hash {
 		dbgx.evalHashHits++
 		return entry.score

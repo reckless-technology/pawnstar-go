@@ -259,7 +259,7 @@ func (position *position) toFenString() string {
 	if position.epSquare == noSquare {
 		sb.WriteByte('-')
 	} else {
-		sb.WriteString(position.epSquare.String())
+		sb.WriteString(position.epSquare.toString())
 	}
 	sb.WriteString(fmt.Sprintf(" %d %d", position.halfMove, int(position.fullMove)+1))
 	return sb.String()

@@ -9,8 +9,8 @@ func squareXY(x, y int) square { return square(x + (8 * y)) }
 func (s square) file() uint8   { return uint8(s) & 7 }
 func (s square) rank() uint8   { return uint8(s) >> 3 }
 
-// String returns the square name in algebraic notation, e.g. "e4".
-func (s square) String() string { return string([]byte{'a' + byte(s.file()), '1' + byte(s.rank())}) }
+// toString returns the square name in algebraic notation, e.g. "e4".
+func (s square) toString() string { return string([]byte{'a' + byte(s.file()), '1' + byte(s.rank())}) }
 
 // squareFromString parses an algebraic square name such as "e4".
 func squareFromString(str string) square {

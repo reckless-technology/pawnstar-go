@@ -50,6 +50,7 @@ func NewGame() *Game {
 		transpositionTable: newTranspositionTable(hashTableMB),
 		timeControl:        newTimeControl(),
 		openingBook:        loadOpeningBook(),
+		evalTable:          newEvalHashTable(evalHashTableSize),
 	}
 	game.newGameFromFen(startFen)
 	return game
@@ -211,8 +212,8 @@ func (game *Game) scoreAndSortMoves(moves []move, ply int) {
 		} else {
 			score = pieceVals[captured] + pieceVals[promoted]
 		}
-		score += pstValue(color, piece, move.to()) - pstValue(color, piece, move.from())
 		score = score*1000 + int(game.historyTable.getCount(ply, move))
+		score += pstValue(color, piece, move.to()) - pstValue(color, piece, move.from())
 		moves[i] = move.withScore(score)
 	}
 	sortMovesUnstable(moves)

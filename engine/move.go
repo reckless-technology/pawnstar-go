@@ -101,10 +101,10 @@ func (m move) equal(other move) bool {
 
 // String returns the move in UCI long-algebraic notation ("e2e4", "e7e8q", "0000" for null).
 func (m move) String() string {
-	if m == moveNone() {
+	if m.isNone() {
 		return "0000"
 	}
-	s := m.from().String() + m.to().String()
+	s := m.from().toString() + m.to().toString()
 	if m.promoted() != noPiece {
 		s += m.promoted().toString()
 	}
@@ -116,7 +116,7 @@ func (m move) GoString() string {
 	if m == moveNone() {
 		return "NONE"
 	}
-	s := m.piece().toString() + m.from().String() + m.to().String()
+	s := m.piece().toString() + m.from().toString() + m.to().toString()
 	if m.captured() != noPiece {
 		s += "x" + m.captured().toString()
 	}

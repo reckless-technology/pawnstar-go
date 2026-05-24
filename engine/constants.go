@@ -39,6 +39,8 @@ const (
 
 	// hashTableMB is the default transposition table size in megabytes.
 	hashTableMB = 64
+
+	evalHashTableSize = 0x10000
 )
 
 // direction is one of the eight compass directions used to index ray tables.
