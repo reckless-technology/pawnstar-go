@@ -141,8 +141,7 @@ func isEndgame(pos *position) bool {
 		if (pos.queens & friendly).isEmpty() {
 			continue
 		}
-		if (pos.rooks&friendly).popCount() > 0 ||
-			((pos.knights|pos.bishops)&friendly).popCount() > 1 {
+		if (pos.rooks&friendly).popCount() > 0 || ((pos.knights|pos.bishops)&friendly).popCount() > 1 {
 			return false
 		}
 	}
@@ -341,9 +340,7 @@ func evaluatePosition(game *Game, alpha, beta int) int {
 	}
 
 	endgame := isEndgame(pos)
-	var ps [2]pawnStructure
-	ps[white] = determinePawnStructure(pos, white)
-	ps[black] = determinePawnStructure(pos, black)
+	ps := [2]pawnStructure{determinePawnStructure(pos, white), determinePawnStructure(pos, black)}
 	wScore += evalPawnStructure(&ps[white], white)
 	bScore += evalPawnStructure(&ps[black], black)
 	// wScore += evalMobility(pos, white, &ps)

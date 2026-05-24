@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"cmp"
 	"slices"
 )
 
@@ -20,8 +19,8 @@ type move int64
 type moveType uint8
 
 const (
-	nonCapture     moveType = iota
-	capture        moveType = iota
+	nonCapture      moveType = iota
+	capture         moveType = iota
 	promotionKnight moveType = iota
 	promotionBishop moveType = iota
 	promotionRook   moveType = iota
@@ -134,12 +133,12 @@ func (m move) isNone() bool { return (m & 0x3FFFFF) == 0 }
 // sortMovesUnstable sorts moves by descending score.  Does not preserve order of
 // equal-score moves; faster than the stable variant.
 func sortMovesUnstable(moves []move) {
-	slices.SortFunc(moves, func(a, b move) int { return cmp.Compare(b.score(), a.score()) })
+	slices.SortFunc(moves, func(a, b move) int { return b.score() - a.score() })
 }
 
 // sortMovesStable sorts moves by descending score, preserving the relative order
 // of equal-score moves.  Used at the root so the previous iteration's ordering
 // is maintained among moves with the same score.
 func sortMovesStable(moves []move) {
-	slices.SortStableFunc(moves, func(a, b move) int { return cmp.Compare(b.score(), a.score()) })
+	slices.SortStableFunc(moves, func(a, b move) int { return b.score() - a.score() })
 }

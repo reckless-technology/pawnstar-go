@@ -63,7 +63,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		return searchCancelledScore
 	}
 
-	pos := *game.currentPosition()
+	pos := game.currentPosition()
 	if pos.isDrawByMaterial() || game.isDrawByFiftyMoves() || game.isDrawByRepetition() {
 		return drawScore
 	}
@@ -171,13 +171,8 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 
 		// Late move reduction.
 		childDepth := depth
-		if moveIdx > 3 &&
-			!pos.isInCheck() &&
-			!m.isChecking() &&
-			depth > 2 &&
-			beta == alpha+1 &&
-			m.piece() != pawn &&
-			m.captured() == noPiece {
+		if moveIdx > 3 && !pos.isInCheck() && !m.isChecking() && beta == alpha+1 &&
+			m.piece() != pawn && m.piece() != king && m.captured() == noPiece {
 			dbgx.lmrAttempts1++
 			childDepth--
 			if depth > 3 && moveIdx > 6 && game.historyTable.getCount(ply, m) == 0 {
@@ -219,7 +214,7 @@ func searchAlphaBeta(game *Game, depth, ply, alpha, beta int, parentPV *variatio
 		copyVariation(parentPV, pv, bestMove)
 	} else {
 		dbgx.nodesAll++
-		game.transpositionTable.record(&transposition{pos.hash, bestMove.withScore(alpha), int16(depth), nodeAll, false})
+		game.transpositionTable.record(&transposition{pos.hash, bestMove.withScore(bestScore), int16(depth), nodeAll, false})
 	}
 	return bestScore
 }
@@ -284,14 +279,14 @@ func searchQuiescent(game *Game, depth, ply, alpha, beta int) int {
 //   - Best move consistent AND score stable across all completed depths: exit if elapsed > ¼ of budget.
 //   - Either condition alone: exit if elapsed > ½ of budget.
 //   - Hard stop if elapsed > budget.
-func searchRootNode(g *Game) move {
+func searchRootNode(game *Game) move {
 	// Check opening book.
-	bookMove := g.openingBook.getMove(g.currentPosition().hash)
+	bookMove := game.openingBook.getMove(game.currentPosition().hash)
 	if bookMove != moveNone() {
 		return bookMove
 	}
 
-	moves := g.currentPosition().generateLegalMoves()
+	moves := game.currentPosition().generateLegalMoves()
 	if len(moves) == 0 {
 		return moveNone()
 	}
@@ -301,9 +296,9 @@ func searchRootNode(g *Game) move {
 
 	// Set up time management.
 	allocatedTime := time.Duration(0)
-	tc := &g.timeControl
-
+	tc := &game.timeControl
 	switch tc.clockType {
+
 	case clockStandard:
 		if tc.numMovesRemaining > 0 {
 			allocatedTime = tc.timeRemaining / time.Duration(tc.numMovesRemaining)
@@ -316,10 +311,11 @@ func searchRootNode(g *Game) move {
 	case clockFixedTime:
 		tc.stopTime = time.Now().Add(tc.timeRemaining)
 	}
+
 	startTime := time.Now()
-	g.isCancelPending = false
-	g.historyTable.reset()
-	g.transpositionTable.age()
+	game.isCancelPending = false
+	game.historyTable.reset()
+	game.transpositionTable.age()
 
 	var principalVariation variation
 	var bestMoves []move
@@ -328,7 +324,7 @@ func searchRootNode(g *Game) move {
 	var initPV variation
 	for i := range moves {
 		m := moves[i]
-		score := searchSingleMove(g, startDepth, 0, initialAlpha, initialBeta, m, &initPV, i)
+		score := searchSingleMove(game, startDepth, 0, initialAlpha, initialBeta, m, &initPV, i)
 		moves[i] = m.withScore(score)
 	}
 	sortMovesStable(moves)
@@ -341,23 +337,22 @@ func searchRootNode(g *Game) move {
 		sortMovesStable(moves)
 		var childPV variation
 		alpha := initialAlpha
-		g.nodeCount = 0
+		game.nodeCount = 0
 		bestMoves = append(bestMoves, bestMove)
 
-		for i := range moves {
-			m := moves[i]
-			score := searchSingleMove(g, depth, 0, alpha, initialBeta, m, &childPV, i)
-			moves[i] = m.withScore(score)
-			if g.isCancelPending {
+		for i, move := range moves {
+			score := searchSingleMove(game, depth, 0, alpha, initialBeta, move, &childPV, i)
+			moves[i] = move.withScore(score)
+			if game.isCancelPending {
 				return bestMove
 			}
 			if score > alpha {
 				alpha = score
-				bestMove = m
+				bestMove = move
 				copyVariation(&principalVariation, childPV, bestMove)
 				pvStr := pvString(principalVariation)
 				fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
-					depth, alpha, time.Since(startTime).Milliseconds(), g.nodeCount, pvStr)
+					depth, alpha, time.Since(startTime).Milliseconds(), game.nodeCount, pvStr)
 			}
 		}
 		if alpha > winThreshold || alpha < loseThreshold {
