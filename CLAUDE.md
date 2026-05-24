@@ -36,15 +36,13 @@ The Go port runs at ~35 Mnps; the C++ original reaches ~700 Mnps via BMI2 PEXT. 
 
 **`noSquare` equals a1** — `noSquare` is defined as `square(0)`, which is the same integer value as `a1`. It is only used for the en-passant target square and castling sentinel contexts where `a1` would never validly appear.
 
-**Pawn structure masks exist but are not used by the evaluator** — `tables.go` precomputes passed-pawn, isolated-pawn, doubled-pawn, and supported-pawn masks. These are not currently read by `evaluate.go`; the evaluator only uses PST scores and king pawn shelter.
-
 ## Architecture
 
 Pawnstar-Go is a UCI chess engine using bitboard board representation and alpha-beta search. It is a port of the C++ Pawnstar engine.
 
-**Board representation** — `position` ([engine/position.go](engine/position.go)) is the central state struct, mutated in place throughout search. `makeMove` / `unmakeMove` traverse the game tree by pushing an `irreversibleState` (hash, castling rights, en passant, checkers bitboard, halfmove clock, flags) onto an internal `stateStack` slice, then popping and restoring it on undo. The struct holds per-piece and per-color `bitboard` arrays, a `squares [64]piece` array for O(1) lookup, incremental Zobrist hash, and incremental PST score accumulators (`scoreWhite`, `scoreBlack`). `positionFromFen` constructs a `position` from a FEN string. `bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for all set operations.
+**Board representation** — `position` ([engine/position.go](engine/position.go)) is a value type used with copy-make traversal: `makeMove` and `makeNullMove` operate on a caller-owned copy of the struct. `Game.posStack []position` maintains the history stack; undoing a move is a slice truncation. The struct holds named bitboard fields (`pawns`, `knights`, `bishops`, `rooks`, `queens`, `kings`, `whitePieces`, `blackPieces`), a `squares [64]piece` array for O(1) lookup, an incremental Zobrist hash, and incremental PST score accumulators (`scores [2]int`). `positionFromFen` constructs a `position` from a FEN string. `bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for all set operations.
 
-**Incremental scoring** — `addPiece`, `removePiece`, and `movePiece` in `position.go` update `scoreWhite`/`scoreBlack` incrementally using `pstValue` from `evaluate.go`. This covers all non-king pieces. The king's PST contribution is computed at evaluation time because it is phase-dependent and cannot be maintained incrementally without knowing the game phase.
+**Incremental scoring** — `addPiece`, `removePiece`, and `movePiece` in `position.go` update `scores[c]` incrementally using `pstValue` from `evaluate.go`. This covers all non-king pieces. The king's PST contribution is computed at evaluation time because it is phase-dependent and cannot be maintained incrementally without knowing the game phase.
 
 **Move encoding** — `move` ([engine/move.go](engine/move.go)) is a packed `int64` with an identical bit layout to the C++ version:
 
@@ -68,7 +66,7 @@ The score is also used to carry the search score inside transposition table entr
 
 **Transposition table** — Single 64 MB table ([engine/transposition.go](engine/transposition.go)). Indexed by `hash % tableSize` (table size is kept odd for distribution). Entries store hash, best move (score packed into upper 32 bits), depth, node type (Cut/All/PV), and an `isOld` flag. Replacement policy: prefer empty slots, old entries, then shallower entries; PV nodes always replace. `age()` marks all entries old at the start of each root search.
 
-**Evaluation** — [engine/evaluate.go](engine/evaluate.go) returns the score from the side-to-move's perspective. It reads the incremental `scoreWhite`/`scoreBlack` accumulators, adds the king's PST bonus (midgame vs endgame table selected by `isEndgame`), and adds a king pawn shelter bonus (+10 cp per pawn in the three squares directly in front of the king, midgame only). SEE ([engine/see.go](engine/see.go)) is implemented but not wired into move ordering, matching the C++ version.
+**Evaluation** — [engine/evaluate.go](engine/evaluate.go) returns the score from the side-to-move's perspective. It reads the incremental `scores[c]` accumulators and adds: bishop-pair bonus (+30 cp), pawn structure scores (passed-pawn PST, defended +5, backward −10, doubled −10, isolated −20 cp), bishop and rook mobility (lookup tables by available-square count), and king safety (phase-dependent PST, three-row pawn shelter with friendly/enemy weights of ±15/±10/±5, open-file penalties, adjacent-piece bonuses). The king PST switches between midgame and endgame tables via `isEndgame`. An alpha/beta material early-exit skips the full evaluation when material alone is more than 200 cp outside the search window. SEE ([engine/see.go](engine/see.go)) is implemented but not wired into move ordering, matching the C++ version.
 
 **Opening book** — [engine/book.go](engine/book.go) embeds [engine/book.txt](engine/book.txt) (385 lines from TSCP) at compile time. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves. `getMove` returns a random candidate for variety across games.
 

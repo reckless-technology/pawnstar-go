@@ -40,13 +40,12 @@ python3 ../pawnstar-rs/game.py
 
 ### Board representation
 
-`Position` ([engine/position.go](engine/position.go)) is mutated in place throughout search. State is split into mutable fields (bitboards, squares array, Zobrist hash, score accumulators) and irreversible state (castling rights, en passant square, checkers bitboard, halfmove clock, last move) which is saved onto an internal `stateStack` slice by `MakeMove` and popped by `UnmakeMove`.
+`position` ([engine/position.go](engine/position.go)) is a value type; `makeMove` and `makeNullMove` operate on a caller-owned copy. `Game` maintains a `posStack []position` history stack; undoing a move is a slice truncation — there is no unmake logic.
 
-The board holds:
-- `pieces[7]Bitboard` — one bitboard per piece type (index = `piece` constant)
-- `colors[2]Bitboard` — one bitboard per side
+The struct holds:
+- Named bitboard fields: `pawns`, `knights`, `bishops`, `rooks`, `queens`, `kings`, `whitePieces`, `blackPieces`
 - `squares[64]piece` — O(1) piece lookup by square
-- `scoreWhite`, `scoreBlack int` — incremental material + PST totals (excludes king, updated by `addPiece`/`removePiece`/`movePiece`)
+- `scores[2]int` — incremental material + PST totals per side (excludes king; updated by `addPiece`/`removePiece`/`movePiece`)
 - `kingLocn[2]square` — king locations (updated separately because king PST is phase-dependent)
 - Zobrist hash maintained incrementally
 
@@ -132,11 +131,19 @@ Single 64 MB table ([engine/transposition.go](engine/transposition.go)). Indexed
 
 All scores are in centipawns from the perspective of the side to move.
 
-**Piece values:** P = 100, N = 320, B = 330, R = 500, Q = 900.
+**Piece values:** P = 100, N = 300, B = 300, R = 500, Q = 900.
 
-**Piece-square tables** ([engine/evaluate.go](engine/evaluate.go)) from the [Simplified Evaluation Function](https://www.chessprogramming.org/Simplified_Evaluation_Function). Stored with rank 8 at low indices; White reads via `sq ^ 0x38` (rank flip), Black reads directly. PST scores for all non-king pieces are accumulated into `scoreWhite`/`scoreBlack` incrementally by `addPiece`/`removePiece`/`movePiece` in `position.go` — no re-scan on evaluation.
+**Piece-square tables** ([engine/evaluate.go](engine/evaluate.go)) ported from the C Pawnstar engine. Stored with rank 8 at low indices; White reads via `sq ^ 0x38` (rank flip), Black reads directly. PST scores for all non-king pieces are accumulated into `scores[c]` incrementally by `addPiece`/`removePiece`/`movePiece` in `position.go` — no re-scan on evaluation.
 
-**King safety:** King PST has two phases — midgame (king hugs a corner) and endgame (king centralises). Phase is determined by `isEndgame`: true if neither side has a queen, or every side that has a queen also has no rooks and at most one minor piece. In the midgame, +10 cp is added per pawn in the king's pawn shelter (precomputed masks per king square).
+**Bishop pair:** +30 cp when both bishops are present (one on each colour).
+
+**Pawn structure** is computed per side by `determinePawnStructure` and scored as: passed pawns (rank-based PST bonus), defended pawns (+5 cp each), backward pawns (−10 cp each), doubled pawns (−10 cp each), isolated pawns (−20 cp each). A doubled passed pawn is not counted as passed (the rear pawn is obstructed).
+
+**Mobility:** Bishop attacks (excluding squares defended by enemy pawns) and rook attacks are each scored via a lookup table indexed by the number of available squares (bishop: −20 to +20 over 14 buckets; rook: −10 to +20 over 15 buckets).
+
+**King safety:** King PST switches between midgame and endgame tables via `isEndgame` (true if neither side has a queen, or every queen-side has no rooks and at most one minor piece). In the midgame: a three-row pawn shelter scores friendly pawns +15/+10/+5 and enemy pawns −15/−10/−5 across the three ranks in front of the king; open files near the king score −15 (king's file) and −10 (adjacent files); friendly non-pawn pieces score +10 (adjacent ring) and +5 (two-square ring).
+
+An alpha/beta material early-exit skips the full evaluation when the material score alone is more than 200 cp outside the search window.
 
 **SEE** ([engine/see.go](engine/see.go)) is implemented but not wired into move ordering — matching the C++ version.
 
