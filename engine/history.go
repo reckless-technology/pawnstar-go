@@ -16,17 +16,12 @@ func (h *historyTable) reset() {
 // recordGoodMove increments the counter for m at ply, indicating that m raised alpha
 // or caused a beta cutoff at that ply.
 func (h *historyTable) recordGoodMove(ply int, m move) {
-	if ply >= 0 && ply < maxPly {
-		h.counts[ply][m.fromTo()]++
-	}
+	h.counts[ply][m.fromTo()]++
 }
 
 // getCount returns the accumulated count for m at ply, or 0 if ply is out of range.
 func (h *historyTable) getCount(ply int, m move) uint {
-	if ply >= 0 && ply < maxPly {
-		return h.counts[ply][m.fromTo()]
-	}
-	return 0
+	return h.counts[ply][m.fromTo()]
 }
 
 func (h *historyTable) getMaxCount() uint {

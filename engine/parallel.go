@@ -14,7 +14,6 @@ import (
 type searchState struct {
 	posStack  []position // position history including game history + search path
 	nodeCount int
-
 	tt        *transpositionTable
 	history   *historyTable
 	evalTable *evalHashTable

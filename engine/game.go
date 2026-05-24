@@ -42,7 +42,6 @@ type Game struct {
 	nodeCount          int
 	wg                 sync.WaitGroup
 	parallelSlots      chan struct{} // semaphore limiting concurrent search workers
-	posStackData       [512]position
 	posStack           []position
 	isCancelPending    atomic.Bool
 }
@@ -102,7 +101,7 @@ func (game *Game) HandleCommand(line string) bool {
 
 // newGameFromFen resets the engine state to the position described by fen.
 func (game *Game) newGameFromFen(fen string) {
-	game.posStack = game.posStackData[:0]
+	game.posStack = make([]position, 0, 512)
 	game.posStack = append(game.posStack, positionFromFen(fen))
 	game.nodeCount = 0
 	game.isCancelPending.Store(false)
@@ -174,7 +173,6 @@ func (game *Game) isDrawByRepetition() bool {
 
 // pieceVals maps piece type to centipawn value, used in move scoring (MVV-LVA).
 var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
-
 
 // scoreAndSortMovesInner assigns sort scores and sorts moves.  It is shared by
 // Game and searchState so parallel workers use the same logic without duplication.

@@ -27,6 +27,7 @@ const (
 	// searchCancelledScore is a sentinel returned by a search iteration that was
 	// interrupted by the time limit, allowing the caller to detect cancellation.
 	searchCancelledScore = -12345678
+	hashNotFoundScore    = -2345678
 
 	// scoreInstabilityThresh is the centipawn tolerance for the early-exit heuristic:
 	// if the best-move score varies by more than this across consecutive depths the

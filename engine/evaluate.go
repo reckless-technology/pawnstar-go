@@ -1,5 +1,7 @@
 package engine
 
+import "sync"
+
 // PST tables ported from the C Pawnstar engine.
 // Stored with rank 8 at low indices, rank 1 at high indices.
 // Black reads the table directly; White reads via sq^rankFlip to mirror ranks.
@@ -11,11 +13,32 @@ type evalHashEntry struct {
 
 type evalHashTable struct {
 	entries []evalHashEntry
+	locks   [256]sync.Mutex
 }
 
-// count must be a power of 2
 func newEvalHashTable(count int) evalHashTable {
 	return evalHashTable{entries: make([]evalHashEntry, count)}
+}
+
+func (t *evalHashTable) find(hash zobrist) int {
+	idx := hash % zobrist(len(t.entries))
+	mu := &t.locks[idx%256]
+	mu.Lock()
+	entry := t.entries[idx]
+	mu.Unlock()
+	if entry.hash == hash {
+		return entry.score
+	}
+	return hashNotFoundScore
+
+}
+
+func (t *evalHashTable) record(hash zobrist, score int) {
+	idx := hash % zobrist(len(t.entries))
+	mu := &t.locks[idx%256]
+	mu.Lock()
+	t.entries[idx] = evalHashEntry{hash, score}
+	mu.Unlock()
 }
 
 var pawnSquare = [64]int{
@@ -321,10 +344,10 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 		return drawScore
 	}
 
-	entry := &ss.evalTable.entries[pos.hash&zobrist(len(ss.evalTable.entries)-1)]
-	if entry.hash == pos.hash {
+	hashScore := ss.evalTable.find(pos.hash)
+	if hashScore != hashNotFoundScore {
 		dbgx.evalHashHits++
-		return entry.score
+		return hashScore
 	}
 
 	wScore := pos.scores[white] + evalMaterialExtra(pos, white)
@@ -354,11 +377,9 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 	bScore += evalKing(pos, black, endgame)
 
 	if pos.colorToMove == white {
-		entry.hash = pos.hash
-		entry.score = wScore - bScore
+		ss.evalTable.record(pos.hash, wScore-bScore)
 		return wScore - bScore
 	}
-	entry.hash = pos.hash
-	entry.score = bScore - wScore
+	ss.evalTable.record(pos.hash, bScore-wScore)
 	return bScore - wScore
 }
