@@ -26,7 +26,7 @@ go test ./engine/ -run TestPerft/002 -v           # single position by 0-based i
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
-The engine runs at approximately **35 Mnps** on the perft suite. The C++ original reaches ~700 Mnps via BMI2 PEXT instructions.
+The engine runs at approximately **70 Mnps** on the perft suite. The C++ original reaches ~700 Mnps via BMI2 PEXT instructions.
 
 ## Playing a game
 
