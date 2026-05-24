@@ -33,6 +33,7 @@ type Game struct {
 	transpositionTable transpositionTable
 	historyTable       historyTable
 	timeControl        timeControl
+	evalTable          evalHashTable
 	openingBook        openingBook
 	nodeCount          int
 	wg                 sync.WaitGroup
@@ -131,12 +132,54 @@ var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
 // Score = captured_value × 10000 − moving_piece_value × 1000 + history_count,
 // giving priority to captures (MVV-LVA) and historically good quiet moves.
 func (g *Game) scoreAndSortMoves(moves []move, ply int) {
-	for i := range moves {
-		move := moves[i]
-		s := (pieceVals[move.captured()] * 10000) -
-			(pieceVals[move.piece()] * 1000) +
-			int(g.historyTable.getCount(ply, move))
-		moves[i] = move.withScore(s)
+	color := g.currentPosition().colorToMove()
+	for i, move := range moves {
+		score := (pieceVals[move.captured()] * 10) - pieceVals[move.piece()]
+		score += pstValue(color, move.piece(), move.to()) - pstValue(color, move.piece(), move.from())
+		score = (score * 1000) + int(g.historyTable.getCount(ply, move))
+		moves[i] = move.withScore(score)
+	}
+	sortMovesUnstable(moves)
+}
+
+func (g *Game) scoreAndSortMovesExtra(moves []move, ply int) {
+	// Determine all squares attacked by the enemy
+	position := g.currentPosition()
+	occupied := position.occupied()
+	color := position.colorToMove()
+	enemyColor := enemyOf(color)
+	enemyPieces := position.piecesOfColor(enemyColor)
+	enemyPawns := enemyPieces & position.pawns
+	var enemyAttacks bitboard
+	if color == white {
+		enemyAttacks = enemyPawns.shiftSouthwest() | enemyPawns.shiftSoutheast()
+	} else {
+		enemyAttacks = enemyPawns.shiftNorthwest() | enemyPawns.shiftNortheast()
+	}
+	enemyPieces &= ^enemyPawns
+	for enemyPieces != 0 {
+		sq := enemyPieces.popLsb()
+		enemyPiece := position.squares[sq]
+		enemyAttacks |= pieceAttacks(enemyPiece, occupied, sq)
+	}
+	// Now determine provisional approximate score for move based on cpatured and promoted material and PST.
+	// If the target square is attacked by the enemy, assume we lose the moving piece.
+	// This is much cruder than SEE, but it's fast and reasonably accurate for rough move ordering.
+	for i, move := range moves {
+		captured := move.captured()
+		piece := move.piece()
+		promoted := move.promoted()
+		var score int
+		if (enemyAttacks & squareBB(move.to())) != 0 {
+			// Enemy attacks destination square
+			score = pieceVals[captured] - pieceVals[piece] + pieceVals[promoted]
+
+		} else {
+			score = pieceVals[captured] + pieceVals[promoted]
+		}
+		score += pstValue(color, piece, move.to()) - pstValue(color, piece, move.from())
+		score = score*1000 + int(g.historyTable.getCount(ply, move))
+		moves[i] = move.withScore(score)
 	}
 	sortMovesUnstable(moves)
 }

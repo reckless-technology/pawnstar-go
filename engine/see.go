@@ -26,8 +26,8 @@ func newSeeBoard(pos *position) seeBoard {
 		rooks:       pos.rooks,
 		queens:      pos.queens,
 		kings:       pos.kings,
-		whitePieces: pos.piecesOfColor(white),
-		blackPieces: pos.piecesOfColor(black),
+		whitePieces: pos.whitePieces,
+		blackPieces: pos.blackPieces,
 	}
 }
 
@@ -59,27 +59,21 @@ func (b *seeBoard) piecesOfColor(c color) *bitboard {
 // evaluateStaticExchange returns the SEE score for m (positive = winning capture)
 // and whether m gives check.  The score accounts for all recaptures on the target
 // square by the least-valuable available attacker on each side in turn.
-func evaluateStaticExchange(pos *position, m move) (int, bool) {
-	var captured piece
-	if m.kind() == epCapture {
-		captured = pawn
-	} else {
-		captured = pos.squares[m.to()]
-	}
+func evaluateStaticExchange(pos *position, move move) (int, bool) {
 	child := *pos
-	child.makeMove(m)
+	child.makeMove(move)
 	isChecking := child.isInCheck()
 	nextColor := child.colorToMove()
 	bb := newSeeBoard(&child)
-
-	p := m.piece()
-	promoted := m.promoted()
+	piece := move.piece()
+	promoted := move.promoted()
+	captured := move.captured()
 	if promoted != noPiece {
 		s := seeValues[captured] + seeValues[promoted] - seeValues[pawn] -
-			evaluateSwapOff(&bb, m.to(), nextColor, promoted)
+			evaluateSwapOff(&bb, move.to(), nextColor, promoted)
 		return s, isChecking
 	}
-	s := seeValues[captured] - evaluateSwapOff(&bb, m.to(), nextColor, p)
+	s := seeValues[captured] - evaluateSwapOff(&bb, move.to(), nextColor, piece)
 	return s, isChecking
 }
 
@@ -131,6 +125,7 @@ func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare p
 			capturingPiece = rook
 			goto AttackFound
 		}
+
 		attackers = (bishopTargets | rookTargets) & attackingPieces & bb.queens
 		if attackers.isNotEmpty() {
 			capturingPiece = queen

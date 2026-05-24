@@ -28,7 +28,7 @@ const (
 	notFileA bitboard = ^fileA
 	notFileH bitboard = ^fileH
 	whiteSqs bitboard = 0x55AA55AA55AA55AA // light squares
-	blackSqs bitboard = ^whiteSqs           // dark squares
+	blackSqs bitboard = ^whiteSqs          // dark squares
 )
 
 // squareBB returns a bitboard with only sq's bit set.

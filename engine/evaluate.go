@@ -4,6 +4,15 @@ package engine
 // Stored with rank 8 at low indices, rank 1 at high indices.
 // Black reads the table directly; White reads via sq^rankFlip to mirror ranks.
 
+type evalHashEntry struct {
+	hash  zobrist
+	score int
+}
+
+type evalHashTable struct {
+	entries [0x400]evalHashEntry
+}
+
 var pawnSquare = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	25, 25, 25, 25, 25, 25, 25, 25,
@@ -142,11 +151,23 @@ func isEndgame(pos *position) bool {
 
 // pawnStructure holds pawn classification for one side.
 type pawnStructure struct {
-	passed   bitboard
-	isolated bitboard
-	backward bitboard
-	doubled  bitboard
-	defended bitboard
+	passed      bitboard
+	isolated    bitboard
+	unsupported bitboard
+	doubled     bitboard
+	defended    bitboard
+}
+
+type maskPtrs struct {
+	passedMask    *[64]bitboard
+	doubledMask   *[64]bitboard
+	isolatedMask  *[64]bitboard
+	supportedMask *[64]bitboard
+}
+
+var pawnMasks = [2]maskPtrs{
+	{&passedPawnMaskWhite, &doubledPawnMaskWhite, &isolatedPawnMask, &supportedPawnMaskWhite},
+	{&passedPawnMaskBlack, &doubledPawnMaskBlack, &isolatedPawnMask, &supportedPawnMaskBlack},
 }
 
 // determinePawnStructure classifies all pawns of color c into structural categories.
@@ -164,39 +185,18 @@ func determinePawnStructure(pos *position, c color) pawnStructure {
 	for f := friendlyPawns; f.isNotEmpty(); {
 		sq := f.popLsb()
 		b := squareBB(sq)
-		if c == white {
-			if (passedPawnMaskWhite[sq] & enemyPawns).isEmpty() {
-				ps.passed |= b
-			}
-			if (doubledPawnMaskWhite[sq] & friendlyPawns).isNotEmpty() {
-				ps.doubled |= b
-			}
-			if (isolatedPawnMask[sq] & friendlyPawns).isEmpty() {
-				ps.isolated |= b
-			}
-			// Backward: unsupported pawn whose advance square is controlled by an enemy pawn.
-			if (supportedPawnMaskWhite[sq] & friendlyPawns).isEmpty() {
-				enemyAttacks := enemyPawns.shiftSouthwest() | enemyPawns.shiftSoutheast()
-				if (enemyAttacks & squareBB(sq+8)).isNotEmpty() {
-					ps.backward |= b
-				}
-			}
-		} else {
-			if (passedPawnMaskBlack[sq] & enemyPawns).isEmpty() {
-				ps.passed |= b
-			}
-			if (doubledPawnMaskBlack[sq] & friendlyPawns).isNotEmpty() {
-				ps.doubled |= b
-			}
-			if (isolatedPawnMask[sq] & friendlyPawns).isEmpty() {
-				ps.isolated |= b
-			}
-			if (supportedPawnMaskBlack[sq] & friendlyPawns).isEmpty() {
-				enemyAttacks := enemyPawns.shiftNorthwest() | enemyPawns.shiftNortheast()
-				if (enemyAttacks & squareBB(sq-8)).isNotEmpty() {
-					ps.backward |= b
-				}
-			}
+		masks := &pawnMasks[c]
+		if (masks.passedMask[sq] & enemyPawns).isEmpty() {
+			ps.passed |= b
+		}
+		if (masks.doubledMask[sq] & friendlyPawns).isNotEmpty() {
+			ps.doubled |= b
+		}
+		if (masks.isolatedMask[sq] & friendlyPawns).isEmpty() {
+			ps.isolated |= b
+		}
+		if (masks.supportedMask[sq] & friendlyPawns).isEmpty() {
+			ps.unsupported |= b
 		}
 	}
 	// A doubled passed pawn doesn't score as passed; the back pawn is obstructed.
@@ -222,7 +222,7 @@ func evalPawnStructure(ps *pawnStructure, c color) int {
 		score += passedPawnSquare[sq^flip]
 	}
 	score += ps.defended.popCount() * 5
-	score -= ps.backward.popCount() * 10
+	score -= ps.unsupported.popCount() * 10
 	score -= ps.doubled.popCount() * 10
 	score -= ps.isolated.popCount() * 20
 	return score
@@ -250,34 +250,31 @@ func evalMobility(pos *position, c color, ps *[2]pawnStructure) int {
 
 // evalKing scores king safety: PST bonus, three-row pawn shelter, open-file penalties,
 // and a bonus for friendly non-pawn pieces near the king.
-func evalKing(pos *position, c color, endgame bool) int {
-	flip := flips[c]
-	friendly := pos.piecesOfColor(c)
-	enemyColor := enemyOf(c)
+func evalKing(pos *position, color color, endgame bool) int {
+	flip := flips[color]
+	friendly := pos.piecesOfColor(color)
+	enemyColor := enemyOf(color)
 	friendlyPawns := friendly & pos.pawns
 	enemyPawns := pos.piecesOfColor(enemyColor) & pos.pawns
-	kingLoc := pos.kingLocn[c]
+	kingLocation := pos.kingLocn[color]
 
 	var pstScore int
 	if endgame {
-		pstScore = kingSqEndgame[kingLoc^flip]
+		pstScore = kingSqEndgame[kingLocation^flip]
 	} else {
-		pstScore = kingSqMidgame[kingLoc^flip]
+		pstScore = kingSqMidgame[kingLocation^flip]
 	}
 
 	safetyScore := 0
 	if !endgame {
-		var shelter1 bitboard
-		if c == white {
-			shelter1 = kingPawnShelterWhite[kingLoc]
-		} else {
-			shelter1 = kingPawnShelterBlack[kingLoc]
-		}
-		var shelter2, shelter3 bitboard
-		if c == white {
+		// King pawn shelter
+		var shelter1, shelter2, shelter3 bitboard
+		if color == white {
+			shelter1 = kingPawnShelterWhite[kingLocation]
 			shelter2 = shelter1.shiftNorth()
 			shelter3 = shelter2.shiftNorth()
 		} else {
+			shelter1 = kingPawnShelterBlack[kingLocation]
 			shelter2 = shelter1.shiftSouth()
 			shelter3 = shelter2.shiftSouth()
 		}
@@ -289,7 +286,7 @@ func evalKing(pos *position, c color, endgame bool) int {
 			5*(enemyPawns&shelter3).popCount()
 
 		// Penalise open files near the king.
-		kingFile := fileBBs[kingLoc.file()]
+		kingFile := fileBBs[kingLocation.file()]
 		if (kingFile & friendlyPawns).isEmpty() {
 			safetyScore -= 15
 		}
@@ -303,9 +300,9 @@ func evalKing(pos *position, c color, endgame bool) int {
 
 	// Friendly non-pawn pieces near the king provide protection.
 	nonPawns := friendly ^ friendlyPawns
-	adj1 := kingAttacks[kingLoc]
-	adj2 := kingAttacks2[kingLoc] ^ adj1
-	safetyScore += 10*(adj1&nonPawns).popCount() + 5*(adj2&nonPawns).popCount()
+	adj1 := kingAttacks[kingLocation]
+	adj2 := kingAttacks2[kingLocation]
+	safetyScore += 5*(adj1&nonPawns).popCount() + 5*(adj2&nonPawns).popCount()
 
 	return pstScore + safetyScore
 }
@@ -314,9 +311,16 @@ func evalKing(pos *position, c color, endgame bool) int {
 // Returns drawScore for positions with insufficient material.
 // If the material score alone is more than 200 cp outside [alpha, beta], it returns early.
 func evaluatePosition(game *Game, alpha, beta int) int {
+	dbgx.evalCalls++
 	pos := game.currentPosition()
 	if pos.isDrawByMaterial() {
 		return drawScore
+	}
+
+	entry := &game.evalTable.entries[pos.hash&0x3FF]
+	if entry.hash == pos.hash {
+		dbgx.evalHashHits++
+		return entry.score
 	}
 
 	wScore := pos.scores[white] + evalMaterialExtra(pos, white)
@@ -327,10 +331,12 @@ func evaluatePosition(game *Game, alpha, beta int) int {
 	if pos.colorToMove() == black {
 		matScore = -matScore
 	}
-	if matScore > beta+200 {
+	if matScore > (beta + 200) {
+		dbgx.evalCutoffBeta++
 		return matScore
 	}
-	if matScore < alpha-200 {
+	if matScore < (alpha - 200) {
+		dbgx.evalCutoffAlpha++
 		return matScore
 	}
 
@@ -340,13 +346,17 @@ func evaluatePosition(game *Game, alpha, beta int) int {
 	ps[black] = determinePawnStructure(pos, black)
 	wScore += evalPawnStructure(&ps[white], white)
 	bScore += evalPawnStructure(&ps[black], black)
-	wScore += evalMobility(pos, white, &ps)
-	bScore += evalMobility(pos, black, &ps)
+	// wScore += evalMobility(pos, white, &ps)
+	// bScore += evalMobility(pos, black, &ps)
 	wScore += evalKing(pos, white, endgame)
 	bScore += evalKing(pos, black, endgame)
 
 	if pos.colorToMove() == white {
+		entry.hash = pos.hash
+		entry.score = wScore - bScore
 		return wScore - bScore
 	}
+	entry.hash = pos.hash
+	entry.score = bScore - wScore
 	return bScore - wScore
 }
