@@ -210,29 +210,27 @@ func searchMovesParallel(ss *searchState, moves []move, skipTTMove move, elderMo
 		}
 
 		w := newWorkerState(ss, &cutoff)
-		mCopy := m
-		cd := childDepth
 		wg.Add(1)
 		launchCount++
-		go func() {
+		go func(w *searchState, cutoff *atomic.Bool, m move, depth, ply, alpha, beta int, resultCh chan<- result, wg *sync.WaitGroup) {
 			// Block until a parallel slot is free, then search.
-			<-ss.game.parallelSlots
+			<-w.game.parallelSlots
 			defer func() {
-				ss.game.parallelSlots <- struct{}{}
+				w.game.parallelSlots <- struct{}{}
 				wg.Done()
 			}()
-			if cutoff.Load() || ss.game.isCancelPending.Load() {
-				resultCh <- result{initialAlpha, mCopy}
+			if cutoff.Load() || w.game.isCancelPending.Load() {
+				resultCh <- result{initialAlpha, m}
 				return
 			}
 			var pv variation
-			score := searchSingleMove(w, cd, ply, alpha, beta, mCopy, &pv, 0)
+			score := searchSingleMove(w, depth, ply, alpha, beta, m, &pv, 0)
 			if score > alpha {
 				cutoff.Store(true)
 				dbgx.parallelCutoffs++
 			}
-			resultCh <- result{score, mCopy}
-		}()
+			resultCh <- result{score, m}
+		}(w, &cutoff, m, childDepth, ply, alpha, beta, resultCh, &wg)
 	}
 	dbgx.parallelLaunchCount += uint(launchCount)
 
