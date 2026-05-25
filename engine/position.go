@@ -360,19 +360,6 @@ func (position *position) makeNullMove() {
 	position.colorToMove = enemyOf(position.colorToMove)
 }
 
-// isLegal returns true if the position is a legal chess position.
-func (position *position) isLegal() bool {
-	color := position.colorToMove
-	whiteKing := position.kings & position.whitePieces
-	blackKing := position.kings & position.blackPieces
-	return whiteKing.popCount() == 1 && blackKing.popCount() == 1 &&
-		whiteKing != blackKing &&
-		(kingAttacks[whiteKing.lsb()] & blackKing).isEmpty() &&
-		!position.isAttacked(position.kingLocation[enemyOf(color)], color) &&
-		position.kingLocation[white] == whiteKing.lsb() &&
-		position.kingLocation[black] == blackKing.lsb()
-}
-
 // isDrawByMaterial returns true when neither side has enough material to checkmate:
 // KK, KNK, KBK, or KBKB with both bishops on the same colour.
 func (position *position) isDrawByMaterial() bool {

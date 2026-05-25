@@ -15,16 +15,16 @@ Point any UCI-compatible GUI (Arena, Cute Chess, etc.) at the binary — no conf
 
 ## Testing
 
-Move generation correctness is verified by perft — counting leaf nodes to a given depth and comparing against known values. All 21 EPD positions must pass before any change is considered correct.
+Move generation correctness is verified by perft — counting leaf nodes to a given depth and comparing against known values. All 131 EPD positions must pass before any change is considered correct.
 
 ```bash
 go test ./engine/ -run TestPerft -short -v        # all positions, depth ≤ D5, ~2s
-go test ./engine/ -run TestPerft -v               # full suite, up to D8 (slow)
-go test ./engine/ -run TestPerft/002 -v           # single position by 0-based index
+go test ./engine/ -run TestPerft -v               # full suite, up to D6 (slow)
+go test ./engine/ -run TestPerft/002 -v           # single position by 1-based index (002 = second position)
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
-The engine runs at approximately **70 Mnps** on the perft suite. The C++ original pawnstar reaches ~600 Mnps via BMI2 PEXT instructions.
+The engine runs at approximately **42 Mnps** on the perft suite. The C++ original pawnstar reaches ~600 Mnps via BMI2 PEXT instructions.
 
 ## Architecture
 
@@ -40,7 +40,7 @@ The struct holds:
 - `colorToMove color` — side to move as a direct field
 - Zobrist hash maintained incrementally
 
-`Bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for common set operations (`popCount`, `lsb`, `clearLsb`, shifts in all eight directions).
+`bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for common set operations (`popCount`, `lsb`, `clearLsb`, shifts in all eight directions).
 
 ### Move encoding
 
@@ -66,13 +66,13 @@ Move lists are plain `[]move` slices allocated with `make([]move, 0, 64)` per ca
 
 ### Move generation
 
-`GenerateLegalMoves` and `GenerateLegalCaptures` ([engine/movegen.go](engine/movegen.go)) are the public entry points, returning `[]move`. Internally:
+`generateLegalMoves` and `generateLegalCaptures` ([engine/movegen.go](engine/movegen.go)) are the entry points, returning `[]move`. Internally:
 
-1. Compute checkers bitboard and pin rays (`Pins` in [engine/pins.go](engine/pins.go)).
+1. Compute checkers bitboard and pin rays (`pins` in [engine/pins.go](engine/pins.go)).
 2. If in double check, only king moves are legal — return early.
 3. Build the forbidden-square set for the king (attacked squares, including X-ray attacks through the king via temporarily clearing the king from occupancy).
 4. For single check, restrict non-king moves to interpositions and captures of the checker.
-5. Apply pin constraints via `Pins.AllowedSquares(from)` — returns the ray the piece may move along, or all squares if unpinned.
+5. Apply pin constraints via `pins.allowedSquares(from)` — returns the ray the piece may move along, or all squares if unpinned.
 
 ### Search
 
@@ -103,7 +103,7 @@ All recursive search functions take a `searchState` ([engine/parallel.go](engine
 | Principal variation search (PVS) | Null-window on moves 2+ when not in check; re-search full window on fail-high |
 | Null-move pruning | R = 4; skipped if in check, position is already null-move, window is not null (`beta ≠ alpha + 1`), or position is an endgame (`isEndgame`); also requires `pstScore > beta + 100` |
 | Late move reduction (LMR) | Reduce by 1 from the 2nd move onward (non-capture, non-check, non-pawn/king, depth > 2); reduce by 2 additionally from move index 7 (depth > 3, zero history count); re-search at full depth if score exceeds alpha |
-| Young Brothers Wait (YBW) | At null-window nodes with depth ≥ 4, the elder brother (first non-TT move) is searched sequentially; remaining moves are dispatched to parallel workers via `searchMovesParallel`. Each worker runs `runWorker` (a standalone function), returns a `move` with score packed in. Workers signal a per-batch `atomic.Bool` on fail-high so siblings abort early. Workers never spawn sub-workers. |
+| Young Brothers Wait (YBW) | At null-window nodes with depth ≥ 4, the first three moves are searched sequentially; remaining moves are dispatched to parallel workers via `searchMovesParallel`. Each worker runs `runWorker` (a standalone function), returns a `move` with score packed in. Workers signal a per-batch `atomic.Bool` on fail-high so siblings abort early. Workers never spawn sub-workers. |
 | Check extension | In quiescence, an in-check position re-enters `searchAlphaBeta` at the same depth instead of standing pat |
 | Transposition table | Hit on PV node increments depth by 1; Cut/All hits return early if score is conclusive |
 
