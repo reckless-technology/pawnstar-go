@@ -168,11 +168,6 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 	ss.scoreAndSortMoves(moves, ply)
 
-	// Iterate all non-TT moves.  The first one searched is the elder brother
-	// (YBW).  After the elder, either dispatch the rest to parallel workers and
-	// break, or continue the loop serially.  All per-move logic (LMR, search,
-	// beta cutoff, alpha update) appears exactly once.
-	elderMove := moveNone()
 	for i, move := range moves {
 		if isTransposition && move.equal(transpos.move) {
 			continue
@@ -214,29 +209,29 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 				copyVariation(parentPV, pv, move)
 			}
 		}
-
-		// After we have tried at least one move, consider searching all the remaining moves in parallel
-		// with a null window search.
-		if elderMove.isNone() {
-			elderMove = move
+		if i > 1 {
+			// We have searched moves up to and including the ith move without achieving a cutoff.
+			// Search the remaining moves in parallel on the assumption this is probably an all node
+			// and no move will raise alpha.
 			if !ss.isCancelled() && beta == alpha+1 && ss.canGoParallel(depth) {
-				parallelBest := searchMovesParallel(ss, moves, transpos.move, elderMove, depth, ply, alpha, beta)
+				parallelBest := searchMovesParallel(ss, moves[i+1:], depth, ply, alpha, beta)
 				if ss.isCancelled() {
 					return searchCancelledScore
 				}
 				parallelScore := parallelBest.score()
 				if parallelScore >= beta {
 					ss.game.transpositionTable.record(&transposition{position.hash, parallelBest.withScore(parallelScore), int16(depth), nodeCut, false})
-					dbgx.nodesCut++
 					return parallelScore
 				}
 				if parallelScore > bestScore {
+					//panic(fmt.Sprintf("Should never get here best score %d parallel score %d", bestScore, parallelScore))
 					bestScore = parallelScore
 					bestMove = parallelBest
 				}
 				break
 			}
 		}
+
 	}
 
 	if hasRaisedAlpha {

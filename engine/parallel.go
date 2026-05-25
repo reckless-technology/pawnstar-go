@@ -35,7 +35,7 @@ type searchState struct {
 	hashStack []hashStackEntry // compact history for repetition detection: game history + search path
 	nodeCount int              // Node count for this goroutine.
 	game      *Game            // shared: time control, cancel flag, parallel semaphore, TT, history, eval table
-	cutoff    *atomic.Bool     // per-batch cutoff signal; nil for the main search
+	wasCutoff *atomic.Bool     // per-batch cutoff signal; nil for the main search
 }
 
 // newSearchState is the private constructor shared by newSearchStateFromGame and
@@ -48,7 +48,7 @@ func newSearchState(hs []hashStackEntry, startPos *position, game *Game, cutoff 
 		posStack:  ps,
 		hashStack: hs,
 		game:      game,
-		cutoff:    cutoff,
+		wasCutoff: cutoff,
 	}
 }
 
@@ -141,14 +141,14 @@ func (ss *searchState) isDrawByRepetition() bool {
 // received a time-expiry or stop command, or a sibling worker found a beta
 // cutoff in the current parallel batch.
 func (ss *searchState) isCancelled() bool {
-	return ss.game.isCancelPending.Load() || (ss.cutoff != nil && ss.cutoff.Load())
+	return ss.game.isCancelPending.Load() || (ss.wasCutoff != nil && ss.wasCutoff.Load())
 }
 
 // canGoParallel returns true when this state is eligible to spawn parallel
 // workers.  Only the main search (cutoff == nil) is allowed; workers never
 // spawn sub-workers.
 func (ss *searchState) canGoParallel(depth int) bool {
-	return ss.cutoff == nil && depth >= 4 && len(ss.game.parallelSlots) > 0
+	return ss.wasCutoff == nil && depth >= 4 && len(ss.game.parallelSlots) > 0
 }
 
 // scoreAndSortMoves assigns sort scores to moves and sorts them descending.
@@ -176,7 +176,7 @@ func runWorker(ss *searchState, move move, depth, ply, alpha, beta int, resultCh
 	score := searchSingleMove(ss, depth, ply, alpha, beta, move, &pv, 0)
 	if score >= beta {
 		// Signal to other workers to stop since we found a beta cutoff (null window).
-		ss.cutoff.Store(true)
+		ss.wasCutoff.Store(true)
 		dbgx.parallelCutoffs++
 	}
 	resultCh <- move.withScore(score)
@@ -191,7 +191,7 @@ func runWorker(ss *searchState, move move, depth, ply, alpha, beta int, resultCh
 // handing off to a worker.  Workers never go parallel themselves.
 //
 // Returns the best score and best move found (score contained within the move)
-func searchMovesParallel(ss *searchState, moves []move, tableMove move, elderMove move, depth, ply, alpha, beta int) move {
+func searchMovesParallel(ss *searchState, moves []move, depth, ply, alpha, beta int) move {
 	if beta != alpha+1 {
 		panic("searchMovesParallel called on non null window")
 	}
@@ -206,29 +206,22 @@ func searchMovesParallel(ss *searchState, moves []move, tableMove move, elderMov
 
 	// Move contains the score within it so the result channel contains moves.
 	resultChan := make(chan move, len(moves))
-	numMovesSearched := 0
-	for _, move := range moves {
-		if (!tableMove.isNone() && move.equal(tableMove)) || move.equal(elderMove) {
-			continue
-		}
+	for i, move := range moves {
 		if cutoff.Load() || ss.game.isCancelPending.Load() {
 			break
 		}
-
 		// Apply LMR to get the child depth for this worker.
 		childDepth := depth
-		if depth > 2 && numMovesSearched > 0 && !isInCheck && !move.isChecking() &&
+		if depth > 2 && i > 3 && !isInCheck && !move.isChecking() &&
 			move.piece() != pawn && move.piece() != king && move.captured() == noPiece {
 			childDepth--
-			if depth > 3 && numMovesSearched > 6 && ss.game.historyTable.getCount(ply, move) == 0 {
+			if depth > 3 && i > 6 && ss.game.historyTable.getCount(ply, move) == 0 {
 				childDepth--
 			}
 		}
-
 		wg.Add(1)
-		dbgx.parallelLaunchCount++
+		dbgx.parallelMovesSearched++
 		go runWorker(newWorkerState(ss, &cutoff), move, childDepth, ply, alpha, beta, resultChan, &wg)
-		numMovesSearched++
 	}
 
 	wg.Wait()
