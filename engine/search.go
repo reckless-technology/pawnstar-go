@@ -168,15 +168,16 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 	ss.scoreAndSortMoves(moves, ply)
 
-	// Find and search the elder brother (first non-TT move) sequentially.
-	elderIdx := -1
+	// Iterate all non-TT moves.  The first one searched is the elder brother
+	// (YBW).  After the elder, either dispatch the rest to parallel workers and
+	// break, or continue the loop serially.  All per-move logic (LMR, search,
+	// beta cutoff, alpha update) appears exactly once.
 	elderMove := moveNone()
 	for i, m := range moves {
 		if isTransposition && m.equal(trans.move) {
 			continue
 		}
-		elderIdx = i
-		elderMove = m
+
 		childDepth := depth
 		if depth > 2 && i > 0 && !pos.isInCheck() && !m.isChecking() && beta == alpha+1 &&
 			m.piece() != pawn && m.piece() != king && m.captured() == noPiece {
@@ -187,6 +188,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 				childDepth--
 			}
 		}
+
 		score := searchSingleMove(ss, childDepth, ply, alpha, beta, m, &pv, i)
 		if score > alpha && childDepth < depth {
 			dbgx.lmrFails++
@@ -212,73 +214,31 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 				copyVariation(parentPV, pv, m)
 			}
 		}
-		break
-	}
 
-	// Search remaining moves — in parallel if eligible, serially otherwise.
-	// YBW is only valid at null-window nodes (beta == alpha+1); full-window PV nodes
-	// search serially because workers would receive the wrong bound.
-	if elderIdx >= 0 && !ss.isCancelled() && beta == alpha+1 && ss.canGoParallel(depth) {
-		// Young Brothers Wait: search all non-elder, non-TT moves in parallel.
-		parallelScore, parallelBest := searchMovesParallel(ss, moves, trans.move, elderMove, depth, ply, alpha, beta)
-		if ss.isCancelled() {
-			return searchCancelledScore
-		}
-		if parallelScore > bestScore {
-			bestScore = parallelScore
-			bestMove = parallelBest
-			if parallelScore > alpha {
-				alpha = parallelScore
-				hasRaisedAlpha = true
-				ss.history.recordGoodMove(ply, parallelBest)
-			}
-		}
-		if parallelScore >= beta {
-			ss.tt.record(&transposition{pos.hash, parallelBest.withScore(parallelScore), int16(depth), nodeCut, false})
-			dbgx.nodesCut++
-			return parallelScore
-		}
-	} else {
-		for moveIdx, m := range moves {
-			if (isTransposition && m.equal(trans.move)) || (elderIdx >= 0 && m.equal(elderMove)) {
-				continue
-			}
-
-			childDepth := depth
-			if depth > 2 && moveIdx > 0 && !pos.isInCheck() && !m.isChecking() && beta == alpha+1 &&
-				m.piece() != pawn && m.piece() != king && m.captured() == noPiece {
-				dbgx.lmrAttempts1++
-				childDepth--
-				if depth > 3 && moveIdx > 6 && ss.history.getCount(ply, m) == 0 {
-					dbgx.lmrAttempts2++
-					childDepth--
+		// After the elder brother: try Young Brothers Wait for the rest.
+		// YBW is only valid at null-window nodes; full-window PV nodes continue serially.
+		if elderMove.isNone() {
+			elderMove = m
+			if !ss.isCancelled() && beta == alpha+1 && ss.canGoParallel(depth) {
+				parallelScore, parallelBest := searchMovesParallel(ss, moves, trans.move, elderMove, depth, ply, alpha, beta)
+				if ss.isCancelled() {
+					return searchCancelledScore
 				}
-			}
-
-			score := searchSingleMove(ss, childDepth, ply, alpha, beta, m, &pv, moveIdx)
-			if score > alpha && childDepth < depth {
-				dbgx.lmrFails++
-				score = searchSingleMove(ss, depth, ply, alpha, beta, m, &pv, moveIdx)
-			}
-			if ss.isCancelled() {
-				return searchCancelledScore
-			}
-			if score >= beta {
-				ss.tt.record(&transposition{pos.hash, m.withScore(score), int16(depth), nodeCut, false})
-				ss.history.recordGoodMove(ply, m)
-				dbgx.nodesCut++
-				return score
-			}
-			if score > bestScore {
-				bestScore = score
-				bestMove = m
-				if score > alpha {
-					dbgx.nodesPvChanged++
-					alpha = score
-					hasRaisedAlpha = true
-					ss.history.recordGoodMove(ply, m)
-					copyVariation(parentPV, pv, m)
+				if parallelScore > bestScore {
+					bestScore = parallelScore
+					bestMove = parallelBest
+					if parallelScore > alpha {
+						alpha = parallelScore
+						hasRaisedAlpha = true
+						ss.history.recordGoodMove(ply, parallelBest)
+					}
 				}
+				if parallelScore >= beta {
+					ss.tt.record(&transposition{pos.hash, parallelBest.withScore(parallelScore), int16(depth), nodeCut, false})
+					dbgx.nodesCut++
+					return parallelScore
+				}
+				break
 			}
 		}
 	}
