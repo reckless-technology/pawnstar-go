@@ -1,8 +1,6 @@
 # Pawnstar-Go
 
-A UCI chess engine written in Go. This is a port of the original C++ Pawnstar engine, preserving the same algorithms and identical move encoding so the two implementations can be compared directly.
-
-A Rust port also exists at [../pawnstar-rs](../pawnstar-rs), which runs at roughly 1.8× the speed of this version.
+A UCI chess engine written in Go. This is a port of the original C++ Pawnstar engine.
 
 ## Build and run
 
@@ -26,15 +24,7 @@ go test ./engine/ -run TestPerft/002 -v           # single position by 0-based i
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
-The engine runs at approximately **70 Mnps** on the perft suite. The C++ original reaches ~700 Mnps via BMI2 PEXT instructions.
-
-## Playing a game
-
-[game.py](../pawnstar-rs/game.py) in the Rust repo orchestrates a UCI game between pawnstar-go (White) and pawnstar-rs (Black), building both engines automatically:
-
-```bash
-python3 ../pawnstar-rs/game.py
-```
+The engine runs at approximately **70 Mnps** on the perft suite. The C++ original pawnstar reaches ~600 Mnps via BMI2 PEXT instructions.
 
 ## Architecture
 
