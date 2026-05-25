@@ -5,14 +5,34 @@ import (
 	"sync/atomic"
 )
 
+// hashEntry is a compact position record used exclusively for repetition detection.
+// It captures only the two fields that isDrawByRepetition needs from a position:
+// the Zobrist hash (to detect equal positions) and the half-move clock (to stop
+// scanning at an irreversible move boundary).  At 16 bytes it is 10.5× smaller
+// than a full position (168 bytes), which is the key to cheap worker forks.
+type hashEntry struct {
+	hash     zobrist // Zobrist hash of the position
+	halfMove uint8   // half-move clock at this position (for 50-move / repetition cutoff)
+}
+
 // searchState holds all mutable state for one search goroutine.  Both the main
 // (serial) search and each parallel worker own a searchState.
 //
-// posStack and nodeCount are private to each goroutine.  tt, history, evalTable,
-// and game (for time control and the cancel flag) are shared via pointer with
-// zero copying.
+// posStack is the copy-make stack for the goroutine's own search path.  It
+// starts with exactly one entry (the position at the fork point) and grows by
+// one entry for each move played.  Workers never undo past their starting
+// position, so the game history is not needed here.
+//
+// hashStack is a compact (hash, halfMove) record for every position from the
+// start of the game through the current search node.  It is the only structure
+// consulted by isDrawByRepetition.  Copying hashStack when forking a worker
+// costs roughly 16 bytes × n rather than 168 bytes × n for a full posStack copy.
+//
+// tt, history, evalTable, and game (for time control and the cancel flag) are
+// shared via pointer with zero copying.
 type searchState struct {
-	posStack  []position // position history including game history + search path
+	posStack  []position   // copy-make stack: starts with 1 entry (fork position), grows during search
+	hashStack []hashEntry  // compact history for repetition detection: game history + search path
 	nodeCount int
 	tt        *transpositionTable
 	history   *historyTable
@@ -22,13 +42,20 @@ type searchState struct {
 }
 
 // newSearchStateFromGame creates a searchState for the main (serial) search.
-// posStack is pre-populated from the game's current history so that draw-by-
-// repetition detection can look back through the full game.
+// posStack is seeded with only the current position.  hashStack is built from
+// the game's full position history so that draw-by-repetition detection can
+// look back through the complete game.
 func newSearchStateFromGame(game *Game) *searchState {
-	ps := make([]position, len(game.posStack), len(game.posStack)+maxPly+4)
-	copy(ps, game.posStack)
+	n := len(game.posStack)
+	hs := make([]hashEntry, n, n+maxPly+4)
+	for i, pos := range game.posStack {
+		hs[i] = hashEntry{pos.hash, pos.halfMove}
+	}
+	ps := make([]position, 1, maxPly+4)
+	ps[0] = game.posStack[n-1]
 	return &searchState{
 		posStack:  ps,
+		hashStack: hs,
 		tt:        &game.transpositionTable,
 		history:   &game.historyTable,
 		evalTable: &game.evalTable,
@@ -37,14 +64,18 @@ func newSearchStateFromGame(game *Game) *searchState {
 }
 
 // newWorkerState creates a searchState for a parallel worker.
-// Only posStack is copied (the current search path, typically a few dozen
-// positions).  All other state is shared via pointer.
+// posStack is seeded with the parent's current position (1 entry, 168 bytes).
+// hashStack is copied from the parent (compact: 16 bytes × n entries).
+// All other state is shared via pointer.
 func newWorkerState(parent *searchState, cutoff *atomic.Bool) *searchState {
-	n := len(parent.posStack)
-	ps := make([]position, n, n+maxPly+4)
-	copy(ps, parent.posStack)
+	n := len(parent.hashStack)
+	hs := make([]hashEntry, n, n+maxPly+4)
+	copy(hs, parent.hashStack)
+	ps := make([]position, 1, maxPly+4)
+	ps[0] = parent.posStack[len(parent.posStack)-1]
 	return &searchState{
 		posStack:  ps,
+		hashStack: hs,
 		tt:        parent.tt,
 		history:   parent.history,
 		evalTable: parent.evalTable,
@@ -53,43 +84,60 @@ func newWorkerState(parent *searchState, cutoff *atomic.Bool) *searchState {
 	}
 }
 
+// currentPosition returns a pointer to the current (deepest) position on the stack.
 func (ss *searchState) currentPosition() *position {
 	return &ss.posStack[len(ss.posStack)-1]
 }
 
+// playMove appends a copy of the current position to posStack, applies m to it,
+// and records the resulting (hash, halfMove) in hashStack.
 func (ss *searchState) playMove(m move) {
 	ss.posStack = append(ss.posStack, ss.posStack[len(ss.posStack)-1])
 	ss.posStack[len(ss.posStack)-1].makeMove(m)
+	pos := &ss.posStack[len(ss.posStack)-1]
+	ss.hashStack = append(ss.hashStack, hashEntry{pos.hash, pos.halfMove})
 }
 
+// makeNullMove appends a copy of the current position to posStack, applies a
+// null move to it, and records the resulting (hash, halfMove) in hashStack.
 func (ss *searchState) makeNullMove() {
 	ss.posStack = append(ss.posStack, ss.posStack[len(ss.posStack)-1])
 	ss.posStack[len(ss.posStack)-1].makeNullMove()
+	pos := &ss.posStack[len(ss.posStack)-1]
+	ss.hashStack = append(ss.hashStack, hashEntry{pos.hash, pos.halfMove})
 }
 
+// undoMove removes the last position from posStack and the last entry from
+// hashStack, reverting to the state before the most recent playMove or makeNullMove.
 func (ss *searchState) undoMove() {
 	ss.posStack = ss.posStack[:len(ss.posStack)-1]
+	ss.hashStack = ss.hashStack[:len(ss.hashStack)-1]
 }
 
+// isDrawByFiftyMoves reports whether the 50-move rule draw condition is met.
 func (ss *searchState) isDrawByFiftyMoves() bool {
 	return ss.currentPosition().halfMove >= 100
 }
 
+// isDrawByRepetition returns true if the current position has occurred twice
+// before in the combined game + search history (three occurrences total).
+// It scans hashStack backwards in two-ply steps (same side to move) and stops
+// early at an irreversible move (halfMove == 0).
 func (ss *searchState) isDrawByRepetition() bool {
-	n := len(ss.posStack)
+	n := len(ss.hashStack)
 	if n < 5 {
 		return false
 	}
-	h := ss.posStack[n-1].hash
+	h := ss.hashStack[n-1].hash
 	repetitions := 2
 	for i := n - 5; i >= 0; i -= 2 {
-		if ss.posStack[i].hash == h {
+		if ss.hashStack[i].hash == h {
 			repetitions--
 			if repetitions == 0 {
 				return true
 			}
 		}
-		if ss.posStack[i].halfMove == 0 {
+		if ss.hashStack[i].halfMove == 0 {
 			return false
 		}
 	}
@@ -110,6 +158,7 @@ func (ss *searchState) canGoParallel(depth int) bool {
 	return ss.cutoff == nil && depth >= 4 && len(ss.game.parallelSlots) > 0
 }
 
+// scoreAndSortMoves assigns sort scores to moves and sorts them descending.
 func (ss *searchState) scoreAndSortMoves(moves []move, ply int) {
 	scoreAndSortMovesInner(ss.currentPosition(), ss.history, moves, ply)
 }
@@ -124,6 +173,10 @@ func (ss *searchState) scoreAndSortMoves(moves []move, ply int) {
 //
 // Returns the best score and best move found.
 func searchMovesParallel(ss *searchState, moves []move, skipTTMove move, elderMove move, depth, ply, alpha, beta int) (int, move) {
+	if beta != alpha+1 {
+		panic("parallel search on non null window")
+	}
+
 	dbgx.parallelBatches++
 
 	var cutoff atomic.Bool

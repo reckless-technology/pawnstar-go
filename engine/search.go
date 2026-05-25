@@ -107,7 +107,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	// beats beta, the position is likely good enough to prune.  Skipped when:
 	// already in a null-move position, in check, not a null window, or the side
 	// has ≤ 3 pieces (zugzwang risk).
-	if !pos.isNullMove() && !pos.isInCheck() && beta == alpha+1 && pos.piecesOfColor(pos.colorToMove).popCount() > 3 {
+	if !pos.isNullMove() && !pos.isInCheck() && beta == alpha+1 && !isEndgame(pos) {
 		pstScore := pos.scores[white] - pos.scores[black]
 		if pos.colorToMove == black {
 			pstScore = -pstScore
@@ -216,7 +216,9 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	}
 
 	// Search remaining moves — in parallel if eligible, serially otherwise.
-	if elderIdx >= 0 && !ss.isCancelled() && ss.canGoParallel(depth) {
+	// YBW is only valid at null-window nodes (beta == alpha+1); full-window PV nodes
+	// search serially because workers would receive the wrong bound.
+	if elderIdx >= 0 && !ss.isCancelled() && beta == alpha+1 && ss.canGoParallel(depth) {
 		// Young Brothers Wait: search all non-elder, non-TT moves in parallel.
 		parallelScore, parallelBest := searchMovesParallel(ss, moves, trans.move, elderMove, depth, ply, alpha, beta)
 		if ss.isCancelled() {
