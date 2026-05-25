@@ -33,7 +33,7 @@ type hashStackEntry struct {
 type searchState struct {
 	posStack  []position       // copy-make stack: starts with 1 entry (fork position), grows during search
 	hashStack []hashStackEntry // compact history for repetition detection: game history + search path
-	nodeCount int              // Node count per worker.
+	nodeCount int              // Node count for this goroutine.
 	game      *Game            // shared: time control, cancel flag, parallel semaphore, TT, history, eval table
 	cutoff    *atomic.Bool     // per-batch cutoff signal; nil for the main search
 }
@@ -164,11 +164,11 @@ func runWorker(ss *searchState, move move, depth, ply, alpha, beta int, resultCh
 		panic("runWorker called on non null window")
 	}
 	<-ss.game.parallelSlots
-	defer func(w *searchState, wg *sync.WaitGroup) {
-		w.game.parallelSlots <- struct{}{}
+	defer func() {
+		ss.game.parallelSlots <- struct{}{}
 		wg.Done()
-	}(ss, wg)
-	if ss.cutoff.Load() || ss.game.isCancelPending.Load() {
+	}()
+	if ss.isCancelled() {
 		resultCh <- move.withScore(searchCancelledScore)
 		return
 	}
@@ -208,7 +208,7 @@ func searchMovesParallel(ss *searchState, moves []move, tableMove move, elderMov
 	resultChan := make(chan move, len(moves))
 	numMovesSearched := 0
 	for _, move := range moves {
-		if (move.equal(tableMove)) || move.equal(elderMove) {
+		if (!tableMove.isNone() && move.equal(tableMove)) || move.equal(elderMove) {
 			continue
 		}
 		if cutoff.Load() || ss.game.isCancelPending.Load() {

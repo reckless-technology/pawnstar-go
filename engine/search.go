@@ -156,7 +156,6 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		}
 	}
 
-	// Table move did not cause a cutoff. Proceed with move generation.
 	moves := position.generateLegalMoves()
 	if len(moves) == 0 {
 		if position.isInCheck() {
@@ -179,7 +178,6 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			continue
 		}
 
-		// Possible late move reduction (LMR).
 		childDepth := depth
 		if depth > 2 && i > 0 && beta == alpha+1 && !position.isInCheck() && !move.isChecking() &&
 			move.piece() != pawn && move.piece() != king && move.captured() == noPiece {
@@ -236,7 +234,6 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 					bestScore = parallelScore
 					bestMove = parallelBest
 				}
-				// Break out of the serial loop now we have dispatched the parallel searches.
 				break
 			}
 		}
