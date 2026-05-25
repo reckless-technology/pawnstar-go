@@ -5,14 +5,14 @@ import (
 	"sync/atomic"
 )
 
-// hashEntry is a compact position record used exclusively for repetition detection.
+// repetitionHashEntry is a compact position record used exclusively for repetition detection.
 // It captures only the two fields that isDrawByRepetition needs from a position:
 // the Zobrist hash (to detect equal positions) and the half-move clock (to stop
 // scanning at an irreversible move boundary).  At 16 bytes it is 10.5× smaller
 // than a full position (168 bytes), which is the key to cheap worker forks.
-type hashEntry struct {
-	hash     zobrist // Zobrist hash of the position
-	halfMove uint8   // half-move clock at this position (for 50-move / repetition cutoff)
+type repetitionHashEntry struct {
+	hash          zobrist // Zobrist hash of the position
+	halfMoveClock uint8   // half-move clock at this position (for 50-move / repetition cutoff)
 }
 
 // searchState holds all mutable state for one search goroutine.  Both the main
@@ -31,8 +31,8 @@ type hashEntry struct {
 // tt, history, evalTable, and game (for time control and the cancel flag) are
 // shared via pointer with zero copying.
 type searchState struct {
-	posStack  []position   // copy-make stack: starts with 1 entry (fork position), grows during search
-	hashStack []hashEntry  // compact history for repetition detection: game history + search path
+	posStack  []position            // copy-make stack: starts with 1 entry (fork position), grows during search
+	hashStack []repetitionHashEntry // compact history for repetition detection: game history + search path
 	nodeCount int
 	tt        *transpositionTable
 	history   *historyTable
@@ -41,18 +41,12 @@ type searchState struct {
 	cutoff    *atomic.Bool // per-batch cutoff signal; nil for the main search
 }
 
-// newSearchStateFromGame creates a searchState for the main (serial) search.
-// posStack is seeded with only the current position.  hashStack is built from
-// the game's full position history so that draw-by-repetition detection can
-// look back through the complete game.
-func newSearchStateFromGame(game *Game) *searchState {
-	n := len(game.posStack)
-	hs := make([]hashEntry, n, n+maxPly+4)
-	for i, pos := range game.posStack {
-		hs[i] = hashEntry{pos.hash, pos.halfMove}
-	}
-	ps := make([]position, 1, maxPly+4)
-	ps[0] = game.posStack[n-1]
+// newSearchState is the private constructor shared by newSearchStateFromGame and
+// newWorkerState.  hs is the caller's pre-built hashStack (ownership transfers).
+// startPos is the single seed entry for posStack.
+func newSearchState(hs []repetitionHashEntry, startPos *position, game *Game, cutoff *atomic.Bool) *searchState {
+	ps := make([]position, 0, maxPly+4)
+	ps = append(ps, *startPos)
 	return &searchState{
 		posStack:  ps,
 		hashStack: hs,
@@ -60,7 +54,21 @@ func newSearchStateFromGame(game *Game) *searchState {
 		history:   &game.historyTable,
 		evalTable: &game.evalTable,
 		game:      game,
+		cutoff:    cutoff,
 	}
+}
+
+// newSearchStateFromGame creates a searchState for the main (serial) search.
+// posStack is seeded with only the current position.  hashStack is built from
+// the game's full position history so that draw-by-repetition detection can
+// look back through the complete game.
+func newSearchStateFromGame(game *Game) *searchState {
+	n := len(game.posStack)
+	hs := make([]repetitionHashEntry, n, n+maxPly+4)
+	for i, pos := range game.posStack {
+		hs[i] = repetitionHashEntry{pos.hash, pos.halfMove}
+	}
+	return newSearchState(hs, &game.posStack[n-1], game, nil)
 }
 
 // newWorkerState creates a searchState for a parallel worker.
@@ -69,19 +77,9 @@ func newSearchStateFromGame(game *Game) *searchState {
 // All other state is shared via pointer.
 func newWorkerState(parent *searchState, cutoff *atomic.Bool) *searchState {
 	n := len(parent.hashStack)
-	hs := make([]hashEntry, n, n+maxPly+4)
+	hs := make([]repetitionHashEntry, n, n+maxPly+4)
 	copy(hs, parent.hashStack)
-	ps := make([]position, 1, maxPly+4)
-	ps[0] = parent.posStack[len(parent.posStack)-1]
-	return &searchState{
-		posStack:  ps,
-		hashStack: hs,
-		tt:        parent.tt,
-		history:   parent.history,
-		evalTable: parent.evalTable,
-		game:      parent.game,
-		cutoff:    cutoff,
-	}
+	return newSearchState(hs, &parent.posStack[len(parent.posStack)-1], parent.game, cutoff)
 }
 
 // currentPosition returns a pointer to the current (deepest) position on the stack.
@@ -95,7 +93,7 @@ func (ss *searchState) playMove(m move) {
 	ss.posStack = append(ss.posStack, ss.posStack[len(ss.posStack)-1])
 	ss.posStack[len(ss.posStack)-1].makeMove(m)
 	pos := &ss.posStack[len(ss.posStack)-1]
-	ss.hashStack = append(ss.hashStack, hashEntry{pos.hash, pos.halfMove})
+	ss.hashStack = append(ss.hashStack, repetitionHashEntry{pos.hash, pos.halfMove})
 }
 
 // makeNullMove appends a copy of the current position to posStack, applies a
@@ -104,7 +102,7 @@ func (ss *searchState) makeNullMove() {
 	ss.posStack = append(ss.posStack, ss.posStack[len(ss.posStack)-1])
 	ss.posStack[len(ss.posStack)-1].makeNullMove()
 	pos := &ss.posStack[len(ss.posStack)-1]
-	ss.hashStack = append(ss.hashStack, hashEntry{pos.hash, pos.halfMove})
+	ss.hashStack = append(ss.hashStack, repetitionHashEntry{pos.hash, pos.halfMove})
 }
 
 // undoMove removes the last position from posStack and the last entry from
@@ -134,10 +132,11 @@ func (ss *searchState) isDrawByRepetition() bool {
 		if ss.hashStack[i].hash == h {
 			repetitions--
 			if repetitions == 0 {
+				dbgx.drawsByRepetition++
 				return true
 			}
 		}
-		if ss.hashStack[i].halfMove == 0 {
+		if ss.hashStack[i].halfMoveClock == 0 {
 			return false
 		}
 	}
@@ -177,7 +176,7 @@ func searchMovesParallel(ss *searchState, moves []move, skipTTMove move, elderMo
 		panic("parallel search on non null window")
 	}
 
-	dbgx.parallelBatches++
+	dbgx.parallelSearches++
 
 	var cutoff atomic.Bool
 	var wg sync.WaitGroup
@@ -235,7 +234,7 @@ func searchMovesParallel(ss *searchState, moves []move, skipTTMove move, elderMo
 			resultCh <- result{score, mCopy}
 		}()
 	}
-	dbgx.parallelMovesSaved += uint(launchCount)
+	dbgx.parallelLaunchCount += uint(launchCount)
 
 	wg.Wait()
 	close(resultCh)

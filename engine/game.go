@@ -61,7 +61,7 @@ func NewGame() *Game {
 	game := &Game{
 		transpositionTable: newTranspositionTable(hashTableMB),
 		timeControl:        newTimeControl(),
-		openingBook:        loadOpeningBook(),
+		openingBook:        newOpeningBookFromFile(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
 		parallelSlots:      slots,
 	}
@@ -89,9 +89,9 @@ func (game *Game) HandleCommand(line string) bool {
 		game.stopThinking()
 		game.newGameFromFen(startFen)
 	case "position":
-		game.uciPosition(fields[1:])
+		game.handleUciPosition(fields[1:])
 	case "go":
-		game.uciGo(fields[1:])
+		game.handleUciGo(fields[1:])
 	case "stop":
 		game.stopThinking()
 	case "quit":
@@ -135,49 +135,6 @@ func (game *Game) playMoveString(s string) move {
 	return moveNone()
 }
 
-// makeNullMove appends a copy of the current position and applies a null move to it.
-func (game *Game) makeNullMove() {
-	game.posStack = append(game.posStack, game.posStack[len(game.posStack)-1])
-	pos := &game.posStack[len(game.posStack)-1]
-	pos.makeNullMove()
-}
-
-// undoMove removes the last position from the stack, reverting to the previous state.
-func (game *Game) undoMove() {
-	if len(game.posStack) > 1 {
-		game.posStack = game.posStack[:len(game.posStack)-1]
-	}
-}
-
-// isDrawByFiftyMoves reports whether the 50-move rule draw condition is met.
-func (game *Game) isDrawByFiftyMoves() bool {
-	return game.currentPosition().halfMove >= 100
-}
-
-// isDrawByRepetition returns true if the current position has occurred twice
-// before in the game history (three occurrences total).  Steps back by two plies
-// at a time (same side to move) and stops early at an irreversible move.
-func (game *Game) isDrawByRepetition() bool {
-	n := len(game.posStack)
-	if n < 5 {
-		return false
-	}
-	h := game.posStack[n-1].hash
-	repetitions := 2
-	for i := n - 5; i >= 0; i -= 2 {
-		if game.posStack[i].hash == h {
-			repetitions--
-			if repetitions == 0 {
-				return true
-			}
-		}
-		if game.posStack[i].halfMove == 0 {
-			return false
-		}
-	}
-	return false
-}
-
 // pieceVals maps piece type to centipawn value, used in move scoring (MVV-LVA).
 var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
 
@@ -204,22 +161,15 @@ func scoreAndSortMovesInner(pos *position, history *historyTable, moves []move, 
 		captured := m.captured()
 		piece := m.piece()
 		promoted := m.promoted()
-		var score int
-		if (enemyAttacks & squareBB(m.to())) != 0 {
-			score = pieceVals[captured] - pieceVals[piece] + pieceVals[promoted]
-		} else {
-			score = pieceVals[captured] + pieceVals[promoted]
+		score := pieceVals[captured] + pieceVals[promoted]
+		if (enemyAttacks & squareBB(m.to())).isNotEmpty() {
+			score -= pieceVals[piece]
 		}
 		score = score*1000 + int(history.getCount(ply, m))
 		score += pstValue(color, piece, m.to()) - pstValue(color, piece, m.from())
 		moves[i] = m.withScore(score)
 	}
 	sortMovesUnstable(moves)
-}
-
-// scoreAndSortMoves assigns sort scores to moves and sorts them descending.
-func (game *Game) scoreAndSortMoves(moves []move, ply int) {
-	scoreAndSortMovesInner(game.currentPosition(), &game.historyTable, moves, ply)
 }
 
 // startThinking launches a search goroutine for the current position and time
@@ -253,9 +203,9 @@ func (game *Game) searchEntry() {
 	}
 }
 
-// uciPosition handles the "position" command, setting the position from a FEN
+// handleUciPosition handles the "position" command, setting the position from a FEN
 // string or the standard starting position, then applying any supplied move list.
-func (game *Game) uciPosition(args []string) {
+func (game *Game) handleUciPosition(args []string) {
 	fen := startFen
 	movesIdx := -1
 	if len(args) > 0 {
@@ -287,8 +237,8 @@ func (game *Game) uciPosition(args []string) {
 	}
 }
 
-// uciGo handles the "go" command, parsing the clock parameters and starting the search.
-func (game *Game) uciGo(args []string) {
+// handleUciGo handles the "go" command, parsing the clock parameters and starting the search.
+func (game *Game) handleUciGo(args []string) {
 	tc := &game.timeControl
 	color := game.currentPosition().colorToMove
 	for i := 0; i < len(args); i++ {

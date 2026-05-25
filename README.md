@@ -88,7 +88,7 @@ Move lists are plain `[]move` slices allocated with `make([]move, 0, 64)` per ca
 
 `Game` ([engine/game.go](engine/game.go)) owns all search state. `startThinking` launches a goroutine that calls `searchEntry`; `stopThinking` sets `isCancelPending` (an `atomic.Bool`) and blocks on a `sync.WaitGroup`. A `parallelSlots` channel (capacity `NumCPU − 1`) acts as a semaphore for parallel workers.
 
-All recursive search functions take a `searchState` ([engine/parallel.go](engine/parallel.go)) rather than `*Game` directly. `searchState` holds a private `posStack` and `nodeCount` per goroutine, with pointers to the shared transposition table, history table, eval table, and parent `Game`. Workers get their own `searchState` with a copy of the current posStack (typically a few KB); everything else is shared with zero copying.
+All recursive search functions take a `searchState` ([engine/parallel.go](engine/parallel.go)) rather than `*Game` directly. `searchState` holds two stacks per goroutine: `posStack []position` for copy-make (one entry per move played during search, seeds with the fork position) and `hashStack []repetitionHashEntry` for repetition detection (compact `{hash, halfMoveClock}` records covering the full game history plus the search path). At 16 bytes per entry vs 168 bytes for a full position, copying `hashStack` when spawning a worker is ~10× cheaper. Everything else — transposition table, history table, eval table, `Game` — is shared via pointer with zero copying.
 
 `searchRootNode` ([engine/search.go](engine/search.go)) drives iterative deepening:
 
@@ -111,7 +111,7 @@ All recursive search functions take a `searchState` ([engine/parallel.go](engine
 | Technique | Parameters |
 |---|---|
 | Principal variation search (PVS) | Null-window on moves 2+ when not in check; re-search full window on fail-high |
-| Null-move pruning | R = 4; skipped if in check, position is already null-move, window is not null (`beta ≠ alpha + 1`), or side has ≤ 3 pieces |
+| Null-move pruning | R = 4; skipped if in check, position is already null-move, window is not null (`beta ≠ alpha + 1`), or position is an endgame (`isEndgame`) |
 | Late move reduction (LMR) | Reduce by 1 from the 2nd move onward (non-capture, non-check, non-pawn/king, depth > 2); reduce by 2 additionally from move index 7 (depth > 3, zero history count); re-search at full depth if score exceeds alpha |
 | Young Brothers Wait (YBW) | At null-window nodes with depth ≥ 4, the elder brother (first non-TT move) is searched sequentially; remaining moves are dispatched to parallel workers via `searchMovesParallel`. Workers signal a per-batch `atomic.Bool` on fail-high so siblings abort early. Workers never spawn sub-workers. |
 | Check extension | In quiescence, an in-check position re-enters `searchAlphaBeta` at the same depth instead of standing pat |

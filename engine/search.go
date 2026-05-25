@@ -173,56 +173,62 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	// break, or continue the loop serially.  All per-move logic (LMR, search,
 	// beta cutoff, alpha update) appears exactly once.
 	elderMove := moveNone()
-	for i, m := range moves {
-		if isTransposition && m.equal(trans.move) {
+	for i, move := range moves {
+		if isTransposition && move.equal(trans.move) {
 			continue
 		}
 
+		// Possible late move reduction (LMR).
 		childDepth := depth
-		if depth > 2 && i > 0 && !pos.isInCheck() && !m.isChecking() && beta == alpha+1 &&
-			m.piece() != pawn && m.piece() != king && m.captured() == noPiece {
+		if depth > 2 && i > 0 && !pos.isInCheck() && !move.isChecking() && beta == alpha+1 &&
+			move.piece() != pawn && move.piece() != king && move.captured() == noPiece {
 			dbgx.lmrAttempts1++
 			childDepth--
-			if depth > 3 && i > 6 && ss.history.getCount(ply, m) == 0 {
+			if depth > 3 && i > 6 && ss.history.getCount(ply, move) == 0 {
 				dbgx.lmrAttempts2++
 				childDepth--
 			}
 		}
 
-		score := searchSingleMove(ss, childDepth, ply, alpha, beta, m, &pv, i)
+		score := searchSingleMove(ss, childDepth, ply, alpha, beta, move, &pv, i)
 		if score > alpha && childDepth < depth {
 			dbgx.lmrFails++
-			score = searchSingleMove(ss, depth, ply, alpha, beta, m, &pv, i)
+			score = searchSingleMove(ss, depth, ply, alpha, beta, move, &pv, i)
 		}
 		if ss.isCancelled() {
 			return searchCancelledScore
 		}
 		if score >= beta {
-			ss.tt.record(&transposition{pos.hash, m.withScore(score), int16(depth), nodeCut, false})
-			ss.history.recordGoodMove(ply, m)
+			ss.tt.record(&transposition{pos.hash, move.withScore(score), int16(depth), nodeCut, false})
+			ss.history.recordGoodMove(ply, move)
 			dbgx.nodesCut++
 			return score
 		}
 		if score > bestScore {
 			bestScore = score
-			bestMove = m
+			bestMove = move
 			if score > alpha {
 				dbgx.nodesPvChanged++
 				alpha = score
 				hasRaisedAlpha = true
-				ss.history.recordGoodMove(ply, m)
-				copyVariation(parentPV, pv, m)
+				ss.history.recordGoodMove(ply, move)
+				copyVariation(parentPV, pv, move)
 			}
 		}
 
 		// After the elder brother: try Young Brothers Wait for the rest.
 		// YBW is only valid at null-window nodes; full-window PV nodes continue serially.
 		if elderMove.isNone() {
-			elderMove = m
+			elderMove = move
 			if !ss.isCancelled() && beta == alpha+1 && ss.canGoParallel(depth) {
 				parallelScore, parallelBest := searchMovesParallel(ss, moves, trans.move, elderMove, depth, ply, alpha, beta)
 				if ss.isCancelled() {
 					return searchCancelledScore
+				}
+				if parallelScore >= beta {
+					ss.tt.record(&transposition{pos.hash, parallelBest.withScore(parallelScore), int16(depth), nodeCut, false})
+					dbgx.nodesCut++
+					return parallelScore
 				}
 				if parallelScore > bestScore {
 					bestScore = parallelScore
@@ -232,11 +238,6 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 						hasRaisedAlpha = true
 						ss.history.recordGoodMove(ply, parallelBest)
 					}
-				}
-				if parallelScore >= beta {
-					ss.tt.record(&transposition{pos.hash, parallelBest.withScore(parallelScore), int16(depth), nodeCut, false})
-					dbgx.nodesCut++
-					return parallelScore
 				}
 				break
 			}
