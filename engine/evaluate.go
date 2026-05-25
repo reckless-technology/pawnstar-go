@@ -15,8 +15,8 @@ type evalHashEntry struct {
 // evalHashTable is a fixed-size cache for evaluated positions.
 // Concurrent access from parallel workers is protected by 256 striped mutexes.
 type evalHashTable struct {
-	entries []evalHashEntry  // flat array indexed by hash % len(entries)
-	locks   [256]sync.Mutex  // striped locks; entry at idx uses locks[idx%256]
+	entries []evalHashEntry // flat array indexed by hash % len(entries)
+	locks   [256]sync.Mutex // striped locks; entry at idx uses locks[idx%256]
 }
 
 // newEvalHashTable allocates an evaluation hash table with count slots.

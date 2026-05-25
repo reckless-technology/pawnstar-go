@@ -43,7 +43,7 @@ type Game struct {
 	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
 	nodeCount          int                // total nodes searched (main goroutine only)
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
-	parallelSlots      chan struct{}       // semaphore: capacity = NumCPU-1, limits parallel workers
+	parallelSlots      chan struct{}      // semaphore: capacity = NumCPU-1, limits parallel workers
 	posStack           []position         // game history + current search path (main goroutine)
 	isCancelPending    atomic.Bool        // set true to signal all goroutines to stop
 }
