@@ -182,15 +182,7 @@ func runWorker(ss *searchState, move move, depth, ply, alpha, beta int, resultCh
 	resultCh <- move.withScore(score)
 }
 
-// searchMovesParallel searches the remaining moves in parallel using Young
-// Brothers Wait.  tableMove and elderMove are moves already searched by the
-// caller and are skipped here.  alpha and beta come from the calling node
-// (beta == alpha+1 is guaranteed — we only parallelize null-window nodes).
-//
-// LMR is applied to each move based on its position in the sorted slice before
-// handing off to a worker.  Workers never go parallel themselves.
-//
-// Returns the best score and best move found (score contained within the move)
+// Fire off a set of move searches on separate goroutines and return the best move found (including score).
 func searchMovesParallel(ss *searchState, moves []move, depth, ply, alpha, beta int) move {
 	if beta != alpha+1 {
 		panic("searchMovesParallel called on non null window")
@@ -200,28 +192,15 @@ func searchMovesParallel(ss *searchState, moves []move, depth, ply, alpha, beta 
 
 	var cutoff atomic.Bool
 	var wg sync.WaitGroup
-
-	position := ss.currentPosition()
-	isInCheck := position.isInCheck()
-
-	// Move contains the score within it so the result channel contains moves.
 	resultChan := make(chan move, len(moves))
-	for i, move := range moves {
+
+	for _, move := range moves {
 		if cutoff.Load() || ss.game.isCancelPending.Load() {
 			break
 		}
-		// Apply LMR to get the child depth for this worker.
-		childDepth := depth
-		if depth > 2 && i > 3 && !isInCheck && !move.isChecking() &&
-			move.piece() != pawn && move.piece() != king && move.captured() == noPiece {
-			childDepth--
-			if depth > 3 && i > 6 && ss.game.historyTable.getCount(ply, move) == 0 {
-				childDepth--
-			}
-		}
 		wg.Add(1)
 		dbgx.parallelMovesSearched++
-		go runWorker(newWorkerState(ss, &cutoff), move, childDepth, ply, alpha, beta, resultChan, &wg)
+		go runWorker(newWorkerState(ss, &cutoff), move, depth, ply, alpha, beta, resultChan, &wg)
 	}
 
 	wg.Wait()
