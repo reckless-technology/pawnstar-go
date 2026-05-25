@@ -12,9 +12,16 @@ const (
 	castleBlackQueenside castlingRights = 0x08
 )
 
-func (cr castlingRights) mayWhiteCastleKingside() bool  { return cr&castleWhiteKingside != 0 }
+// mayWhiteCastleKingside reports whether White may castle kingside.
+func (cr castlingRights) mayWhiteCastleKingside() bool { return cr&castleWhiteKingside != 0 }
+
+// mayWhiteCastleQueenside reports whether White may castle queenside.
 func (cr castlingRights) mayWhiteCastleQueenside() bool { return cr&castleWhiteQueenside != 0 }
-func (cr castlingRights) mayBlackCastleKingside() bool  { return cr&castleBlackKingside != 0 }
+
+// mayBlackCastleKingside reports whether Black may castle kingside.
+func (cr castlingRights) mayBlackCastleKingside() bool { return cr&castleBlackKingside != 0 }
+
+// mayBlackCastleQueenside reports whether Black may castle queenside.
 func (cr castlingRights) mayBlackCastleQueenside() bool { return cr&castleBlackQueenside != 0 }
 
 // hash returns the Zobrist contribution of the current castling rights.
@@ -49,6 +56,7 @@ func castlingRightsFromFen(fen string) castlingRights {
 	return cr
 }
 
+// toFenString serialises the castling rights to the FEN field, e.g. "KQkq" or "-".
 func (cr castlingRights) toFenString() string {
 	if cr == 0 {
 		return "-"

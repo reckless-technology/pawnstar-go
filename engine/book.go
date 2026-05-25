@@ -48,6 +48,7 @@ func loadOpeningBook() openingBook {
 	return b
 }
 
+// clearOpeningBook empties the book so the engine will not use book moves.
 func (book *openingBook) clearOpeningBook() {
 	clear(book.moves)
 }

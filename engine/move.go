@@ -15,7 +15,7 @@ import (
 //	32–63  sort score (not part of move identity; ignored by equal and isNone)
 type move int64
 
-// moveType classifies a move for make/unmake dispatch.
+// moveType classifies a move for dispatch in makeMove.
 type moveType uint8
 
 const (
@@ -32,29 +32,44 @@ const (
 	isCheckingBit   move     = 1 << 22
 )
 
+// constructMove encodes all move fields into a move value.
 func constructMove(from, to square, p piece, mt moveType, captured piece) move {
 	return move(int64(to) | int64(from)<<6 | int64(p)<<12 | int64(captured)<<15 | int64(mt)<<18)
 }
 
 // Constructor helpers — each encodes the move type and fills in fixed fields.
+
+// moveNonCapture encodes a quiet (non-capturing) move.
 func moveNonCapture(from, to square, p piece) move {
 	return move(int64(to) | int64(from)<<6 | int64(p)<<12)
 }
+
+// moveCapture encodes a standard capture move.
 func moveCapture(from, to square, p, captured piece) move {
 	return constructMove(from, to, p, capture, captured)
 }
+
+// movePromotion encodes a pawn promotion, optionally capturing on the target square.
 func movePromotion(from, to square, promoted piece, captured piece) move {
 	return constructMove(from, to, pawn, moveType(promoted), captured)
 }
+
+// moveCastling encodes a castling move (king from/to squares only; rook is implicit).
 func moveCastling(from, to square) move {
 	return constructMove(from, to, king, castling, noPiece)
 }
+
+// moveEpCapture encodes an en-passant capture.
 func moveEpCapture(from, to square) move {
 	return constructMove(from, to, pawn, epCapture, pawn)
 }
+
+// moveDoublePush encodes a pawn double-push (sets the en-passant square).
 func moveDoublePush(from, to square) move {
 	return constructMove(from, to, pawn, pawnDoublePush, noPiece)
 }
+
+// moveSinglePush encodes a quiet single-square pawn push.
 func moveSinglePush(from, to square) move {
 	return constructMove(from, to, pawn, pawnSinglePush, noPiece)
 }
@@ -62,18 +77,19 @@ func moveSinglePush(from, to square) move {
 // moveNone is the null sentinel (all identity bits zero, which is not a legal move).
 func moveNone() move { return move(0) }
 
-func (m move) to() square       { return square(m & 0x3F) }
-func (m move) from() square     { return square((m >> 6) & 0x3F) }
-func (m move) piece() piece     { return piece((m >> 12) & 0x07) }
-func (m move) captured() piece  { return piece((m >> 15) & 0x07) }
-func (m move) kind() moveType   { return moveType((m >> 18) & 0x0F) }
-func (m move) score() int       { return int(m >> 32) }
-func (m move) isChecking() bool { return (m & isCheckingBit) != 0 }
+func (m move) to() square       { return square(m & 0x3F) }           // destination square
+func (m move) from() square     { return square((m >> 6) & 0x3F) }    // origin square
+func (m move) piece() piece     { return piece((m >> 12) & 0x07) }    // moving piece type
+func (m move) captured() piece  { return piece((m >> 15) & 0x07) }    // captured piece type (noPiece if non-capture)
+func (m move) kind() moveType   { return moveType((m >> 18) & 0x0F) } // move classification
+func (m move) score() int       { return int(m >> 32) }               // sort score (bits 32–63)
+func (m move) isChecking() bool { return (m & isCheckingBit) != 0 }   // true if this move gives check
 
 // fromTo returns the combined from+to index (bits 0–11) used as a hash key in
 // the history table.
 func (m move) fromTo() int { return int(m) & 0xFFF }
 
+// promoted returns the promotion piece type, or noPiece for non-promotion moves.
 func (m move) promoted() piece {
 	switch m.kind() {
 	case promotionKnight:

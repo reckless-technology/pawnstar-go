@@ -44,12 +44,15 @@ type debugX struct {
 	parallelMovesSaved   uint // total moves handed to parallel workers
 }
 
+// dbgx is the global accumulator for search diagnostics.
 var dbgx debugX
 
+// dbgxClear resets all diagnostic counters to zero.
 func dbgxClear() {
 	dbgx = debugX{}
 }
 
+// camelToWords converts a camelCase identifier to a space-separated lowercase string.
 func camelToWords(s string) string {
 	var b strings.Builder
 	for i, ch := range s {
@@ -61,11 +64,13 @@ func camelToWords(s string) string {
 	return b.String()
 }
 
+// dbgxLine is one formatted counter line used by dbgxPrint.
 type dbgxLine struct {
-	name string
-	val  uint64
+	name string // human-readable counter name derived from the struct field name
+	val  uint64 // accumulated count
 }
 
+// dbgxPrint prints all diagnostic counters in alphabetical order.
 func dbgxPrint() {
 	v := reflect.ValueOf(dbgx)
 	t := reflect.TypeFor[debugX]()

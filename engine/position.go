@@ -37,13 +37,19 @@ type position struct {
 }
 
 const (
-	flagNullMove uint8 = 0x01
+	flagNullMove uint8 = 0x01 // set in position.flags after makeNullMove
 )
 
-func (position *position) isNullMove() bool   { return (position.flags & flagNullMove) != 0 }
-func (position *position) isInCheck() bool    { return position.checkers.isNotEmpty() }
+// isNullMove reports whether this position was reached by a null move.
+func (position *position) isNullMove() bool { return (position.flags & flagNullMove) != 0 }
+
+// isInCheck reports whether the side to move is in check.
+func (position *position) isInCheck() bool { return position.checkers.isNotEmpty() }
+
+// occupied returns a bitboard of all squares containing any piece.
 func (position *position) occupied() bitboard { return position.whitePieces | position.blackPieces }
 
+// piecesOfColor returns the bitboard of all pieces belonging to color c.
 func (position *position) piecesOfColor(c color) bitboard {
 	if c == white {
 		return position.whitePieces
@@ -51,6 +57,7 @@ func (position *position) piecesOfColor(c color) bitboard {
 	return position.blackPieces
 }
 
+// piecesOfColorPtr returns a pointer to the bitboard for all pieces of color c.
 func (position *position) piecesOfColorPtr(c color) *bitboard {
 	if c == white {
 		return &position.whitePieces
@@ -126,6 +133,7 @@ func (position *position) attacksTo(sq square, c color) bitboard {
 	return result
 }
 
+// isAttacked reports whether sq is attacked by any piece of color by.
 func (position *position) isAttacked(sq square, by color) bool {
 	return position.attacksTo(sq, by).isNotEmpty()
 }
@@ -217,6 +225,7 @@ func (position *position) computeHash() zobrist {
 	return hash
 }
 
+// toFenString serialises the position to a FEN string.
 func (position *position) toFenString() string {
 	var sb strings.Builder
 	occ := position.occupied()

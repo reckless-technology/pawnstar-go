@@ -8,16 +8,17 @@ var seeValues = [7]int{0, 100, 300, 300, 500, 900, 10000}
 // pieces can be removed as the exchange sequence is simulated without mutating
 // the real position.
 type seeBoard struct {
-	pawns       bitboard
-	knights     bitboard
-	bishops     bitboard
-	rooks       bitboard
-	queens      bitboard
-	kings       bitboard
-	whitePieces bitboard
-	blackPieces bitboard
+	pawns       bitboard // all pawns (both colours)
+	knights     bitboard // all knights
+	bishops     bitboard // all bishops
+	rooks       bitboard // all rooks
+	queens      bitboard // all queens
+	kings       bitboard // all kings
+	whitePieces bitboard // all White pieces
+	blackPieces bitboard // all Black pieces
 }
 
+// newSeeBoard initialises a seeBoard from the piece bitboards of pos.
 func newSeeBoard(pos *position) seeBoard {
 	return seeBoard{
 		pawns:       pos.pawns,
@@ -31,6 +32,7 @@ func newSeeBoard(pos *position) seeBoard {
 	}
 }
 
+// piecesOfType returns a pointer to the bitboard for piece type p.
 func (b *seeBoard) piecesOfType(p piece) *bitboard {
 	switch p {
 	case pawn:
@@ -49,6 +51,7 @@ func (b *seeBoard) piecesOfType(p piece) *bitboard {
 	return nil
 }
 
+// piecesOfColor returns a pointer to the bitboard for all pieces of color c.
 func (b *seeBoard) piecesOfColor(c color) *bitboard {
 	if c == white {
 		return &b.whitePieces

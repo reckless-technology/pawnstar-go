@@ -10,17 +10,19 @@ import (
 	"time"
 )
 
+// startFen is the FEN string for the standard chess starting position.
 const startFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 // timeControl holds the clock configuration passed to the search goroutine.
 type timeControl struct {
-	clockType         clockType
+	clockType         clockType     // how time is managed (standard, fixed depth, fixed time, infinite)
 	timeRemaining     time.Duration // time left on the clock for the side to move
 	numMovesRemaining int           // moves until next time control (0 = sudden death)
 	depth             int           // target depth for clockFixedDepth mode
 	stopTime          time.Time     // hard deadline; search sets isCancelPending when exceeded
 }
 
+// newTimeControl returns a default timeControl (5-minute standard game, 40 moves).
 func newTimeControl() timeControl {
 	return timeControl{
 		clockType:         clockStandard,
@@ -34,16 +36,16 @@ func newTimeControl() timeControl {
 // table, opening book, chess clock, and a stack of positions for copy-make search.
 // Create one with NewGame and drive it via HandleCommand.
 type Game struct {
-	transpositionTable transpositionTable
-	historyTable       historyTable
-	timeControl        timeControl
-	evalTable          evalHashTable
-	openingBook        openingBook
-	nodeCount          int
-	wg                 sync.WaitGroup
-	parallelSlots      chan struct{} // semaphore limiting concurrent search workers
-	posStack           []position
-	isCancelPending    atomic.Bool
+	transpositionTable transpositionTable // shared across all search goroutines
+	historyTable       historyTable       // shared across all search goroutines
+	timeControl        timeControl        // clock configuration for the current search
+	evalTable          evalHashTable      // shared evaluation cache
+	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
+	nodeCount          int                // total nodes searched (main goroutine only)
+	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
+	parallelSlots      chan struct{}       // semaphore: capacity = NumCPU-1, limits parallel workers
+	posStack           []position         // game history + current search path (main goroutine)
+	isCancelPending    atomic.Bool        // set true to signal all goroutines to stop
 }
 
 // NewGame creates an engine instance ready to accept UCI commands.
@@ -108,10 +110,12 @@ func (game *Game) newGameFromFen(fen string) {
 	game.timeControl = newTimeControl()
 }
 
+// currentPosition returns a pointer to the current (last) position on the stack.
 func (game *Game) currentPosition() *position {
 	return &game.posStack[len(game.posStack)-1]
 }
 
+// playMove appends a copy of the current position to the stack and applies m to it.
 func (game *Game) playMove(m move) {
 	game.posStack = append(game.posStack, game.posStack[len(game.posStack)-1])
 	pos := &game.posStack[len(game.posStack)-1]
@@ -131,18 +135,21 @@ func (game *Game) playMoveString(s string) move {
 	return moveNone()
 }
 
+// makeNullMove appends a copy of the current position and applies a null move to it.
 func (game *Game) makeNullMove() {
 	game.posStack = append(game.posStack, game.posStack[len(game.posStack)-1])
 	pos := &game.posStack[len(game.posStack)-1]
 	pos.makeNullMove()
 }
 
+// undoMove removes the last position from the stack, reverting to the previous state.
 func (game *Game) undoMove() {
 	if len(game.posStack) > 1 {
 		game.posStack = game.posStack[:len(game.posStack)-1]
 	}
 }
 
+// isDrawByFiftyMoves reports whether the 50-move rule draw condition is met.
 func (game *Game) isDrawByFiftyMoves() bool {
 	return game.currentPosition().halfMove >= 100
 }
@@ -210,6 +217,7 @@ func scoreAndSortMovesInner(pos *position, history *historyTable, moves []move, 
 	sortMovesUnstable(moves)
 }
 
+// scoreAndSortMoves assigns sort scores to moves and sorts them descending.
 func (game *Game) scoreAndSortMoves(moves []move, ply int) {
 	scoreAndSortMovesInner(game.currentPosition(), &game.historyTable, moves, ply)
 }

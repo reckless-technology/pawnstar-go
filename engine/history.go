@@ -24,6 +24,7 @@ func (h *historyTable) getCount(ply int, m move) uint {
 	return h.counts[ply][m.fromTo()]
 }
 
+// getMaxCount returns the largest count stored in the table across all plies and moves.
 func (h *historyTable) getMaxCount() uint {
 	var maximum uint = 0
 	for i := range maxPly {

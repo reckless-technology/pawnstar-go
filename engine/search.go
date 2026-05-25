@@ -11,6 +11,7 @@ type variation struct {
 	moves []move
 }
 
+// copyVariation sets dst to best followed by all moves in src.
 func copyVariation(dst *variation, src variation, best move) {
 	dst.moves = dst.moves[:0]
 	dst.moves = append(dst.moves, best)
@@ -458,6 +459,7 @@ func searchRootNode(game *Game) move {
 	return bestMove
 }
 
+// pvString formats a principal variation as a space-separated UCI move list.
 func pvString(pv variation) string {
 	var b strings.Builder
 	for i, move := range pv.moves {
@@ -490,6 +492,7 @@ func allScoreStable(moves []move, best move) bool {
 	return true
 }
 
+// absInt returns the absolute value of x.
 func absInt(x int) int {
 	if x < 0 {
 		return -x
