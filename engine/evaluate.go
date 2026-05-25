@@ -359,7 +359,7 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 		return drawScore
 	}
 
-	hashScore := ss.evalTable.find(pos.hash)
+	hashScore := ss.game.evalTable.find(pos.hash)
 	if hashScore != hashNotFoundScore {
 		dbgx.evalHashHits++
 		return hashScore
@@ -392,9 +392,9 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 	bScore += evalKing(pos, black, endgame)
 
 	if pos.colorToMove == white {
-		ss.evalTable.record(pos.hash, wScore-bScore)
+		ss.game.evalTable.record(pos.hash, wScore-bScore)
 		return wScore - bScore
 	}
-	ss.evalTable.record(pos.hash, bScore-wScore)
+	ss.game.evalTable.record(pos.hash, bScore-wScore)
 	return bScore - wScore
 }

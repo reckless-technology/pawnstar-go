@@ -50,7 +50,7 @@ type Game struct {
 
 // NewGame creates an engine instance ready to accept UCI commands.
 func NewGame() *Game {
-	n := runtime.NumCPU() - 1
+	n := runtime.NumCPU()
 	if n < 1 {
 		n = 1
 	}
