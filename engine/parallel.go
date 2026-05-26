@@ -141,7 +141,7 @@ func (ss *searchState) isDrawByRepetition() bool {
 // received a time-expiry or stop command, or a sibling worker found a beta
 // cutoff in the current parallel batch.
 func (ss *searchState) isCancelled() bool {
-	return ss.game.isCancelPending.Load() || (ss.wasCutoff != nil && ss.wasCutoff.Load())
+	return (ss.wasCutoff != nil && ss.wasCutoff.Load()) || ss.game.isCancelPending.Load()
 }
 
 // canGoParallel returns true when this state is eligible to spawn parallel

@@ -220,11 +220,10 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 				}
 				parallelScore := parallelBest.score()
 				if parallelScore >= beta {
-					ss.game.transpositionTable.record(&transposition{position.hash, parallelBest.withScore(parallelScore), int16(depth), nodeCut, false})
+					ss.game.transpositionTable.record(&transposition{position.hash, parallelBest, int16(depth), nodeCut, false})
 					return parallelScore
 				}
 				if parallelScore > bestScore {
-					//panic(fmt.Sprintf("Should never get here best score %d parallel score %d", bestScore, parallelScore))
 					bestScore = parallelScore
 					bestMove = parallelBest
 				}
