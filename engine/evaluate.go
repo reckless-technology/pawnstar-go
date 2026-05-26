@@ -1,23 +1,53 @@
 package engine
 
+import "sync"
+
 // PST tables ported from the C Pawnstar engine.
 // Stored with rank 8 at low indices, rank 1 at high indices.
 // Black reads the table directly; White reads via sq^rankFlip to mirror ranks.
 
+// evalHashEntry is a single slot in the evaluation hash table.
 type evalHashEntry struct {
-	hash  zobrist
-	score int
+	hash  zobrist // Zobrist hash of the position
+	score int     // cached evaluation score (centipawns, side-to-move perspective)
 }
 
+// evalHashTable is a fixed-size cache for evaluated positions.
+// Concurrent access from parallel workers is protected by 256 striped mutexes.
 type evalHashTable struct {
-	entries []evalHashEntry
+	entries []evalHashEntry // flat array indexed by hash % len(entries)
+	locks   [256]sync.Mutex // striped locks; entry at idx uses locks[idx%256]
 }
 
-// count must be a power of 2
+// newEvalHashTable allocates an evaluation hash table with count slots.
 func newEvalHashTable(count int) evalHashTable {
 	return evalHashTable{entries: make([]evalHashEntry, count)}
 }
 
+// find returns the cached score for hash, or hashNotFoundScore on a miss.
+func (t *evalHashTable) find(hash zobrist) int {
+	idx := hash % zobrist(len(t.entries))
+	mu := &t.locks[idx%256]
+	mu.Lock()
+	entry := t.entries[idx]
+	mu.Unlock()
+	if entry.hash == hash {
+		return entry.score
+	}
+	return hashNotFoundScore
+
+}
+
+// record stores score for hash, always overwriting the existing entry.
+func (t *evalHashTable) record(hash zobrist, score int) {
+	idx := hash % zobrist(len(t.entries))
+	mu := &t.locks[idx%256]
+	mu.Lock()
+	t.entries[idx] = evalHashEntry{hash, score}
+	mu.Unlock()
+}
+
+// pawnSquare is the piece-square bonus for pawns. Rank 8 at low indices; White flips via ^rankFlip.
 var pawnSquare = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	25, 25, 25, 25, 25, 25, 25, 25,
@@ -29,6 +59,7 @@ var pawnSquare = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
 }
 
+// knightSquare is the piece-square bonus for knights.
 var knightSquare = [64]int{
 	-20, -10, -10, -10, -10, -10, -10, -20,
 	-10, 0, 0, 0, 0, 0, 0, -10,
@@ -40,6 +71,7 @@ var knightSquare = [64]int{
 	-20, -20, -10, -10, -10, -10, -20, -20,
 }
 
+// bishopSquare is the piece-square bonus for bishops.
 var bishopSquare = [64]int{
 	-10, -10, -10, -10, -10, -10, -10, -10,
 	-10, 0, 0, 0, 0, 0, 0, -10,
@@ -51,6 +83,7 @@ var bishopSquare = [64]int{
 	-10, -10, -20, -10, -10, -20, -10, -10,
 }
 
+// rookSquare is the piece-square bonus for rooks.
 var rookSquare = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	5, 10, 10, 10, 10, 10, 10, 5,
@@ -62,6 +95,7 @@ var rookSquare = [64]int{
 	-5, 0, 5, 5, 5, 5, 0, -5,
 }
 
+// queenSquare is the piece-square bonus for queens.
 var queenSquare = [64]int{
 	-10, -10, -10, -5, -5, -10, -10, -10,
 	-10, 0, 0, 0, 0, 0, 0, -10,
@@ -85,6 +119,7 @@ var kingSqMidgame = [64]int{
 	20, 40, 40, -20, 0, -20, 40, 20,
 }
 
+// kingSqEndgame is the king piece-square table used once neither side has heavy material.
 var kingSqEndgame = [64]int{
 	0, 10, 20, 30, 30, 20, 10, 0,
 	10, 20, 30, 40, 40, 30, 20, 10,
@@ -116,6 +151,8 @@ var rookAttackScores = [15]int{-10, -10, -5, -5, 0, 5, 10, 15, 20, 20, 20, 20, 2
 // fileBBs maps file index (0=a … 7=h) to the full-file bitboard.
 var fileBBs = [8]bitboard{fileA, fileB, fileC, fileD, fileE, fileF, fileG, fileH}
 
+// flips maps a color to the XOR mask applied to a square index when reading PST tables.
+// White XORs with rankFlip (0x38) to mirror ranks; Black reads tables directly (XOR 0).
 var flips = [2]square{rankFlip, 0}
 
 // pstValue returns material value plus piece-square bonus for piece p of color c
@@ -155,18 +192,19 @@ func isEndgame(pos *position) bool {
 
 // pawnStructure holds pawn classification for one side.
 type pawnStructure struct {
-	passed      bitboard
-	isolated    bitboard
-	unsupported bitboard
-	doubled     bitboard
-	defended    bitboard
+	passed      bitboard // pawns with no enemy pawns ahead on the same or adjacent files
+	isolated    bitboard // pawns with no friendly pawns on adjacent files
+	unsupported bitboard // pawns not defended by another friendly pawn
+	doubled     bitboard // pawns with another friendly pawn ahead on the same file
+	defended    bitboard // pawns defended by at least one other friendly pawn
 }
 
+// maskPtrs bundles pointers to the four color-specific pawn structure mask tables.
 type maskPtrs struct {
-	passedMask    *[64]bitboard
-	doubledMask   *[64]bitboard
-	isolatedMask  *[64]bitboard
-	supportedMask *[64]bitboard
+	passedMask    *[64]bitboard // squares ahead and on adjacent files (no enemy pawn ⇒ passed)
+	doubledMask   *[64]bitboard // squares ahead on the same file (friendly pawn ⇒ doubled)
+	isolatedMask  *[64]bitboard // adjacent files at all ranks (no friendly pawn ⇒ isolated)
+	supportedMask *[64]bitboard // squares from which the pawn could be defended by a friendly pawn
 }
 
 var pawnMasks = [2]maskPtrs{
@@ -314,17 +352,17 @@ func evalKing(pos *position, color color, endgame bool) int {
 // evaluatePosition returns the score from the side-to-move's perspective.
 // Returns drawScore for positions with insufficient material.
 // If the material score alone is more than 200 cp outside [alpha, beta], it returns early.
-func evaluatePosition(game *Game, alpha, beta int) int {
+func evaluatePosition(ss *searchState, alpha, beta int) int {
 	dbgx.evalCalls++
-	pos := game.currentPosition()
+	pos := ss.currentPosition()
 	if pos.isDrawByMaterial() {
 		return drawScore
 	}
 
-	entry := &game.evalTable.entries[pos.hash&zobrist(len(game.evalTable.entries)-1)]
-	if entry.hash == pos.hash {
+	hashScore := ss.game.evalTable.find(pos.hash)
+	if hashScore != hashNotFoundScore {
 		dbgx.evalHashHits++
-		return entry.score
+		return hashScore
 	}
 
 	wScore := pos.scores[white] + evalMaterialExtra(pos, white)
@@ -354,11 +392,9 @@ func evaluatePosition(game *Game, alpha, beta int) int {
 	bScore += evalKing(pos, black, endgame)
 
 	if pos.colorToMove == white {
-		entry.hash = pos.hash
-		entry.score = wScore - bScore
+		ss.game.evalTable.record(pos.hash, wScore-bScore)
 		return wScore - bScore
 	}
-	entry.hash = pos.hash
-	entry.score = bScore - wScore
+	ss.game.evalTable.record(pos.hash, bScore-wScore)
 	return bScore - wScore
 }

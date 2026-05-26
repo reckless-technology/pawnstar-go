@@ -2,23 +2,27 @@ package engine
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
+// startFen is the FEN string for the standard chess starting position.
 const startFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 // timeControl holds the clock configuration passed to the search goroutine.
 type timeControl struct {
-	clockType         clockType
+	clockType         clockType     // how time is managed (standard, fixed depth, fixed time, infinite)
 	timeRemaining     time.Duration // time left on the clock for the side to move
 	numMovesRemaining int           // moves until next time control (0 = sudden death)
 	depth             int           // target depth for clockFixedDepth mode
 	stopTime          time.Time     // hard deadline; search sets isCancelPending when exceeded
 }
 
+// newTimeControl returns a default timeControl (5-minute standard game, 40 moves).
 func newTimeControl() timeControl {
 	return timeControl{
 		clockType:         clockStandard,
@@ -32,25 +36,34 @@ func newTimeControl() timeControl {
 // table, opening book, chess clock, and a stack of positions for copy-make search.
 // Create one with NewGame and drive it via HandleCommand.
 type Game struct {
-	transpositionTable transpositionTable
-	historyTable       historyTable
-	timeControl        timeControl
-	evalTable          evalHashTable
-	openingBook        openingBook
-	nodeCount          int
-	wg                 sync.WaitGroup
-	posStackData       [512]position
-	posStack           []position
-	isCancelPending    bool
+	transpositionTable transpositionTable // shared across all search goroutines
+	historyTable       historyTable       // shared across all search goroutines
+	timeControl        timeControl        // clock configuration for the current search
+	evalTable          evalHashTable      // shared evaluation cache
+	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
+	nodeCount          int                // total nodes searched (main goroutine only)
+	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
+	parallelSlots      chan struct{}      // semaphore: capacity = NumCPU-1, limits parallel workers
+	posStack           []position         // game history + current search path (main goroutine)
+	isCancelPending    atomic.Bool        // set true to signal all goroutines to stop
 }
 
 // NewGame creates an engine instance ready to accept UCI commands.
 func NewGame() *Game {
+	n := runtime.NumCPU()
+	if n < 1 {
+		n = 1
+	}
+	slots := make(chan struct{}, n)
+	for range n {
+		slots <- struct{}{}
+	}
 	game := &Game{
 		transpositionTable: newTranspositionTable(hashTableMB),
 		timeControl:        newTimeControl(),
-		openingBook:        loadOpeningBook(),
+		openingBook:        newOpeningBookFromFile(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
+		parallelSlots:      slots,
 	}
 	game.newGameFromFen(startFen)
 	return game
@@ -76,9 +89,9 @@ func (game *Game) HandleCommand(line string) bool {
 		game.stopThinking()
 		game.newGameFromFen(startFen)
 	case "position":
-		game.uciPosition(fields[1:])
+		game.handleUciPosition(fields[1:])
 	case "go":
-		game.uciGo(fields[1:])
+		game.handleUciGo(fields[1:])
 	case "stop":
 		game.stopThinking()
 	case "quit":
@@ -90,17 +103,19 @@ func (game *Game) HandleCommand(line string) bool {
 
 // newGameFromFen resets the engine state to the position described by fen.
 func (game *Game) newGameFromFen(fen string) {
-	game.posStack = game.posStackData[:0]
+	game.posStack = make([]position, 0, 512)
 	game.posStack = append(game.posStack, positionFromFen(fen))
 	game.nodeCount = 0
-	game.isCancelPending = false
+	game.isCancelPending.Store(false)
 	game.timeControl = newTimeControl()
 }
 
+// currentPosition returns a pointer to the current (last) position on the stack.
 func (game *Game) currentPosition() *position {
 	return &game.posStack[len(game.posStack)-1]
 }
 
+// playMove appends a copy of the current position to the stack and applies m to it.
 func (game *Game) playMove(m move) {
 	game.posStack = append(game.posStack, game.posStack[len(game.posStack)-1])
 	pos := &game.posStack[len(game.posStack)-1]
@@ -120,71 +135,17 @@ func (game *Game) playMoveString(s string) move {
 	return moveNone()
 }
 
-func (game *Game) makeNullMove() {
-	game.posStack = append(game.posStack, game.posStack[len(game.posStack)-1])
-	pos := &game.posStack[len(game.posStack)-1]
-	pos.makeNullMove()
-}
-
-func (game *Game) undoMove() {
-	if len(game.posStack) > 1 {
-		game.posStack = game.posStack[:len(game.posStack)-1]
-	}
-}
-
-func (game *Game) isDrawByFiftyMoves() bool {
-	return game.currentPosition().halfMove >= 100
-}
-
-// isDrawByRepetition returns true if the current position has occurred twice
-// before in the game history (three occurrences total).  Steps back by two plies
-// at a time (same side to move) and stops early at an irreversible move.
-func (game *Game) isDrawByRepetition() bool {
-	n := len(game.posStack)
-	if n < 5 {
-		return false
-	}
-	h := game.posStack[n-1].hash
-	repetitions := 2
-	for i := n - 5; i >= 0; i -= 2 {
-		if game.posStack[i].hash == h {
-			repetitions--
-			if repetitions == 0 {
-				return true
-			}
-		}
-		if game.posStack[i].halfMove == 0 {
-			return false
-		}
-	}
-	return false
-}
-
 // pieceVals maps piece type to centipawn value, used in move scoring (MVV-LVA).
 var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
 
-// scoreAndSortMoves assigns a sort score to each move and sorts descending.
-// Score = captured_value × 10000 − moving_piece_value × 1000 + history_count,
-// giving priority to captures (MVV-LVA) and historically good quiet moves.
-func (game *Game) scoreAndSortMovesX(moves []move, ply int) {
-	color := game.currentPosition().colorToMove
-	for i, move := range moves {
-		score := (pieceVals[move.captured()] * 10) - pieceVals[move.piece()]
-		score += pstValue(color, move.piece(), move.to()) - pstValue(color, move.piece(), move.from())
-		score = (score * 1000) + int(game.historyTable.getCount(ply, move))
-		moves[i] = move.withScore(score)
-	}
-	sortMovesUnstable(moves)
-}
-
-func (game *Game) scoreAndSortMoves(moves []move, ply int) {
-	// Determine all squares attacked by the enemy
-	position := game.currentPosition()
-	occupied := position.occupied()
-	color := position.colorToMove
+// scoreAndSortMovesInner assigns sort scores and sorts moves.  It is shared by
+// Game and searchState so parallel workers use the same logic without duplication.
+func scoreAndSortMovesInner(pos *position, history *historyTable, moves []move, ply int) {
+	occupied := pos.occupied()
+	color := pos.colorToMove
 	enemyColor := enemyOf(color)
-	enemyPieces := position.piecesOfColor(enemyColor)
-	enemyPawns := enemyPieces & position.pawns
+	enemyPieces := pos.piecesOfColor(enemyColor)
+	enemyPawns := enemyPieces & pos.pawns
 	var enemyAttacks bitboard
 	if color == white {
 		enemyAttacks = enemyPawns.shiftSouthwest() | enemyPawns.shiftSoutheast()
@@ -194,27 +155,19 @@ func (game *Game) scoreAndSortMoves(moves []move, ply int) {
 	enemyPieces &= ^enemyPawns
 	for enemyPieces != 0 {
 		sq := enemyPieces.popLsb()
-		enemyPiece := position.squares[sq]
-		enemyAttacks |= pieceAttacks(enemyPiece, occupied, sq)
+		enemyAttacks |= pieceAttacks(pos.squares[sq], occupied, sq)
 	}
-	// Now determine provisional approximate score for move based on cpatured and promoted material and PST.
-	// If the target square is attacked by the enemy, assume we lose the moving piece.
-	// This is much cruder than SEE, but it's fast and reasonably accurate for rough move ordering.
-	for i, move := range moves {
-		captured := move.captured()
-		piece := move.piece()
-		promoted := move.promoted()
-		var score int
-		if (enemyAttacks & squareBB(move.to())) != 0 {
-			// Enemy attacks destination square
-			score = pieceVals[captured] - pieceVals[piece] + pieceVals[promoted]
-
-		} else {
-			score = pieceVals[captured] + pieceVals[promoted]
+	for i, m := range moves {
+		captured := m.captured()
+		piece := m.piece()
+		promoted := m.promoted()
+		score := pieceVals[captured] + pieceVals[promoted]
+		if (enemyAttacks & squareBB(m.to())).isNotEmpty() {
+			score -= pieceVals[piece]
 		}
-		score = score*1000 + int(game.historyTable.getCount(ply, move))
-		score += pstValue(color, piece, move.to()) - pstValue(color, piece, move.from())
-		moves[i] = move.withScore(score)
+		score = score*1000 + int(history.getCount(ply, m))
+		score += pstValue(color, piece, m.to()) - pstValue(color, piece, m.from())
+		moves[i] = m.withScore(score)
 	}
 	sortMovesUnstable(moves)
 }
@@ -223,7 +176,7 @@ func (game *Game) scoreAndSortMoves(moves []move, ply int) {
 // control.  Any previously running search is stopped first.
 func (game *Game) startThinking() {
 	game.stopThinking()
-	game.isCancelPending = false
+	game.isCancelPending.Store(false)
 	game.wg.Add(1)
 	go func() {
 		game.searchEntry()
@@ -233,9 +186,9 @@ func (game *Game) startThinking() {
 
 // stopThinking signals the search goroutine to halt and blocks until it exits.
 func (game *Game) stopThinking() {
-	game.isCancelPending = true
+	game.isCancelPending.Store(true)
 	game.wg.Wait()
-	game.isCancelPending = false
+	game.isCancelPending.Store(false)
 }
 
 // searchEntry is the body of the search goroutine.  It runs the search, plays the
@@ -250,9 +203,9 @@ func (game *Game) searchEntry() {
 	}
 }
 
-// uciPosition handles the "position" command, setting the position from a FEN
+// handleUciPosition handles the "position" command, setting the position from a FEN
 // string or the standard starting position, then applying any supplied move list.
-func (game *Game) uciPosition(args []string) {
+func (game *Game) handleUciPosition(args []string) {
 	fen := startFen
 	movesIdx := -1
 	if len(args) > 0 {
@@ -284,8 +237,8 @@ func (game *Game) uciPosition(args []string) {
 	}
 }
 
-// uciGo handles the "go" command, parsing the clock parameters and starting the search.
-func (game *Game) uciGo(args []string) {
+// handleUciGo handles the "go" command, parsing the clock parameters and starting the search.
+func (game *Game) handleUciGo(args []string) {
 	tc := &game.timeControl
 	color := game.currentPosition().colorToMove
 	for i := 0; i < len(args); i++ {

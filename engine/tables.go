@@ -2,8 +2,13 @@ package engine
 
 import "math/rand"
 
+// zobrist is a 64-bit Zobrist hash of a position, maintained incrementally.
 type zobrist uint64
+
+// shiftFn is a function that shifts a bitboard one step in a compass direction.
 type shiftFn func(bitboard) bitboard
+
+// attackFn computes the attack set for a sliding piece given an occupancy bitboard and its square.
 type attackFn func(bitboard, square) bitboard
 
 // bishopAttacks returns the squares attacked by a bishop on sq given the occupied squares.
@@ -77,6 +82,7 @@ func init() {
 	initCastleMasks()
 }
 
+// shiftFns maps each compass direction to the corresponding bitboard shift function.
 var shiftFns = map[direction]shiftFn{
 	north:     bitboard.shiftNorth,
 	northeast: bitboard.shiftNortheast,

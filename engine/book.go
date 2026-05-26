@@ -13,11 +13,11 @@ type openingBook struct {
 	moves map[zobrist][]move
 }
 
-// loadOpeningBook reads book.txt from the same directory as the running binary
+// newOpeningBookFromFile reads book.txt from the same directory as the running binary
 // and builds the hash→moves index.  Returns an empty book if the file is absent.
 // Each line is a sequence of moves from the starting position; for every prefix
 // of a line, the next move is recorded as a candidate for that position's hash.
-func loadOpeningBook() openingBook {
+func newOpeningBookFromFile() openingBook {
 	b := openingBook{moves: make(map[zobrist][]move)}
 	exe, err := os.Executable()
 	if err != nil {
@@ -48,6 +48,7 @@ func loadOpeningBook() openingBook {
 	return b
 }
 
+// clearOpeningBook empties the book so the engine will not use book moves.
 func (book *openingBook) clearOpeningBook() {
 	clear(book.moves)
 }

@@ -1,5 +1,7 @@
 package engine
 
+import "sync"
+
 // nodeType indicates what kind of alpha-beta node produced the stored result.
 type nodeType uint8
 
@@ -21,8 +23,11 @@ type transposition struct {
 
 // transpositionTable is a fixed-size hash table of search results, indexed by
 // hash % tableSize.  The table size is odd to improve distribution of entries.
+// Concurrent access from parallel workers is protected by 256 striped mutexes:
+// each slot maps to locks[slotIndex % 256].
 type transpositionTable struct {
 	table []transposition
+	locks [256]sync.Mutex
 }
 
 // newTranspositionTable allocates a table sized to megabytes MB.
@@ -40,9 +45,13 @@ func newTranspositionTable(megabytes int) transpositionTable {
 
 // find returns the entry for hash if one exists (collision check included).
 func (tt *transpositionTable) find(hash zobrist) (transposition, bool) {
-	e := &tt.table[hash%zobrist(len(tt.table))]
+	idx := hash % zobrist(len(tt.table))
+	mu := &tt.locks[idx%256]
+	mu.Lock()
+	e := tt.table[idx]
+	mu.Unlock()
 	if e.hash == hash {
-		return *e, true
+		return e, true
 	}
 	return transposition{}, false
 }
@@ -52,14 +61,18 @@ func (tt *transpositionTable) find(hash zobrist) (transposition, bool) {
 // search), the new entry is at least as deep, or the new entry is a PV node.
 func (tt *transpositionTable) record(t *transposition) {
 	idx := t.hash % zobrist(len(tt.table))
+	mu := &tt.locks[idx%256]
+	mu.Lock()
 	existing := &tt.table[idx]
 	if existing.hash == 0 || existing.isOld || t.depth >= existing.depth || t.nodeType == nodePV {
 		*existing = *t
 	}
+	mu.Unlock()
 }
 
 // age marks all entries as old so they can be preferentially replaced in the
-// next search.  Called once at the start of each root search.
+// next search.  Called once at the start of each root search (no concurrent
+// access at that point, so no locking needed).
 func (tt *transpositionTable) age() {
 	for i := range tt.table {
 		tt.table[i].isOld = true
