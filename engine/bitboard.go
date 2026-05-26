@@ -32,10 +32,16 @@ const (
 )
 
 // squareBB returns a bitboard with only sq's bit set.
-func squareBB(s square) bitboard    { return bitboard(1) << s }
-func (b bitboard) isEmpty() bool    { return b == 0 }
+func squareBB(s square) bitboard { return bitboard(1) << s }
+
+// isEmpty reports whether the bitboard has no bits set.
+func (b bitboard) isEmpty() bool { return b == 0 }
+
+// isNotEmpty reports whether the bitboard has at least one bit set.
 func (b bitboard) isNotEmpty() bool { return b != 0 }
-func (b bitboard) popCount() int    { return bits.OnesCount64(uint64(b)) }
+
+// popCount returns the number of set bits (squares occupied).
+func (b bitboard) popCount() int { return bits.OnesCount64(uint64(b)) }
 
 // lsb returns the index of the least-significant set bit (lowest square number).
 func (b bitboard) lsb() square { return square(bits.TrailingZeros64(uint64(b))) }

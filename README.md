@@ -1,8 +1,6 @@
 # Pawnstar-Go
 
-A UCI chess engine written in Go. This is a port of the original C++ Pawnstar engine, preserving the same algorithms and identical move encoding so the two implementations can be compared directly.
-
-A Rust port also exists at [../pawnstar-rs](../pawnstar-rs), which runs at roughly 1.8× the speed of this version.
+A UCI chess engine written in Go. This is a port of the original C++ Pawnstar engine.
 
 ## Build and run
 
@@ -17,30 +15,22 @@ Point any UCI-compatible GUI (Arena, Cute Chess, etc.) at the binary — no conf
 
 ## Testing
 
-Move generation correctness is verified by perft — counting leaf nodes to a given depth and comparing against known values. All 21 EPD positions must pass before any change is considered correct.
+Move generation correctness is verified by perft — counting leaf nodes to a given depth and comparing against known values. All 131 EPD positions must pass before any change is considered correct.
 
 ```bash
 go test ./engine/ -run TestPerft -short -v        # all positions, depth ≤ D5, ~2s
-go test ./engine/ -run TestPerft -v               # full suite, up to D8 (slow)
-go test ./engine/ -run TestPerft/002 -v           # single position by 0-based index
+go test ./engine/ -run TestPerft -v               # full suite, up to D6 (slow)
+go test ./engine/ -run TestPerft/002 -v           # single position by 1-based index (002 = second position)
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
-The engine runs at approximately **70 Mnps** on the perft suite. The C++ original reaches ~700 Mnps via BMI2 PEXT instructions.
-
-## Playing a game
-
-[game.py](../pawnstar-rs/game.py) in the Rust repo orchestrates a UCI game between pawnstar-go (White) and pawnstar-rs (Black), building both engines automatically:
-
-```bash
-python3 ../pawnstar-rs/game.py
-```
+The engine runs at approximately **42 Mnps** on the perft suite. The C++ original pawnstar reaches ~600 Mnps via BMI2 PEXT instructions.
 
 ## Architecture
 
 ### Board representation
 
-`position` ([engine/position.go](engine/position.go)) is a value type; `makeMove` and `makeNullMove` operate on a caller-owned copy. `Game` maintains a `posStack []position` history stack backed by an embedded `posStackData [512]position` array (no heap allocation); undoing a move is a slice truncation — there is no unmake logic.
+`position` ([engine/position.go](engine/position.go)) is a value type; `makeMove` and `makeNullMove` operate on a caller-owned copy. `Game` maintains a `posStack []position` history stack (capacity 512, heap-allocated); undoing a move is a slice truncation — there is no unmake logic.
 
 The struct holds:
 - Named bitboard fields: `pawns`, `knights`, `bishops`, `rooks`, `queens`, `kings`, `whitePieces`, `blackPieces`
@@ -50,7 +40,7 @@ The struct holds:
 - `colorToMove color` — side to move as a direct field
 - Zobrist hash maintained incrementally
 
-`Bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for common set operations (`popCount`, `lsb`, `clearLsb`, shifts in all eight directions).
+`bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for common set operations (`popCount`, `lsb`, `clearLsb`, shifts in all eight directions).
 
 ### Move encoding
 
@@ -72,23 +62,23 @@ Move lists are plain `[]move` slices allocated with `make([]move, 0, 64)` per ca
 
 ### Attack generation
 
-`MagicTables` ([engine/magic.go](engine/magic.go)) implements magic bitboard lookup for sliding pieces. Magic numbers are precomputed constants found offline with seed 1337 and are identical to the C++ version. `BishopAttacks(occ, sq)` and `RookAttacks(occ, sq)` are the hot paths; `QueenAttacks` ORs both.
-
-`Tables` ([engine/tables.go](engine/tables.go)) holds all precomputed non-magic data initialised once at startup: ray tables in all eight directions (64 squares × 8 directions), knight/king/pawn attack tables, pawn structure masks (passed, isolated, adjacent-file), king pawn shelter masks, intervening-square tables, and Zobrist hashes for pieces/castling/en-passant/side-to-move.
+[engine/tables.go](engine/tables.go) holds all precomputed data initialised once at startup: magic bitboard tables for sliding pieces (`bishopAttacks`, `rookAttacks` — magic numbers found offline with seed 1337), ray tables in all eight directions (64 squares × 8 directions), knight/king/pawn attack tables, pawn structure masks (passed, isolated, adjacent-file), king pawn shelter masks, intervening-square tables, and Zobrist hashes for pieces/castling/en-passant/side-to-move.
 
 ### Move generation
 
-`GenerateLegalMoves` and `GenerateLegalCaptures` ([engine/movegen.go](engine/movegen.go)) are the public entry points, returning `[]move`. Internally:
+`generateLegalMoves` and `generateLegalCaptures` ([engine/movegen.go](engine/movegen.go)) are the entry points, returning `[]move`. Internally:
 
-1. Compute checkers bitboard and pin rays (`Pins` in [engine/pins.go](engine/pins.go)).
+1. Compute checkers bitboard and pin rays (`pins` in [engine/pins.go](engine/pins.go)).
 2. If in double check, only king moves are legal — return early.
 3. Build the forbidden-square set for the king (attacked squares, including X-ray attacks through the king via temporarily clearing the king from occupancy).
 4. For single check, restrict non-king moves to interpositions and captures of the checker.
-5. Apply pin constraints via `Pins.AllowedSquares(from)` — returns the ray the piece may move along, or all squares if unpinned.
+5. Apply pin constraints via `pins.allowedSquares(from)` — returns the ray the piece may move along, or all squares if unpinned.
 
 ### Search
 
-`Game` ([engine/game.go](engine/game.go)) owns all search state. `startThinking` launches a goroutine that calls `searchEntry`; `stopThinking` sets `isCancelPending = true` and blocks on a `sync.WaitGroup`.
+`Game` ([engine/game.go](engine/game.go)) owns all search state. `startThinking` launches a goroutine that calls `searchEntry`; `stopThinking` sets `isCancelPending` (an `atomic.Bool`) and blocks on a `sync.WaitGroup`. A `parallelSlots` channel (capacity `NumCPU`) acts as a semaphore for parallel workers.
+
+All recursive search functions take a `searchState` ([engine/parallel.go](engine/parallel.go)) rather than `*Game` directly. `searchState` holds two stacks per goroutine: `posStack []position` for copy-make (one entry per move played during search, seeds with the fork position) and `hashStack []hashStackEntry` for repetition detection (compact `{hash, halfMoveClock}` records covering the full game history plus the search path). At 16 bytes per entry vs 168 bytes for a full position, copying `hashStack` when spawning a worker is ~10× cheaper. All shared state — transposition table, history table, eval table, time control, cancel flag, semaphore — is accessed through the `game *Game` pointer; `searchState` carries no redundant pointer fields.
 
 `searchRootNode` ([engine/search.go](engine/search.go)) drives iterative deepening:
 
@@ -111,19 +101,20 @@ Move lists are plain `[]move` slices allocated with `make([]move, 0, 64)` per ca
 | Technique | Parameters |
 |---|---|
 | Principal variation search (PVS) | Null-window on moves 2+ when not in check; re-search full window on fail-high |
-| Null-move pruning | R = 4; skipped if in check, position is already null-move, window is not null (`beta ≠ alpha + 1`), or side has ≤ 3 pieces |
+| Null-move pruning | R = 4; skipped if in check, position is already null-move, window is not null (`beta ≠ alpha + 1`), or position is an endgame (`isEndgame`); also requires `pstScore > beta + 100` |
 | Late move reduction (LMR) | Reduce by 1 from the 2nd move onward (non-capture, non-check, non-pawn/king, depth > 2); reduce by 2 additionally from move index 7 (depth > 3, zero history count); re-search at full depth if score exceeds alpha |
+| Young Brothers Wait (YBW) | At null-window nodes with depth ≥ 4, the first three moves are searched sequentially; remaining moves are dispatched to parallel workers via `searchMovesParallel`. Each worker runs `runWorker` (a standalone function), returns a `move` with score packed in. Workers signal a per-batch `atomic.Bool` on fail-high so siblings abort early. Workers never spawn sub-workers. |
 | Check extension | In quiescence, an in-check position re-enters `searchAlphaBeta` at the same depth instead of standing pat |
 | Transposition table | Hit on PV node increments depth by 1; Cut/All hits return early if score is conclusive |
 
 **Move ordering within `searchAlphaBeta`:**
 
 1. TT move (tried first, before generating all legal moves).
-2. Remaining legal moves scored by `captured_value × 10000 − moving_value × 1000 + history_count`, sorted descending.
+2. Remaining legal moves scored by MVV-LVA adjusted for enemy pawn attacks on the destination square, plus PST delta and history count, sorted descending.
 
 ### Transposition table
 
-Single 64 MB table ([engine/transposition.go](engine/transposition.go)). Indexed by `hash % tableSize` (table size is odd to improve distribution). Each entry stores hash, best move (with score packed into the upper 32 bits), depth, node type (Cut/All/PV), and an `isOld` flag.
+Single 64 MB table ([engine/transposition.go](engine/transposition.go)). Indexed by `hash % tableSize` (table size is odd to improve distribution). Each entry stores hash, best move (with score packed into the upper 32 bits), depth, node type (Cut/All/PV), and an `isOld` flag. Concurrent access from parallel workers is protected by 256 striped `sync.Mutex` locks (each slot maps to `locks[slotIndex % 256]`).
 
 **Replacement policy:** replace if the slot is empty, the existing entry is old (from a previous root search), the new entry is at least as deep, or the new entry is a PV node. `age()` marks all entries old at the start of each root search.
 
@@ -177,4 +168,4 @@ An alpha/beta material early-exit skips the full evaluation when the material sc
 
 ### Search diagnostics
 
-[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, and null-move/LMR/PVS attempt and fail counts. Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect search behaviour.
+[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, and parallel batch/cutoff/move counts. Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect search behaviour.

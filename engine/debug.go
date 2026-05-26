@@ -11,42 +11,49 @@ import (
 // debugX collects per-search diagnostic counters.  To use, call dbgxClear before
 // a search and dbgxPrint after to inspect search behaviour.
 type debugX struct {
-	historyTableMax      uint
-	checkmates           uint
-	stalemates           uint
-	quiescentCalls       uint
-	quiescentEvalCutoffs uint
-	quiescentBetaCutoffs uint
-	quiescentChecks      uint
-	evalCalls            uint
-	evalCutoffBeta       uint
-	evalCutoffAlpha      uint
-	evalHashHits         uint
-	nodesCut             uint // beta cutoffs (fail-high nodes)
-	nodesPvChanged       uint
-	nodesPv              uint
-	nodesAll             uint
-	tableHitAlpha        uint // TT hits that pruned: stored score ≤ alpha (All node)
-	tableHitBeta         uint // TT hits that pruned: stored score ≥ beta (Cut node)
-	tableHitPv           uint // TT hits on PV nodes (search depth incremented by 1)
-	tableMove            uint
-	tableMoveBetaCutoff  uint
-	tableMoveRaiseAlpha  uint
-	nullMoveAttempts     uint // times null-move pruning was attempted
-	nullMoveFails        uint // times the null-move score did not reach beta
-	lmrAttempts1         uint // times single-ply late-move reduction was applied
-	lmrAttempts2         uint // times double-ply LMR was applied (deep node, late move)
-	lmrFails             uint // times LMR re-search was required (score > alpha at reduced depth)
-	pvsAttempts          uint // times a PVS null-window search was attempted
-	pvsFails             uint // times PVS failed high and a full-window re-search was needed
+	historyTableMax       uint
+	checkmates            uint
+	stalemates            uint
+	drawsByRepetition     uint
+	quiescentCalls        uint
+	quiescentEvalCutoffs  uint
+	quiescentBetaCutoffs  uint
+	quiescentChecks       uint
+	evalCalls             uint
+	evalCutoffBeta        uint
+	evalCutoffAlpha       uint
+	evalHashHits          uint
+	nodesCut              uint // beta cutoffs (fail-high nodes)
+	nodesPvChanged        uint
+	nodesPv               uint
+	nodesAll              uint
+	tableHitAlpha         uint // TT hits that pruned: stored score ≤ alpha (All node)
+	tableHitBeta          uint // TT hits that pruned: stored score ≥ beta (Cut node)
+	tableHitPv            uint // TT hits on PV nodes (search depth incremented by 1)
+	tableMove             uint
+	tableMoveBetaCutoff   uint
+	tableMoveRaiseAlpha   uint
+	nullMoveAttempts      uint // times null-move pruning was attempted
+	nullMoveFails         uint // times the null-move score did not reach beta
+	lmrAttempts1          uint // times single-ply late-move reduction was applied
+	lmrAttempts2          uint // times double-ply LMR was applied (deep node, late move)
+	lmrFails              uint // times LMR re-search was required (score > alpha at reduced depth)
+	pvsAttempts           uint // times a PVS null-window search was attempted
+	pvsFails              uint // times PVS failed high and a full-window re-search was needed
+	parallelSearches      uint // times searchMovesParallel was called
+	parallelCutoffs       uint // times a parallel worker found a beta cutoff
+	parallelMovesSearched uint // total moves handed to parallel workers
 }
 
+// dbgx is the global accumulator for search diagnostics.
 var dbgx debugX
 
+// dbgxClear resets all diagnostic counters to zero.
 func dbgxClear() {
 	dbgx = debugX{}
 }
 
+// camelToWords converts a camelCase identifier to a space-separated lowercase string.
 func camelToWords(s string) string {
 	var b strings.Builder
 	for i, ch := range s {
@@ -58,11 +65,13 @@ func camelToWords(s string) string {
 	return b.String()
 }
 
+// dbgxLine is one formatted counter line used by dbgxPrint.
 type dbgxLine struct {
-	name string
-	val  uint64
+	name string // human-readable counter name derived from the struct field name
+	val  uint64 // accumulated count
 }
 
+// dbgxPrint prints all diagnostic counters in alphabetical order.
 func dbgxPrint() {
 	v := reflect.ValueOf(dbgx)
 	t := reflect.TypeFor[debugX]()

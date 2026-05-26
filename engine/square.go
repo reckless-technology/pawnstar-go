@@ -6,8 +6,12 @@ type square uint8
 
 // squareXY constructs a square from file x (0 = a … 7 = h) and rank y (0 = rank 1 … 7 = rank 8).
 func squareXY(x, y int) square { return square(x + (8 * y)) }
-func (s square) file() uint8   { return uint8(s) & 7 }
-func (s square) rank() uint8   { return uint8(s) >> 3 }
+
+// file returns the file index of s (0 = a-file … 7 = h-file).
+func (s square) file() uint8 { return uint8(s) & 7 }
+
+// rank returns the rank index of s (0 = rank 1 … 7 = rank 8).
+func (s square) rank() uint8 { return uint8(s) >> 3 }
 
 // toString returns the square name in algebraic notation, e.g. "e4".
 func (s square) toString() string { return string([]byte{'a' + byte(s.file()), '1' + byte(s.rank())}) }

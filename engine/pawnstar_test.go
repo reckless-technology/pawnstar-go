@@ -225,6 +225,55 @@ func TestPerft(t *testing.T) {
 	}
 }
 
+// perftHashCheck counts perft nodes like perft but also verifies at every node
+// that the incremental Zobrist hash maintained by makeMove matches the hash
+// recomputed from scratch by computeHash.  Any mismatch is reported via t.Errorf.
+func perftHashCheck(t *testing.T, pos position, depth int) uint64 {
+	t.Helper()
+	moves := pos.generateLegalMoves()
+	var nodes uint64
+	for _, m := range moves {
+		child := pos
+		child.makeMove(m)
+		if want := child.computeHash(); child.hash != want {
+			t.Errorf("hash mismatch after %s:\n  parent: %s\n  child:  %s\n  incremental: %016x\n  computed:    %016x",
+				m.String(), pos.toFenString(), child.toFenString(), child.hash, want)
+		}
+		if depth > 1 {
+			nodes += perftHashCheck(t, child, depth-1)
+		} else {
+			nodes++
+		}
+	}
+	return nodes
+}
+
+// TestPerftExtra verifies that the incremental Zobrist hash matches a freshly
+// computed hash at every node in the perft tree, across all EPD positions.
+// Runs to depth 3 in -short mode and depth 4 otherwise.
+func TestPerftExtra(t *testing.T) {
+	maxDepth := 4
+	if testing.Short() {
+		maxDepth = 3
+	}
+	for i, epd := range perftEPD {
+		fen, cases := parseEPD(epd)
+		for _, tc := range cases {
+			if tc.depth > maxDepth {
+				continue
+			}
+			tc := tc
+			t.Run(fmt.Sprintf("%03d/d%d", i+1, tc.depth), func(t *testing.T) {
+				pos := positionFromFen(fen)
+				got := perftHashCheck(t, pos, tc.depth)
+				if got != tc.nodes {
+					t.Errorf("FEN=%s depth=%d\n  got %d, want %d", fen, tc.depth, got, tc.nodes)
+				}
+			})
+		}
+	}
+}
+
 // BenchmarkPerft7 times perft(7) on the start position.
 func BenchmarkPerft7(b *testing.B) {
 	pos := positionFromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
