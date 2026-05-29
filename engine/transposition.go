@@ -1,6 +1,8 @@
 package engine
 
-import "sync"
+import (
+	"sync/atomic"
+)
 
 // nodeType indicates what kind of alpha-beta node produced the stored result.
 type nodeType uint8
@@ -13,26 +15,29 @@ const (
 
 // transposition is a cached search result.  The score is packed into the move's
 // upper 32 bits (via move.withScore) so no separate score field is needed.
+// The lock field occupies the 4 bytes of natural padding after age, keeping
+// the struct at 24 bytes.
 type transposition struct {
 	hash     zobrist
 	move     move // best move found; upper 32 bits hold the score
 	depth    int16
 	nodeType nodeType
-	isOld    bool // set by age(); old entries are overwritten preferentially
+	age      uint8  // generation counter at write time; compared against transpositionTable.currentAge
+	lock     uint32 // per-entry spinlock: 0 = unlocked, 1 = locked
 }
 
 // transpositionTable is a fixed-size hash table of search results, indexed by
 // hash % tableSize.  The table size is odd to improve distribution of entries.
-// Concurrent access from parallel workers is protected by 256 striped mutexes:
-// each slot maps to locks[slotIndex % 256].
+// Each entry carries its own spinlock so concurrent workers contend only when
+// they happen to access the same slot.
 type transpositionTable struct {
-	table []transposition
-	locks [256]sync.Mutex
+	table      []transposition
+	currentAge uint8
 }
 
 // newTranspositionTable allocates a table sized to megabytes MB.
 func newTranspositionTable(megabytes int) transpositionTable {
-	const entrySize = 24 // approx bytes per entry
+	const entrySize = 24 // bytes per entry
 	n := (megabytes * 1024 * 1024) / entrySize
 	if n < 1 {
 		n = 1
@@ -46,35 +51,40 @@ func newTranspositionTable(megabytes int) transpositionTable {
 // find returns the entry for hash if one exists (collision check included).
 func (tt *transpositionTable) find(hash zobrist) (transposition, bool) {
 	idx := hash % zobrist(len(tt.table))
-	mu := &tt.locks[idx%256]
-	mu.Lock()
-	e := tt.table[idx]
-	mu.Unlock()
+	entry := &tt.table[idx]
+	for !atomic.CompareAndSwapUint32(&entry.lock, 0, 1) {
+		dbgx.spinlocksFind++
+	}
+	e := *entry
+	atomic.StoreUint32(&entry.lock, 0)
 	if e.hash == hash {
 		return e, true
 	}
 	return transposition{}, false
 }
 
-// record stores t, applying the replacement policy:
-// replace if the slot is empty, the existing entry is old (from a previous
-// search), the new entry is at least as deep, or the new entry is a PV node.
-func (tt *transpositionTable) record(t *transposition) {
-	idx := t.hash % zobrist(len(tt.table))
-	mu := &tt.locks[idx%256]
-	mu.Lock()
-	existing := &tt.table[idx]
-	if existing.hash == 0 || existing.isOld || t.depth >= existing.depth || t.nodeType == nodePV {
-		*existing = *t
+// record stores a search result, applying the replacement policy:
+// replace if the slot is empty, the existing entry is from a previous
+// search, the new entry is at least as deep, or the new entry is a PV node.
+func (tt *transpositionTable) record(hash zobrist, m move, depth int16, nt nodeType) {
+	idx := hash % zobrist(len(tt.table))
+	entry := &tt.table[idx]
+	for !atomic.CompareAndSwapUint32(&entry.lock, 0, 1) {
+		dbgx.spinlocksRecord++
 	}
-	mu.Unlock()
+	if entry.hash == 0 || entry.age != tt.currentAge || depth >= entry.depth || nt == nodePV {
+		entry.hash = hash
+		entry.move = m
+		entry.depth = depth
+		entry.nodeType = nt
+		entry.age = tt.currentAge
+	}
+	atomic.StoreUint32(&entry.lock, 0)
 }
 
-// age marks all entries as old so they can be preferentially replaced in the
-// next search.  Called once at the start of each root search (no concurrent
-// access at that point, so no locking needed).
+// age advances the generation counter so entries written in earlier searches
+// are treated as stale and replaced preferentially.  Called once at the start
+// of each root search (no concurrent access at that point, so no locking needed).
 func (tt *transpositionTable) age() {
-	for i := range tt.table {
-		tt.table[i].isOld = true
-	}
+	tt.currentAge++
 }

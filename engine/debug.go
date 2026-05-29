@@ -11,6 +11,8 @@ import (
 // debugX collects per-search diagnostic counters.  To use, call dbgxClear before
 // a search and dbgxPrint after to inspect search behaviour.
 type debugX struct {
+	spinlocksRecord       uint
+	spinlocksFind         uint
 	historyTableMax       uint
 	checkmates            uint
 	stalemates            uint

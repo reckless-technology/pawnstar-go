@@ -111,7 +111,8 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	if position.colorToMove == black {
 		pstScore = -pstScore
 	}
-	if beta == alpha+1 && pstScore > (beta+100) && !position.isNullMove() && !position.isInCheck() && !isEndgame(position) {
+	if beta == alpha+1 && pstScore > (beta+100) && !position.isNullMove() && !position.isInCheck() &&
+		position.piecesOfColor(position.colorToMove).popCount() > 3 {
 		ss.makeNullMove()
 		dbgx.nullMoveAttempts++
 		var dummy variation
@@ -142,7 +143,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		}
 		if score >= beta {
 			dbgx.tableMoveBetaCutoff++
-			ss.game.transpositionTable.record(&transposition{position.hash, transpos.move.withScore(score), int16(depth), nodeCut, false})
+			ss.game.transpositionTable.record(position.hash, transpos.move.withScore(score), int16(depth), nodeCut)
 			ss.game.historyTable.recordGoodMove(ply, transpos.move)
 			return score
 		}
@@ -193,7 +194,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			return searchCancelledScore
 		}
 		if score >= beta {
-			ss.game.transpositionTable.record(&transposition{position.hash, move.withScore(score), int16(depth), nodeCut, false})
+			ss.game.transpositionTable.record(position.hash, move.withScore(score), int16(depth), nodeCut)
 			ss.game.historyTable.recordGoodMove(ply, move)
 			dbgx.nodesCut++
 			return score
@@ -220,7 +221,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 				}
 				parallelScore := parallelBest.score()
 				if parallelScore >= beta {
-					ss.game.transpositionTable.record(&transposition{position.hash, parallelBest, int16(depth), nodeCut, false})
+					ss.game.transpositionTable.record(position.hash, parallelBest, int16(depth), nodeCut)
 					return parallelScore
 				}
 				if parallelScore > bestScore {
@@ -235,12 +236,12 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 	if hasRaisedAlpha {
 		dbgx.nodesPv++
-		ss.game.transpositionTable.record(&transposition{position.hash, bestMove.withScore(alpha), int16(depth), nodePV, false})
+		ss.game.transpositionTable.record(position.hash, bestMove.withScore(alpha), int16(depth), nodePV)
 		ss.game.historyTable.recordGoodMove(ply, bestMove)
 		copyVariation(parentPV, pv, bestMove)
 	} else {
 		dbgx.nodesAll++
-		ss.game.transpositionTable.record(&transposition{position.hash, bestMove.withScore(bestScore), int16(depth), nodeAll, false})
+		ss.game.transpositionTable.record(position.hash, bestMove.withScore(bestScore), int16(depth), nodeAll)
 	}
 	return bestScore
 }

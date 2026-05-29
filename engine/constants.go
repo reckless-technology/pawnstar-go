@@ -42,7 +42,7 @@ const (
 	startDepth = 3
 
 	// hashTableMB is the default transposition table size in megabytes.
-	hashTableMB = 64
+	hashTableMB = 512
 
 	// evalHashTableSize is the number of slots in the evaluation hash table.
 	evalHashTableSize = 0x10000
