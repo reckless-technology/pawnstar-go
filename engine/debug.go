@@ -47,6 +47,8 @@ type debugX struct {
 	parallelSearches         uint // times searchMovesParallel was called
 	parallelCutoffs          uint // times a parallel worker found a beta cutoff
 	parallelMovesSearched    uint // total moves handed to parallel workers
+	aspirationFails          uint // times aspiration window failed and was widened to full window
+	killerBetaCutoffs        uint // times a killer move produced a beta cutoff
 }
 
 // dbgx is the global accumulator for search diagnostics.

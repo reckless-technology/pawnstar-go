@@ -36,6 +36,7 @@ type hashStackEntry struct {
 type searchState struct {
 	posStack  []position       // copy-make stack: starts with 1 entry (fork position), grows during search
 	hashStack []hashStackEntry // compact history for repetition detection: game history + search path
+	killers   [maxPly][2]move  // killer moves: quiet moves that caused beta cutoffs, indexed by ply
 	nodeCount int              // Node count for this goroutine.
 	game      *Game            // shared: time control, cancel flag, parallel semaphore, TT, history, eval table
 	wasCutoff *atomic.Bool     // per-batch cutoff signal; nil for the main search
@@ -158,7 +159,19 @@ func (ss *searchState) canGoParallel(depth int) bool {
 
 // scoreAndSortMoves assigns sort scores to moves and sorts them descending.
 func (ss *searchState) scoreAndSortMoves(moves []move, ply int) {
-	scoreAndSortMovesInner(ss.currentPosition(), &ss.game.historyTable, moves, ply)
+	scoreAndSortMovesInner(ss.currentPosition(), &ss.game.historyTable, ss.killers[ply], moves, ply)
+}
+
+// updateKillers records m as a killer at ply if it is a quiet move and not
+// already the first killer.  The second killer is displaced by the first.
+func (ss *searchState) updateKillers(ply int, m move) {
+	if m.kind() != nonCapture {
+		return
+	}
+	if !ss.killers[ply][0].equal(m) {
+		ss.killers[ply][1] = ss.killers[ply][0]
+		ss.killers[ply][0] = m
+	}
 }
 
 // runWorker is the body of a parallel search goroutine.  It blocks until a
@@ -368,6 +381,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			dbgx.tableMoveBetaCutoff++
 			ss.game.transpositionTable.record(position.hash, transpos.move.withScore(score), int16(depth), nodeCut)
 			ss.game.historyTable.recordGoodMove(ply, transpos.move)
+			ss.updateKillers(ply, transpos.move)
 			return score
 		}
 		bestScore = score
@@ -418,6 +432,10 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		if score >= beta {
 			ss.game.transpositionTable.record(position.hash, move.withScore(score), int16(depth), nodeCut)
 			ss.game.historyTable.recordGoodMove(ply, move)
+			ss.updateKillers(ply, move)
+			if move.kind() == nonCapture {
+				dbgx.killerBetaCutoffs++
+			}
 			dbgx.nodesCut++
 			return score
 		}
@@ -444,6 +462,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 				parallelScore := parallelBest.score()
 				if parallelScore >= beta {
 					ss.game.transpositionTable.record(position.hash, parallelBest, int16(depth), nodeCut)
+					ss.updateKillers(ply, parallelBest)
 					return parallelScore
 				}
 				if parallelScore > bestScore {
@@ -582,32 +601,52 @@ func searchRootNode(game *Game) move {
 	}
 	sortMovesStable(moves)
 	bestMove := moves[0]
+	prevScore := bestMove.score() // seed for aspiration windows
 
 	for depth := startDepth + 1; depth < maxPly; depth++ {
 		if tc.clockType == clockFixedDepth && depth > tc.depth {
 			break
 		}
 		sortMovesStable(moves)
-		var pv variation
-		alpha := initialAlpha
-		ss.nodeCount = 0
 		bestMoves = append(bestMoves, bestMove)
+		ss.nodeCount = 0
 
-		for i, move := range moves {
-			score := searchSingleMove(ss, depth, 0, alpha, initialBeta, move, &pv, i)
-			moves[i] = move.withScore(score)
+		aspirAlpha := max(initialAlpha, prevScore-aspirDelta)
+		aspirBeta := min(initialBeta, prevScore+aspirDelta)
+		alpha := initialAlpha
+
+		for attempt := 0; attempt < 2; attempt++ {
+			var pv variation
+			alpha = aspirAlpha
+
+			for i, move := range moves {
+				score := searchSingleMove(ss, depth, 0, alpha, aspirBeta, move, &pv, i)
+				moves[i] = move.withScore(score)
+				if ss.isCancelled() {
+					return bestMove
+				}
+				if score > alpha {
+					alpha = score
+					bestMove = move
+					copyVariation(&principalVariation, pv, bestMove)
+					pvStr := pvString(principalVariation)
+					fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
+						depth, alpha, time.Since(startTime).Milliseconds(), ss.nodeCount, pvStr)
+				}
+			}
+
+			if alpha > aspirAlpha && alpha < aspirBeta || attempt == 1 {
+				prevScore = alpha
+				break
+			}
 			if ss.isCancelled() {
 				return bestMove
 			}
-			if score > alpha {
-				alpha = score
-				bestMove = move
-				copyVariation(&principalVariation, pv, bestMove)
-				pvStr := pvString(principalVariation)
-				fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
-					depth, alpha, time.Since(startTime).Milliseconds(), ss.nodeCount, pvStr)
-			}
+			dbgx.aspirationFails++
+			aspirAlpha = initialAlpha
+			aspirBeta = initialBeta
 		}
+
 		if alpha > winThreshold || alpha < loseThreshold {
 			break
 		}
