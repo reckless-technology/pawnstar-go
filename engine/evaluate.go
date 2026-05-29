@@ -18,6 +18,7 @@ type evalHashEntry struct {
 // they happen to evaluate the same position simultaneously.
 type evalHashTable struct {
 	entries []evalHashEntry // flat array indexed by hash % len(entries)
+	mask    zobrist
 }
 
 // newEvalHashTable allocates an evaluation hash table with count slots.
@@ -26,12 +27,12 @@ func newEvalHashTable(count int) evalHashTable {
 	// Make the size a power of 2 for efficient circular addressing.
 	for i = 1; i < count; i <<= 1 {
 	}
-	return evalHashTable{entries: make([]evalHashEntry, i)}
+	return evalHashTable{entries: make([]evalHashEntry, i), mask: zobrist(i) - 1}
 }
 
 // find returns the cached score for hash, or hashNotFoundScore on a miss.
 func (t *evalHashTable) find(hash zobrist) int {
-	idx := hash & (zobrist(len(t.entries)) - 1)
+	idx := hash & t.mask
 	entry := &t.entries[idx]
 	for !atomic.CompareAndSwapUint32(&entry.lock, 0, 1) {
 	}
@@ -45,7 +46,7 @@ func (t *evalHashTable) find(hash zobrist) int {
 
 // record stores score for hash, always overwriting the existing entry.
 func (t *evalHashTable) record(hash zobrist, score int) {
-	idx := hash & (zobrist(len(t.entries)) - 1)
+	idx := hash & t.mask
 	entry := &t.entries[idx]
 	for !atomic.CompareAndSwapUint32(&entry.lock, 0, 1) {
 	}
