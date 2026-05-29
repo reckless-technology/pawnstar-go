@@ -20,7 +20,7 @@ type position struct {
 	squares     [64]piece      // reverse lookup: squares[sq] gives the piece type on sq, or noPiece
 	checkers    bitboard       // pieces currently giving check to the side to move; refreshed by makeMove
 	hash        zobrist        // Zobrist hash; updated incrementally, recomputed from scratch only in positionFromFen
-	scores      [2]int32       // material + PST totals per color, king excluded (king PST is phase-dependent)
+	scores      [2]int         // material + PST totals per color, king excluded (king PST is phase-dependent)
 	epSquare    square         // target square of the last double pawn push, or noSquare if none
 	halfMove    uint8          // half-move clock; reset on pawn moves and captures; draw at 100
 	fullMove    uint8          // full-move number stored 0-based (add 1 when writing FEN)
