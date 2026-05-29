@@ -141,7 +141,7 @@ func scoreAndSortMovesInner(pos *position, history *historyTable, killers [2]mov
 	occupied := pos.occupied()
 	color := pos.colorToMove
 	enemyColor := enemyOf(color)
-	enemyPieces := pos.piecesOfColor(enemyColor)
+	enemyPieces := pos.colors[enemyColor]
 	enemyPawns := enemyPieces & pos.pieces[pawn]
 	var enemyAttacks bitboard
 	if color == white {

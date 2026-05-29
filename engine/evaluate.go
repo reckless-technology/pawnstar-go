@@ -187,7 +187,7 @@ func pstValue(c color, p piece, sq square) int {
 // queen also has no rooks and at most one minor piece.
 func isEndgame(pos *position) bool {
 	for c := white; c <= black; c++ {
-		friendly := pos.piecesOfColor(c)
+		friendly := pos.colors[c]
 		if (pos.pieces[queen] & friendly).isEmpty() {
 			continue
 		}
@@ -222,7 +222,7 @@ var pawnMasks = [2]maskPtrs{
 
 // determinePawnStructure classifies all pawns of color c into structural categories.
 func determinePawnStructure(pos *position, c color) pawnStructure {
-	friendlyPawns := pos.pieces[pawn] & pos.piecesOfColor(c)
+	friendlyPawns := pos.pieces[pawn] & pos.colors[c]
 	enemyPawns := pos.pieces[pawn] ^ friendlyPawns
 	var ps pawnStructure
 
@@ -256,7 +256,7 @@ func determinePawnStructure(pos *position, c color) pawnStructure {
 
 // evalMaterialExtra returns a bishop-pair bonus (+30 cp) when both color bishops are present.
 func evalMaterialExtra(pos *position, c color) int {
-	bishops := pos.pieces[bishop] & pos.piecesOfColor(c)
+	bishops := pos.pieces[bishop] & pos.colors[c]
 	if (bishops&whiteSqs) != 0 && (bishops&blackSqs) != 0 {
 		return 30
 	}
@@ -281,7 +281,7 @@ func evalPawnStructure(ps *pawnStructure, c color) int {
 // evalMobility scores bishop and rook mobility for color c.
 // Bishop squares defended by enemy pawns are excluded from the count.
 func evalMobility(pos *position, c color, ps *[2]pawnStructure) int {
-	friendly := pos.piecesOfColor(c)
+	friendly := pos.colors[c]
 	occ := pos.occupied()
 	enemyDefended := ps[enemyOf(c)].defended
 	score := 0
@@ -302,10 +302,10 @@ func evalMobility(pos *position, c color, ps *[2]pawnStructure) int {
 // and a bonus for friendly non-pawn pieces near the king.
 func evalKing(pos *position, color color, endgame bool) int {
 	flip := flips[color]
-	friendly := pos.piecesOfColor(color)
+	friendly := pos.colors[color]
 	enemyColor := enemyOf(color)
 	friendlyPawns := friendly & pos.pieces[pawn]
-	enemyPawns := pos.piecesOfColor(enemyColor) & pos.pieces[pawn]
+	enemyPawns := pos.colors[enemyColor] & pos.pieces[pawn]
 	kingLocation := pos.kingLocation[color]
 
 	var pstScore int
