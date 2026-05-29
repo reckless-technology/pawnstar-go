@@ -10,26 +10,24 @@ import (
 // makeNullMove modify a copy of the position; the caller is responsible for
 // maintaining the game-history stack in Game.posStack.
 //
-// pieces is indexed by piece type (noPiece=0 unused, pawn=1..king=6).
-// colors is indexed by color (white=0, black=1).
-// Bitboards and the squares array are always kept in sync.  Piece-square table
-// scores ([2]int indexed by color) are maintained incrementally by addPiece,
-// removePiece, and movePiece so that evaluation is a simple subtraction at leaf
-// nodes.  The Zobrist hash is similarly maintained incrementally.
+// All bitboard fields are kept in sync with squares at all times.
+// Piece-square scores and the Zobrist hash are maintained incrementally by
+// addPiece, removePiece, and movePiece so evaluation and hashing are O(1)
+// at every node.
 type position struct {
-	pieces      [7]bitboard    // indexed by piece type (noPiece=0 unused, pawn=1..king=6)
-	colors      [2]bitboard    // indexed by color (white=0, black=1)
-	squares     [64]piece      // O(1) piece lookup by square
-	checkers    bitboard       // squares of pieces giving check to the side to move
-	hash        zobrist        // Zobrist hash of the current position
-	scores      [2]int         // incremental material + PST score per color (excludes king)
-	kingLocation [2]square     // king location per side; updated separately from piece BBs
-	epSquare    square         // en-passant target square, or noSquare
-	halfMove    uint8          // half-move clock (for 50-move rule)
-	fullMove    uint8          // full-move number minus 1 (stored 0-based)
-	flags       uint8          // null move flag
-	castling    castlingRights // 4 bit castling rights flags
-	colorToMove color          // color to move
+	pieces       [7]bitboard    // per-piece-type occupancy; index = piece constant (pawn=1..king=6, 0 unused)
+	colors       [2]bitboard    // per-color occupancy; colors[white]|colors[black] == occupied()
+	squares      [64]piece      // reverse lookup: squares[sq] gives the piece type on sq, or noPiece
+	checkers     bitboard       // pieces currently giving check to the side to move; refreshed by makeMove
+	hash         zobrist        // Zobrist hash; updated incrementally, recomputed from scratch only in positionFromFen
+	scores       [2]int         // material + PST totals per color, king excluded (king PST is phase-dependent)
+	kingLocation [2]square      // king square per color; mirrors pieces[king] for direct O(1) access in hot paths
+	epSquare     square         // target square of the last double pawn push, or noSquare if none
+	halfMove     uint8          // half-move clock; reset on pawn moves and captures; draw at 100
+	fullMove     uint8          // full-move number stored 0-based (add 1 when writing FEN)
+	flags        uint8          // transient move flags; currently only flagNullMove
+	castling     castlingRights // which castling moves remain legal for each side
+	colorToMove  color          // side whose turn it is to move
 }
 
 const (
@@ -77,7 +75,9 @@ func (position *position) movePiece(c color, p piece, from, to square) {
 	position.scores[c] += pstValue(c, p, to) - pstValue(c, p, from)
 }
 
-// attacksTo returns the bitboard of pieces of color c that attack sq.
+// attacksTo returns a bitboard of all pieces of color c that attack sq.
+// Sliding-piece attacks are computed against the full occupancy, so X-ray
+// attacks through other pieces are not included — only direct attacks.
 func (position *position) attacksTo(sq square, c color) bitboard {
 	occ := position.occupied()
 	var result bitboard
@@ -321,8 +321,9 @@ func (position *position) makeNullMove() {
 	position.colorToMove = enemyOf(position.colorToMove)
 }
 
-// isDrawByMaterial returns true when neither side has enough material to checkmate:
-// KK, KNK, KBK, or KBKB with both bishops on the same colour.
+// isDrawByMaterial reports whether the position is a theoretical draw by
+// insufficient mating material: K vs K, K+N vs K, K+B vs K, or K+B vs K+B
+// where both bishops travel on the same colour squares.
 func (position *position) isDrawByMaterial() bool {
 	if position.pieces[pawn].isNotEmpty() || position.pieces[rook].isNotEmpty() || position.pieces[queen].isNotEmpty() {
 		return false
