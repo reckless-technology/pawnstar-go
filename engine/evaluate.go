@@ -1,6 +1,6 @@
 package engine
 
-import "sync"
+import "sync/atomic"
 
 // PST tables ported from the C Pawnstar engine.
 // Stored with rank 8 at low indices, rank 1 at high indices.
@@ -10,13 +10,14 @@ import "sync"
 type evalHashEntry struct {
 	hash  zobrist // Zobrist hash of the position
 	score int     // cached evaluation score (centipawns, side-to-move perspective)
+	lock  uint32  // per-entry spinlock: 0 = unlocked, 1 = locked
 }
 
 // evalHashTable is a fixed-size cache for evaluated positions.
-// Concurrent access from parallel workers is protected by 256 striped mutexes.
+// Each entry carries its own spinlock so concurrent workers contend only when
+// they happen to evaluate the same position simultaneously.
 type evalHashTable struct {
 	entries []evalHashEntry // flat array indexed by hash % len(entries)
-	locks   [256]sync.Mutex // striped locks; entry at idx uses locks[idx%256]
 }
 
 // newEvalHashTable allocates an evaluation hash table with count slots.
@@ -27,24 +28,26 @@ func newEvalHashTable(count int) evalHashTable {
 // find returns the cached score for hash, or hashNotFoundScore on a miss.
 func (t *evalHashTable) find(hash zobrist) int {
 	idx := hash % zobrist(len(t.entries))
-	mu := &t.locks[idx%256]
-	mu.Lock()
-	entry := t.entries[idx]
-	mu.Unlock()
-	if entry.hash == hash {
-		return entry.score
+	entry := &t.entries[idx]
+	for !atomic.CompareAndSwapUint32(&entry.lock, 0, 1) {
+	}
+	e := *entry
+	atomic.StoreUint32(&entry.lock, 0)
+	if e.hash == hash {
+		return e.score
 	}
 	return hashNotFoundScore
-
 }
 
 // record stores score for hash, always overwriting the existing entry.
 func (t *evalHashTable) record(hash zobrist, score int) {
 	idx := hash % zobrist(len(t.entries))
-	mu := &t.locks[idx%256]
-	mu.Lock()
-	t.entries[idx] = evalHashEntry{hash, score}
-	mu.Unlock()
+	entry := &t.entries[idx]
+	for !atomic.CompareAndSwapUint32(&entry.lock, 0, 1) {
+	}
+	entry.hash = hash
+	entry.score = score
+	atomic.StoreUint32(&entry.lock, 0)
 }
 
 // pawnSquare is the piece-square bonus for pawns. Rank 8 at low indices; White flips via ^rankFlip.
