@@ -22,6 +22,7 @@ go test ./engine/ -run TestPerft/002 -v           # single position by 1-based i
 go test ./engine/ -run TestPerftExtra -short -v  # verify incremental Zobrist hash vs recomputed hash at every node
 go test ./engine/ -run TestSearch -short -v       # search every EPD position to depth 9; exercises TT and search
 go test ./engine/ -run TestBratkoKopec -v         # 24 Bratko-Kopec positions at depth 8; regression test for search quality
+go test ./engine/ -run TestSEE -v                 # 18 static exchange evaluation cases; unit tests for evaluateStaticExchange
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
@@ -39,7 +40,7 @@ The struct holds:
 - `pieces [7]bitboard` — indexed by piece type constant (`pawn`=1 … `king`=6; index 0 unused)
 - `colors [2]bitboard` — indexed by color constant (`white`=0, `black`=1)
 - `squares[64]piece` — O(1) piece lookup by square
-- `scores[2]int32` — incremental material + PST totals per side (excludes king; updated by `addPiece`/`removePiece`/`movePiece`)
+- `scores[2]int` — incremental material + PST totals per side (excludes king; updated by `addPiece`/`removePiece`/`movePiece`)
 - `colorToMove color` — side to move as a direct field
 - Zobrist hash maintained incrementally
 - `halfMove uint8` — half-move clock for the 50-move rule
@@ -215,7 +216,7 @@ The `lock` field occupies the 4 bytes of natural padding that would otherwise fo
 
 All scores are in centipawns from the perspective of the side to move.
 
-**Piece values:** P = 100, N = 300, B = 300, R = 500, Q = 900.
+**Piece values:** P = 100, N = 350, B = 350, R = 525, Q = 1000. SEE uses simplified values (P=100, N/B=300, R=500, Q=900) for speed.
 
 **Piece-square tables** ([engine/evaluate.go](engine/evaluate.go)) ported from the C Pawnstar engine. Stored with rank 8 at low indices; White reads via `sq ^ 0x38` (rank flip), Black reads directly. PST scores for all non-king pieces are accumulated into `scores[c]` incrementally by `addPiece`/`removePiece`/`movePiece` in `position.go` — no re-scan on evaluation.
 
