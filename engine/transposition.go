@@ -18,7 +18,7 @@ type transposition struct {
 	move     move // best move found; upper 32 bits hold the score
 	depth    int16
 	nodeType nodeType
-	isOld    bool // set by age(); old entries are overwritten preferentially
+	age      uint8 // generation counter at write time; compared against transpositionTable.currentAge
 }
 
 // transpositionTable is a fixed-size hash table of search results, indexed by
@@ -26,8 +26,9 @@ type transposition struct {
 // Concurrent access from parallel workers is protected by 256 striped mutexes:
 // each slot maps to locks[slotIndex % 256].
 type transpositionTable struct {
-	table []transposition
-	locks [256]sync.Mutex
+	table      []transposition
+	locks      [256]sync.Mutex
+	currentAge uint8
 }
 
 // newTranspositionTable allocates a table sized to megabytes MB.
@@ -56,25 +57,23 @@ func (tt *transpositionTable) find(hash zobrist) (transposition, bool) {
 	return transposition{}, false
 }
 
-// record stores t, applying the replacement policy:
-// replace if the slot is empty, the existing entry is old (from a previous
-// search), the new entry is at least as deep, or the new entry is a PV node.
-func (tt *transpositionTable) record(t *transposition) {
-	idx := t.hash % zobrist(len(tt.table))
+// record stores a search result, applying the replacement policy:
+// replace if the slot is empty, the existing entry is from a previous
+// search, the new entry is at least as deep, or the new entry is a PV node.
+func (tt *transpositionTable) record(hash zobrist, m move, depth int16, nt nodeType) {
+	idx := hash % zobrist(len(tt.table))
 	mu := &tt.locks[idx%256]
 	mu.Lock()
 	existing := &tt.table[idx]
-	if existing.hash == 0 || existing.isOld || t.depth >= existing.depth || t.nodeType == nodePV {
-		*existing = *t
+	if existing.hash == 0 || existing.age != tt.currentAge || depth >= existing.depth || nt == nodePV {
+		*existing = transposition{hash, m, depth, nt, tt.currentAge}
 	}
 	mu.Unlock()
 }
 
-// age marks all entries as old so they can be preferentially replaced in the
-// next search.  Called once at the start of each root search (no concurrent
-// access at that point, so no locking needed).
+// age advances the generation counter so entries written in earlier searches
+// are treated as stale and replaced preferentially.  Called once at the start
+// of each root search (no concurrent access at that point, so no locking needed).
 func (tt *transpositionTable) age() {
-	for i := range tt.table {
-		tt.table[i].isOld = true
-	}
+	tt.currentAge++
 }
