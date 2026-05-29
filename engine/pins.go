@@ -22,8 +22,8 @@ func computePins(pos *position) pins {
 	intervening := &interveningSquares[kingLocation]
 
 	// Candidate pinners: enemy sliders on a bishop or rook ray from the king.
-	enemySliders := (bishopAttacksEmpty[kingLocation] & (pos.bishops | pos.queens)) |
-		(rookAttacksEmpty[kingLocation] & (pos.rooks | pos.queens))
+	enemySliders := (bishopAttacksEmpty[kingLocation] & (pos.pieces[bishop] | pos.pieces[queen])) |
+		(rookAttacksEmpty[kingLocation] & (pos.pieces[rook] | pos.pieces[queen]))
 	enemySliders &= ^friendlyPieces
 
 	for enemySliders.isNotEmpty() {

@@ -188,10 +188,10 @@ func pstValue(c color, p piece, sq square) int {
 func isEndgame(pos *position) bool {
 	for c := white; c <= black; c++ {
 		friendly := pos.piecesOfColor(c)
-		if (pos.queens & friendly).isEmpty() {
+		if (pos.pieces[queen] & friendly).isEmpty() {
 			continue
 		}
-		if (pos.rooks&friendly).popCount() > 0 || ((pos.knights|pos.bishops)&friendly).popCount() > 1 {
+		if (pos.pieces[rook]&friendly).popCount() > 0 || ((pos.pieces[knight]|pos.pieces[bishop])&friendly).popCount() > 1 {
 			return false
 		}
 	}
@@ -222,8 +222,8 @@ var pawnMasks = [2]maskPtrs{
 
 // determinePawnStructure classifies all pawns of color c into structural categories.
 func determinePawnStructure(pos *position, c color) pawnStructure {
-	friendlyPawns := pos.pawns & pos.piecesOfColor(c)
-	enemyPawns := pos.pawns ^ friendlyPawns
+	friendlyPawns := pos.pieces[pawn] & pos.piecesOfColor(c)
+	enemyPawns := pos.pieces[pawn] ^ friendlyPawns
 	var ps pawnStructure
 
 	if c == white {
@@ -256,7 +256,7 @@ func determinePawnStructure(pos *position, c color) pawnStructure {
 
 // evalMaterialExtra returns a bishop-pair bonus (+30 cp) when both color bishops are present.
 func evalMaterialExtra(pos *position, c color) int {
-	bishops := pos.bishops & pos.piecesOfColor(c)
+	bishops := pos.pieces[bishop] & pos.piecesOfColor(c)
 	if (bishops&whiteSqs) != 0 && (bishops&blackSqs) != 0 {
 		return 30
 	}
@@ -285,12 +285,12 @@ func evalMobility(pos *position, c color, ps *[2]pawnStructure) int {
 	occ := pos.occupied()
 	enemyDefended := ps[enemyOf(c)].defended
 	score := 0
-	for b := pos.bishops & friendly; b.isNotEmpty(); {
+	for b := pos.pieces[bishop] & friendly; b.isNotEmpty(); {
 		sq := b.popLsb()
 		attacks := bishopAttacks(occ, sq) & ^friendly & ^enemyDefended
 		score += bishopAttackScores[attacks.popCount()]
 	}
-	for r := pos.rooks & friendly; r.isNotEmpty(); {
+	for r := pos.pieces[rook] & friendly; r.isNotEmpty(); {
 		sq := r.popLsb()
 		attacks := rookAttacks(occ, sq) & ^friendly
 		score += rookAttackScores[attacks.popCount()]
@@ -304,8 +304,8 @@ func evalKing(pos *position, color color, endgame bool) int {
 	flip := flips[color]
 	friendly := pos.piecesOfColor(color)
 	enemyColor := enemyOf(color)
-	friendlyPawns := friendly & pos.pawns
-	enemyPawns := pos.piecesOfColor(enemyColor) & pos.pawns
+	friendlyPawns := friendly & pos.pieces[pawn]
+	enemyPawns := pos.piecesOfColor(enemyColor) & pos.pieces[pawn]
 	kingLocation := pos.kingLocation[color]
 
 	var pstScore int
