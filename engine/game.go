@@ -42,19 +42,15 @@ type Game struct {
 	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
 	nodeCount          int                // total nodes searched (main goroutine only)
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
-	parallelSlots      chan struct{}      // semaphore: capacity = NumCPU-1, limits parallel workers
+	parallelSlots      chan struct{}      // semaphore: capacity = maxNumGoRoutines, limits parallel workers
 	posStack           []position         // game history + current search path (main goroutine)
 	isCancelPending    atomic.Bool        // set true to signal all goroutines to stop
 }
 
 // NewGame creates an engine instance ready to accept UCI commands.
 func NewGame() *Game {
-	n := 1000
-	if n < 1 {
-		n = 1
-	}
-	slots := make(chan struct{}, n)
-	for range n {
+	slots := make(chan struct{}, maxNumGoRoutines)
+	for range maxNumGoRoutines {
 		slots <- struct{}{}
 	}
 	game := &Game{

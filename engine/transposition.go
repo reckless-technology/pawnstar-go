@@ -18,12 +18,12 @@ const (
 // The lock field occupies the 4 bytes of natural padding after age, keeping
 // the struct at 24 bytes.
 type transposition struct {
-	hash     zobrist
-	move     move // best move found; upper 32 bits hold the score
-	depth    int16
-	nodeType nodeType
-	age      uint8  // generation counter at write time; compared against transpositionTable.currentAge
-	lock     uint32 // per-entry spinlock: 0 = unlocked, 1 = locked
+	hash     zobrist  // hash of the position
+	move     move     // best move found; upper 32 bits hold the score
+	depth    int16    // depth to which this was searched
+	nodeType nodeType // node type
+	age      uint8    // generation counter at write time; compared against transpositionTable.currentAge
+	lock     uint32   // per-entry spinlock: 0 = unlocked, 1 = locked
 }
 
 // transpositionTable is a fixed-size hash table of search results, indexed by
@@ -33,6 +33,7 @@ type transposition struct {
 type transpositionTable struct {
 	table      []transposition
 	currentAge uint8
+	mask       zobrist
 }
 
 // newTranspositionTable allocates a table sized to megabytes MB.
@@ -42,15 +43,17 @@ func newTranspositionTable(megabytes int) transpositionTable {
 	if n < 1 {
 		n = 1
 	}
-	if (n & 1) == 0 {
-		n += 1
+	// use the next biggest power of 2 from n so we can use AND masking
+	var count zobrist
+	for count = 1; count < zobrist(n); count = count << 1 {
+
 	}
-	return transpositionTable{table: make([]transposition, n)}
+	return transpositionTable{table: make([]transposition, count), mask: (count - 1)}
 }
 
 // find returns the entry for hash if one exists (collision check included).
 func (tt *transpositionTable) find(hash zobrist) (transposition, bool) {
-	idx := hash % zobrist(len(tt.table))
+	idx := hash & tt.mask
 	entry := &tt.table[idx]
 	for !atomic.CompareAndSwapUint32(&entry.lock, 0, 1) {
 		dbgx.spinlocksFind++
@@ -67,7 +70,7 @@ func (tt *transpositionTable) find(hash zobrist) (transposition, bool) {
 // replace if the slot is empty, the existing entry is from a previous
 // search, the new entry is at least as deep, or the new entry is a PV node.
 func (tt *transpositionTable) record(hash zobrist, m move, depth int16, nt nodeType) {
-	idx := hash % zobrist(len(tt.table))
+	idx := hash & tt.mask
 	entry := &tt.table[idx]
 	for !atomic.CompareAndSwapUint32(&entry.lock, 0, 1) {
 		dbgx.spinlocksRecord++

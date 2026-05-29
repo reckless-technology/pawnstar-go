@@ -11,7 +11,6 @@ import (
 //	12–14  moving piece
 //	15–17  captured piece (noPiece if non-capture)
 //	18–21  move type (moveType value)
-//	   22  gives-check flag
 //	32–63  sort score (not part of move identity; ignored by equal and isNone)
 type move int64
 
@@ -29,7 +28,6 @@ const (
 	pawnDoublePush  moveType = iota
 	epCapture       moveType = iota
 	castling        moveType = iota
-	isCheckingBit   move     = 1 << 22
 )
 
 // constructMove encodes all move fields into a move value.
@@ -77,13 +75,12 @@ func moveSinglePush(from, to square) move {
 // moveNone is the null sentinel (all identity bits zero, which is not a legal move).
 func moveNone() move { return move(0) }
 
-func (m move) to() square       { return square(m & 0x3F) }           // destination square
-func (m move) from() square     { return square((m >> 6) & 0x3F) }    // origin square
-func (m move) piece() piece     { return piece((m >> 12) & 0x07) }    // moving piece type
-func (m move) captured() piece  { return piece((m >> 15) & 0x07) }    // captured piece type (noPiece if non-capture)
-func (m move) kind() moveType   { return moveType((m >> 18) & 0x0F) } // move classification
-func (m move) score() int       { return int(m >> 32) }               // sort score (bits 32–63)
-func (m move) isChecking() bool { return (m & isCheckingBit) != 0 }   // true if this move gives check
+func (m move) to() square      { return square(m & 0x3F) }           // destination square
+func (m move) from() square    { return square((m >> 6) & 0x3F) }    // origin square
+func (m move) piece() piece    { return piece((m >> 12) & 0x07) }    // moving piece type
+func (m move) captured() piece { return piece((m >> 15) & 0x07) }    // captured piece type (noPiece if non-capture)
+func (m move) kind() moveType  { return moveType((m >> 18) & 0x0F) } // move classification
+func (m move) score() int      { return int(m >> 32) }               // sort score (bits 32–63)
 
 // fromTo returns the combined from+to index (bits 0–11) used as a hash key in
 // the history table.
