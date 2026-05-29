@@ -111,7 +111,8 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	if position.colorToMove == black {
 		pstScore = -pstScore
 	}
-	if beta == alpha+1 && pstScore > (beta+100) && !position.isNullMove() && !position.isInCheck() && !isEndgame(position) {
+	if beta == alpha+1 && pstScore > (beta+100) && !position.isNullMove() && !position.isInCheck() &&
+		position.piecesOfColor(position.colorToMove).popCount() > 3 {
 		ss.makeNullMove()
 		dbgx.nullMoveAttempts++
 		var dummy variation
