@@ -39,13 +39,12 @@ The struct holds:
 - `pieces [7]bitboard` — indexed by piece type constant (`pawn`=1 … `king`=6; index 0 unused)
 - `colors [2]bitboard` — indexed by color constant (`white`=0, `black`=1)
 - `squares[64]piece` — O(1) piece lookup by square
-- `scores[2]int` — incremental material + PST totals per side (excludes king; updated by `addPiece`/`removePiece`/`movePiece`)
-- `kingLocation[2]square` — king locations (updated separately because king PST is phase-dependent)
+- `scores[2]int32` — incremental material + PST totals per side (excludes king; updated by `addPiece`/`removePiece`/`movePiece`)
 - `colorToMove color` — side to move as a direct field
 - Zobrist hash maintained incrementally
 - `halfMove uint8` — half-move clock for the 50-move rule
 
-`bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for common set operations (`popCount`, `lsb`, `clearLsb`, shifts in all eight directions).
+`bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for common set operations (`popCount`, `lsb`, `popLsb`, shifts in all eight directions).
 
 ### Move encoding
 
@@ -189,7 +188,7 @@ Within `searchAlphaBeta`, moves are ordered as follows:
 
 ### Transposition table
 
-Single 512 MB table ([engine/transposition.go](engine/transposition.go)), indexed by `hash % tableSize` (table size is odd to improve distribution).
+Single 512 MB table ([engine/transposition.go](engine/transposition.go)). The entry count is rounded up to the next power of 2 so entries are indexed by `hash & mask` (a bitmask) rather than modulo.
 
 Each `transposition` entry is exactly 24 bytes:
 
