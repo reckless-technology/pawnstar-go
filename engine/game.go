@@ -134,8 +134,10 @@ func (game *Game) playMoveString(s string) move {
 var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
 
 // scoreAndSortMovesInner assigns sort scores and sorts moves.  It is shared by
-// Game and searchState so parallel workers use the same logic without duplication.
-func scoreAndSortMovesInner(pos *position, history *historyTable, moves []move, ply int) {
+// searchState (with per-ply killers) and the root search (zero killers).
+// Captures and promotions are scored via SEE; quiet moves use an enemy-attack
+// penalty plus killer bonuses and history.
+func scoreAndSortMovesInner(pos *position, history *historyTable, killers [2]move, moves []move, ply int) {
 	occupied := pos.occupied()
 	color := pos.colorToMove
 	enemyColor := enemyOf(color)
@@ -147,20 +149,30 @@ func scoreAndSortMovesInner(pos *position, history *historyTable, moves []move, 
 	} else {
 		enemyAttacks = enemyPawns.shiftNorthwest() | enemyPawns.shiftNortheast()
 	}
-	enemyPieces &= ^enemyPawns
-	for enemyPieces != 0 {
-		sq := enemyPieces.popLsb()
+	nonPawnEnemy := enemyPieces &^ enemyPawns
+	for nonPawnEnemy != 0 {
+		sq := nonPawnEnemy.popLsb()
 		enemyAttacks |= pieceAttacks(pos.squares[sq], occupied, sq)
 	}
 	for i, m := range moves {
-		captured := m.captured()
 		piece := m.piece()
-		promoted := m.promoted()
-		score := pieceVals[captured] + pieceVals[promoted]
-		if (enemyAttacks & squareBB(m.to())).isNotEmpty() {
-			score -= pieceVals[piece]
+		var score int
+		if m.captured() != noPiece || m.promoted() != noPiece {
+			// SEE replaces MVV-LVA for captures and promotions.
+			seeScore, _ := evaluateStaticExchange(pos, m)
+			score = seeScore * 1000
+		} else {
+			// Quiet move: penalise walking into an enemy attack; boost killers.
+			if (enemyAttacks & squareBB(m.to())).isNotEmpty() {
+				score -= pieceVals[piece] * 1000
+			}
+			if !killers[0].isNone() && killers[0].equal(m) {
+				score += killerScore0
+			} else if !killers[1].isNone() && killers[1].equal(m) {
+				score += killerScore1
+			}
 		}
-		score = score*1000 + int(history.getCount(ply, m))
+		score += int(history.getCount(ply, m))
 		score += pstValue(color, piece, m.to()) - pstValue(color, piece, m.from())
 		moves[i] = m.withScore(score)
 	}
