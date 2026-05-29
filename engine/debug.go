@@ -85,6 +85,6 @@ func dbgxPrint() {
 	}
 	slices.SortFunc(lines, func(a, b dbgxLine) int { return strings.Compare(a.name, b.name) })
 	for _, l := range lines {
-		fmt.Printf("%-25s %10d\n", l.name, l.val)
+		fmt.Printf("%-30s %10d\n", l.name, l.val)
 	}
 }
