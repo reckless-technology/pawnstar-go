@@ -9,6 +9,8 @@ const (
 	initialAlpha = -11000
 	initialBeta  = 11000
 
+	maxNumGoRoutines = 1024
+
 	// checkmatedScore is the base score for checkmate.  It is adjusted by ply so
 	// that shorter mates score higher than longer ones.
 	checkmatedScore = -10000

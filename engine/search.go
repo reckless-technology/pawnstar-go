@@ -177,6 +177,10 @@ func runWorker(ss *searchState, move move, depth, ply, alpha, beta int, resultCh
 	}
 	var pv variation
 	score := searchSingleMove(ss, depth, ply, alpha, beta, move, &pv, 0)
+	if ss.isCancelled() {
+		resultCh <- move.withScore(searchCancelledScore)
+		return
+	}
 	if score >= beta {
 		// Signal to other workers to stop since we found a beta cutoff (null window).
 		ss.wasCutoff.Store(true)
@@ -198,11 +202,11 @@ func searchMovesParallel(ss *searchState, moves []move, depth, ply, alpha, beta 
 	resultChan := make(chan move, len(moves))
 
 	for _, move := range moves {
-		if cutoff.Load() || ss.game.isCancelPending.Load() {
+		if cutoff.Load() || ss.isCancelled() {
 			break
 		}
-		wg.Add(1)
 		dbgx.parallelMovesSearched++
+		wg.Add(1)
 		go runWorker(newWorkerState(ss, &cutoff), move, depth, ply, alpha, beta, resultChan, &wg)
 	}
 
@@ -392,8 +396,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		}
 
 		childDepth := depth
-		if depth > 2 && i > 0 && beta == alpha+1 && !position.isInCheck() && !move.isChecking() &&
-			move.piece() != pawn && move.piece() != king && move.captured() == noPiece {
+		if depth > 2 && i > 0 && beta == alpha+1 && !position.isInCheck() && move.kind() == nonCapture {
 			dbgx.lmrAttempts1++
 			childDepth--
 			if depth > 3 && i > 6 && ss.game.historyTable.getCount(ply, move) == 0 {
@@ -485,6 +488,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 	}
 	if score > alpha {
 		alpha = score
+		dbgx.quiescentEvalRaisesAlpha++
 	}
 	bestScore := score
 	moves := pos.generateLegalCaptures()
@@ -509,6 +513,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 			}
 		}
 	}
+	dbgx.quiescentAllNodes++
 	return bestScore
 }
 
