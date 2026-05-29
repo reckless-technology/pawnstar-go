@@ -618,6 +618,7 @@ func searchRootNode(game *Game) move {
 		for attempt := 0; attempt < 2; attempt++ {
 			var pv variation
 			alpha = aspirAlpha
+			failHigh := false
 
 			for i, move := range moves {
 				score := searchSingleMove(ss, depth, 0, alpha, aspirBeta, move, &pv, i)
@@ -632,10 +633,14 @@ func searchRootNode(game *Game) move {
 					pvStr := pvString(principalVariation)
 					fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
 						depth, alpha, time.Since(startTime).Milliseconds(), ss.nodeCount, pvStr)
+					if score >= aspirBeta {
+						failHigh = true
+						break // window failed high — remaining moves must not be searched with inverted window
+					}
 				}
 			}
 
-			if alpha > aspirAlpha && alpha < aspirBeta || attempt == 1 {
+			if (!failHigh && alpha > aspirAlpha) || attempt == 1 {
 				prevScore = alpha
 				break
 			}
