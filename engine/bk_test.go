@@ -66,7 +66,17 @@ func TestBratkoKopec(t *testing.T) {
 			status = "FAIL"
 			failures++
 		}
-		fmt.Printf("[%s]  pos%02d  got=%-6s  accepted=%-5v  %s\n", status, i+1, got, accepted, tc.fen)
+		fmt.Printf("[%s] pos%02d got=%s accepted=[", status, i+1, got)
+		for i, move := range accepted {
+			if move == "" {
+				break
+			}
+			if i != 0 {
+				fmt.Printf(" ")
+			}
+			fmt.Printf("%s", move)
+		}
+		fmt.Printf("] %s\n", tc.fen)
 	}
 	fmt.Printf("\n%d/24 passed\n", 24-failures)
 	if failures > 0 {
