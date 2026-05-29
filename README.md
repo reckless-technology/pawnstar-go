@@ -227,7 +227,7 @@ All scores are in centipawns from the perspective of the side to move.
 
 **King safety:** King PST switches between midgame and endgame tables via `isEndgame` (true if neither side has a queen, or every queen-side has no rooks and at most one minor piece). In the midgame: a three-row pawn shelter scores friendly pawns +15/+10/+5 and enemy pawns −15/−10/−5 across the three ranks in front of the king; open files near the king score −15 (king's file) and −10 (adjacent files); friendly non-pawn pieces score +10 (adjacent ring) and +5 (two-square ring).
 
-An alpha/beta material early-exit skips the full evaluation when the material score alone is more than 200 cp outside the search window. Results are cached in a 64 K-entry `evalHashTable` with 256 striped `sync.Mutex` locks.
+An alpha/beta material early-exit skips the full evaluation when the material score alone is more than 200 cp outside the search window. Results are cached in a 64 K-entry `evalHashTable`; each entry carries its own `lock uint32` spinlock (atomic CAS/store), matching the transposition table's locking design.
 
 **Static Exchange Evaluation** ([engine/see.go](engine/see.go)) simulates the sequence of captures on a square using the least-valuable-attacker method, propagating scores backwards so each side can choose not to recapture if it would lose material. Used in move ordering to distinguish winning from losing captures.
 
