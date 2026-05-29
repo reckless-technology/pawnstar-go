@@ -38,7 +38,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 	occupied := position.occupied()
 	friendlyPieces := position.piecesOfColor(color)
 	enemyPieces := occupied ^ friendlyPieces
-	enemyPawns := position.pawns & enemyPieces
+	enemyPawns := position.pieces[pawn] & enemyPieces
 	kingLocation := position.kingLocation[color]
 
 	// Build forbidden squares for the king by computing all enemy attacks
@@ -149,7 +149,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 	)
 
 	if color == white {
-		pawns = position.pawns & friendlyPieces
+		pawns = position.pieces[pawn] & friendlyPieces
 		singlePushes = pawns.shiftNorth() & ^occupied
 		doublePushes = singlePushes.shiftNorth() & ^occupied & rank4
 		capturesWest = pawns.shiftNorthwest() & enemyPieces
@@ -162,7 +162,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 		eastDelta = 9
 		promoRank = rank8
 	} else {
-		pawns = position.pawns & friendlyPieces
+		pawns = position.pieces[pawn] & friendlyPieces
 		singlePushes = pawns.shiftSouth() & ^occupied
 		doublePushes = singlePushes.shiftSouth() & ^occupied & rank5
 		capturesWest = pawns.shiftSouthwest() & enemyPieces
@@ -262,7 +262,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 			if kingLocation.rank() == from.rank() {
 				pseudoOcc := occupied ^ squareBB(capturedSq) ^ squareBB(from)
 				horizontalAttacks := rookAttacks(pseudoOcc, kingLocation) & (westOf[kingLocation] | eastOf[kingLocation])
-				if (horizontalAttacks & position.piecesOfColor(enemyOf(color)) & (position.rooks | position.queens)).isNotEmpty() {
+				if (horizontalAttacks & position.piecesOfColor(enemyOf(color)) & (position.pieces[rook] | position.pieces[queen])).isNotEmpty() {
 					continue
 				}
 			}

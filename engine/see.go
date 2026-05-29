@@ -15,16 +15,7 @@ type seeBoard struct {
 
 // newSeeBoard initialises a seeBoard from the piece bitboards of pos.
 func newSeeBoard(pos *position) seeBoard {
-	var b seeBoard
-	b.pieces[pawn] = pos.pawns
-	b.pieces[knight] = pos.knights
-	b.pieces[bishop] = pos.bishops
-	b.pieces[rook] = pos.rooks
-	b.pieces[queen] = pos.queens
-	b.pieces[king] = pos.kings
-	b.colors[white] = pos.whitePieces
-	b.colors[black] = pos.blackPieces
-	return b
+	return seeBoard{pieces: pos.pieces, colors: pos.colors}
 }
 
 // evaluateStaticExchange returns the SEE score for m (positive = winning capture)

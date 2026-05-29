@@ -142,7 +142,7 @@ func scoreAndSortMovesInner(pos *position, history *historyTable, killers [2]mov
 	color := pos.colorToMove
 	enemyColor := enemyOf(color)
 	enemyPieces := pos.piecesOfColor(enemyColor)
-	enemyPawns := enemyPieces & pos.pawns
+	enemyPawns := enemyPieces & pos.pieces[pawn]
 	var enemyAttacks bitboard
 	if color == white {
 		enemyAttacks = enemyPawns.shiftSouthwest() | enemyPawns.shiftSoutheast()
