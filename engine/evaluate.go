@@ -175,13 +175,13 @@ func pstValue(c color, p piece, sq square) int {
 	case pawn:
 		return 100 + pawnSquare[sq^flip]
 	case knight:
-		return 300 + knightSquare[sq^flip]
+		return 350 + knightSquare[sq^flip]
 	case bishop:
-		return 300 + bishopSquare[sq^flip]
+		return 350 + bishopSquare[sq^flip]
 	case rook:
-		return 500 + rookSquare[sq^flip]
+		return 525 + rookSquare[sq^flip]
 	case queen:
-		return 900 + queenSquare[sq^flip]
+		return 1000 + queenSquare[sq^flip]
 	}
 	return 0
 }
