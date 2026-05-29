@@ -154,7 +154,7 @@ func (ss *searchState) isCancelled() bool {
 // workers.  Only the main search (cutoff == nil) is allowed; workers never
 // spawn sub-workers.
 func (ss *searchState) canGoParallel(depth int) bool {
-	return ss.wasCutoff == nil && depth >= 4 && len(ss.game.parallelSlots) > 0
+	return ss.wasCutoff == nil && depth >= 0 && len(ss.game.parallelSlots) > 0
 }
 
 // scoreAndSortMoves assigns sort scores to moves and sorts them descending.
@@ -348,7 +348,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		pstScore = -pstScore
 	}
 	if beta == alpha+1 && pstScore > (beta+100) && !position.isNullMove() && !position.isInCheck() &&
-		position.piecesOfColor(position.colorToMove).popCount() > 3 {
+		position.colors[position.colorToMove].popCount() > 3 {
 		ss.makeNullMove()
 		dbgx.nullMoveAttempts++
 		var dummy variation
@@ -611,17 +611,17 @@ func searchRootNode(game *Game) move {
 		bestMoves = append(bestMoves, bestMove)
 		ss.nodeCount = 0
 
-		aspirAlpha := max(initialAlpha, prevScore-aspirDelta)
-		aspirBeta := min(initialBeta, prevScore+aspirDelta)
+		alphaAspiration := max(initialAlpha, prevScore-aspirationDelta)
+		betaAspiration := min(initialBeta, prevScore+aspirationDelta)
 		alpha := initialAlpha
 
 		for attempt := 0; attempt < 2; attempt++ {
 			var pv variation
-			alpha = aspirAlpha
-			failHigh := false
+			alpha = alphaAspiration
+			hasFailedHigh := false
 
 			for i, move := range moves {
-				score := searchSingleMove(ss, depth, 0, alpha, aspirBeta, move, &pv, i)
+				score := searchSingleMove(ss, depth, 0, alpha, betaAspiration, move, &pv, i)
 				moves[i] = move.withScore(score)
 				if ss.isCancelled() {
 					return bestMove
@@ -633,14 +633,14 @@ func searchRootNode(game *Game) move {
 					pvStr := pvString(principalVariation)
 					fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
 						depth, alpha, time.Since(startTime).Milliseconds(), ss.nodeCount, pvStr)
-					if score >= aspirBeta {
-						failHigh = true
+					if score >= betaAspiration {
+						hasFailedHigh = true
 						break // window failed high — remaining moves must not be searched with inverted window
 					}
 				}
 			}
 
-			if (!failHigh && alpha > aspirAlpha) || attempt == 1 {
+			if (!hasFailedHigh && alpha > alphaAspiration) || attempt == 1 {
 				prevScore = alpha
 				break
 			}
@@ -648,8 +648,8 @@ func searchRootNode(game *Game) move {
 				return bestMove
 			}
 			dbgx.aspirationFails++
-			aspirAlpha = initialAlpha
-			aspirBeta = initialBeta
+			alphaAspiration = initialAlpha
+			betaAspiration = initialBeta
 		}
 
 		if alpha > winThreshold || alpha < loseThreshold {

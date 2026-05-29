@@ -36,7 +36,7 @@ const (
 func (position *position) generateMoves(color color, doAllMoves bool) []move {
 	moves := make([]move, 0, 64)
 	occupied := position.occupied()
-	friendlyPieces := position.piecesOfColor(color)
+	friendlyPieces := position.colors[color]
 	enemyPieces := occupied ^ friendlyPieces
 	enemyPawns := position.pieces[pawn] & enemyPieces
 	kingLocation := position.kingLocation[color]
@@ -51,7 +51,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 	}
 	occExceptKing := occupied ^ squareBB(kingLocation)
 	for piece := knight; piece <= king; piece++ {
-		for b := *position.piecesOfType(piece) & enemyPieces; b.isNotEmpty(); {
+		for b := position.pieces[piece] & enemyPieces; b.isNotEmpty(); {
 			s := b.popLsb()
 			forbidden |= pieceAttacks(piece, occExceptKing, s)
 		}
@@ -87,7 +87,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 
 	// Piece moves (knight, bishop, rook, queen).
 	for piece := knight; piece <= queen; piece++ {
-		for b := *position.piecesOfType(piece) & friendlyPieces; b.isNotEmpty(); {
+		for b := position.pieces[piece] & friendlyPieces; b.isNotEmpty(); {
 			from := b.popLsb()
 			attacks := pieceAttacks(piece, occupied, from) & pinInfo.allowedSquares(from)
 			for captures := attacks & allowedCaptures; captures.isNotEmpty(); {
@@ -262,7 +262,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 			if kingLocation.rank() == from.rank() {
 				pseudoOcc := occupied ^ squareBB(capturedSq) ^ squareBB(from)
 				horizontalAttacks := rookAttacks(pseudoOcc, kingLocation) & (westOf[kingLocation] | eastOf[kingLocation])
-				if (horizontalAttacks & position.piecesOfColor(enemyOf(color)) & (position.pieces[rook] | position.pieces[queen])).isNotEmpty() {
+				if (horizontalAttacks & position.colors[enemyOf(color)] & (position.pieces[rook] | position.pieces[queen])).isNotEmpty() {
 					continue
 				}
 			}

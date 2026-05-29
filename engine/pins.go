@@ -17,7 +17,7 @@ func computePins(pos *position) pins {
 	var p pins
 	color := pos.colorToMove
 	occupied := pos.occupied()
-	friendlyPieces := pos.piecesOfColor(color)
+	friendlyPieces := pos.colors[color]
 	kingLocation := pos.kingLocation[color]
 	intervening := &interveningSquares[kingLocation]
 

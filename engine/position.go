@@ -45,15 +45,6 @@ func (position *position) isInCheck() bool { return position.checkers.isNotEmpty
 // occupied returns a bitboard of all squares containing any piece.
 func (position *position) occupied() bitboard { return position.colors[white] | position.colors[black] }
 
-// piecesOfColor returns the bitboard of all pieces belonging to color c.
-func (position *position) piecesOfColor(c color) bitboard { return position.colors[c] }
-
-// piecesOfColorPtr returns a pointer to the bitboard for all pieces of color c.
-func (position *position) piecesOfColorPtr(c color) *bitboard { return &position.colors[c] }
-
-// piecesOfType returns a pointer to the bitboard for piece type p.
-func (position *position) piecesOfType(p piece) *bitboard { return &position.pieces[p] }
-
 // addPiece places p of color c on sq and updates the bitboards, squares array,
 // Zobrist hash, and incremental PST score.
 func (position *position) addPiece(c color, p piece, sq square) {
