@@ -87,18 +87,20 @@ func (ss *searchState) currentPosition() *position {
 // playMove appends a copy of the current position to posStack, applies m to it,
 // and records the resulting (hash, halfMove) in hashStack.
 func (ss *searchState) playMove(m move) {
-	ss.posStack = append(ss.posStack, ss.posStack[len(ss.posStack)-1])
-	ss.posStack[len(ss.posStack)-1].makeMove(m)
-	pos := &ss.posStack[len(ss.posStack)-1]
+	n := len(ss.posStack)
+	ss.posStack = append(ss.posStack, ss.posStack[n-1])
+	ss.posStack[n].makeMove(m)
+	pos := &ss.posStack[n]
 	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
 }
 
 // makeNullMove appends a copy of the current position to posStack, applies a
 // null move to it, and records the resulting (hash, halfMove) in hashStack.
 func (ss *searchState) makeNullMove() {
-	ss.posStack = append(ss.posStack, ss.posStack[len(ss.posStack)-1])
-	ss.posStack[len(ss.posStack)-1].makeNullMove()
-	pos := &ss.posStack[len(ss.posStack)-1]
+	n := len(ss.posStack)
+	ss.posStack = append(ss.posStack, ss.posStack[n-1])
+	ss.posStack[n].makeNullMove()
+	pos := &ss.posStack[n]
 	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
 }
 
