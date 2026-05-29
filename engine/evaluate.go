@@ -7,18 +7,21 @@ import "sync/atomic"
 // Black reads the table directly; White reads via sq^rankFlip to mirror ranks.
 
 // evalHashEntry is a single slot in the evaluation hash table.
+// lock sits in the 4 bytes of natural padding that would follow score on a
+// 64-bit platform, keeping the struct at 24 bytes with no wasted space.
 type evalHashEntry struct {
-	hash  zobrist // Zobrist hash of the position
-	score int     // cached evaluation score (centipawns, side-to-move perspective)
-	lock  uint32  // per-entry spinlock: 0 = unlocked, 1 = locked
+	hash  zobrist // Zobrist hash of the stored position; used to detect index collisions
+	score int     // cached evaluation in centipawns, from the side-to-move's perspective
+	lock  uint32  // per-entry CAS spinlock: 0 = unlocked, 1 = locked
 }
 
-// evalHashTable is a fixed-size cache for evaluated positions.
-// Each entry carries its own spinlock so concurrent workers contend only when
-// they happen to evaluate the same position simultaneously.
+// evalHashTable is a fixed-size direct-mapped cache for static evaluations.
+// The table size is always a power of 2 so entries are indexed with a bitmask.
+// Each entry carries its own spinlock so concurrent workers only contend when
+// they evaluate the exact same position simultaneously.
 type evalHashTable struct {
-	entries []evalHashEntry // flat array indexed by hash % len(entries)
-	mask    zobrist
+	entries []evalHashEntry // flat array; entry for hash is at entries[hash & mask]
+	mask    zobrist         // len(entries)-1; used to index entries via hash & mask
 }
 
 // newEvalHashTable allocates an evaluation hash table with count slots.
@@ -183,8 +186,10 @@ func pstValue(c color, p piece, sq square) int {
 	return 0
 }
 
-// isEndgame returns true when neither side has a queen, or every side that has a
-// queen also has no rooks and at most one minor piece.
+// isEndgame reports whether the position is in the endgame phase for the
+// purpose of selecting the king's piece-square table.  Returns true when no
+// side has a queen, or when every side that owns a queen has no rooks and at
+// most one minor piece alongside it.
 func isEndgame(pos *position) bool {
 	for c := white; c <= black; c++ {
 		friendly := pos.colors[c]

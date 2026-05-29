@@ -7,12 +7,13 @@ type pins struct {
 	allowed [64]bitboard // allowed[sq] is the legal destination set for the pinned piece on sq
 }
 
-// computePins finds all absolutely pinned pieces for the side to move.
+// computePins finds all absolutely pinned pieces for the side to move and
+// records the set of squares each pinned piece may legally move to.
 //
-// A piece is pinned if it is the sole occupant between the king and an enemy
-// slider on a shared ray.  For each such piece, the legal destination set is
-// restricted to that ray (including the pinner's square, so the pinner can be
-// captured).
+// A piece is absolutely pinned if it is the only piece on the ray between the
+// king and an enemy slider (bishop, rook, or queen).  A pinned piece may only
+// move along that ray — which includes the pinner's square so the pinner can
+// be captured, but excludes moving off the ray entirely.
 func computePins(pos *position) pins {
 	var p pins
 	color := pos.colorToMove
@@ -40,8 +41,10 @@ func computePins(pos *position) pins {
 	return p
 }
 
-// allowedSquares returns the squares that the piece on sq may legally move to,
-// accounting for pin constraints.  Returns all squares for an unpinned piece.
+// allowedSquares returns the set of squares the piece on sq may legally move to,
+// given the pin constraints computed by computePins.  For an unpinned piece this
+// is the full board (^bitboard(0)); for a pinned piece it is the ray between the
+// king and the pinner, including the pinner's square.
 func (p *pins) allowedSquares(sq square) bitboard {
 	if (squareBB(sq) & p.pinned).isNotEmpty() {
 		return p.allowed[sq]

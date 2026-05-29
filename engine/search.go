@@ -8,14 +8,13 @@ import (
 	"time"
 )
 
-// hashStackEntry is a compact position record used exclusively for repetition detection.
-// It captures only the two fields that isDrawByRepetition needs from a position:
-// the Zobrist hash (to detect equal positions) and the half-move clock (to stop
-// scanning at an irreversible move boundary).  At 16 bytes it is 10.5× smaller
-// than a full position (168 bytes), which is the key to cheap worker forks.
+// hashStackEntry is a compact position record used exclusively by isDrawByRepetition.
+// Storing only the Zobrist hash and the half-move clock (16 bytes total) instead of a
+// full position (168 bytes) makes worker fork cost proportional to depth rather than
+// board complexity, and keeps the repetition scan cache-friendly.
 type hashStackEntry struct {
-	hash          zobrist // Zobrist hash of the position
-	halfMoveClock uint8   // half-move clock at this position (for 50-move / repetition cutoff)
+	hash          zobrist // Zobrist hash identifies the position
+	halfMoveClock uint8   // clock value at this position; a zero entry marks an irreversible move boundary
 }
 
 // searchState holds all mutable state for one search goroutine.  Both the main
@@ -34,10 +33,10 @@ type hashStackEntry struct {
 // tt, history, evalTable, and game (for time control and the cancel flag) are
 // shared via pointer with zero copying.
 type searchState struct {
-	posStack  []position       // copy-make stack: starts with 1 entry (fork position), grows during search
-	hashStack []hashStackEntry // compact history for repetition detection: game history + search path
-	killers   [maxPly][2]move  // killer moves: quiet moves that caused beta cutoffs, indexed by ply
-	nodeCount int              // Node count for this goroutine.
+	posStack  []position       // copy-make stack: one entry per move played; seeded with the fork position
+	hashStack []hashStackEntry // full history from game start through current node, for repetition detection
+	killers   [maxPly][2]move  // per-ply quiet moves that recently caused beta cutoffs
+	nodeCount int              // nodes searched by this goroutine since the last root iteration reset
 	game      *Game            // shared: time control, cancel flag, parallel semaphore, TT, history, eval table
 	wasCutoff *atomic.Bool     // per-batch cutoff signal; nil for the main search
 }
@@ -69,10 +68,11 @@ func newSearchStateFromGame(game *Game) *searchState {
 	return newSearchState(hs, &game.posStack[n-1], game, nil)
 }
 
-// newWorkerState creates a searchState for a parallel worker.
-// posStack is seeded with the parent's current position (1 entry, 168 bytes).
-// hashStack is copied from the parent (compact: 16 bytes × n entries).
-// All other state is shared via pointer.
+// newWorkerState creates a searchState for a parallel worker branching from parent.
+// posStack is seeded with a single entry (the fork position) — O(1) to create.
+// hashStack is copied in full so the worker can detect repetitions against the
+// complete game history; at 16 bytes per entry this is ~10× cheaper than copying
+// posStack would be.  All shared state is accessed via the game pointer.
 func newWorkerState(parent *searchState, cutoff *atomic.Bool) *searchState {
 	n := len(parent.hashStack)
 	hs := make([]hashStackEntry, n, n+maxPly+4)
@@ -117,10 +117,13 @@ func (ss *searchState) isDrawByFiftyMoves() bool {
 	return ss.currentPosition().halfMove >= 100
 }
 
-// isDrawByRepetition returns true if the current position has occurred twice
+// isDrawByRepetition reports whether the current position has appeared twice
 // before in the combined game + search history (three occurrences total).
-// It scans hashStack backwards in two-ply steps (same side to move) and stops
-// early at an irreversible move (halfMove == 0).
+// The scan steps backwards in two-ply increments so only positions with the
+// same side to move are compared.  It stops early at an irreversible move
+// (halfMoveClock == 0) because repetitions cannot cross a pawn move or capture.
+// A minimum of five entries is required: positions 0, 2, and 4 would be the
+// earliest possible three-fold repetition.
 func (ss *searchState) isDrawByRepetition() bool {
 	n := len(ss.hashStack)
 	if n < 5 {
@@ -157,13 +160,17 @@ func (ss *searchState) canGoParallel(depth int) bool {
 	return ss.wasCutoff == nil && depth >= 0 && len(ss.game.parallelSlots) > 0
 }
 
-// scoreAndSortMoves assigns sort scores to moves and sorts them descending.
+// scoreAndSortMoves scores and sorts moves at ply using SEE for captures,
+// killer bonuses for quiet moves that previously caused cutoffs, and the
+// history heuristic for all quiet moves.
 func (ss *searchState) scoreAndSortMoves(moves []move, ply int) {
 	scoreAndSortMovesInner(ss.currentPosition(), &ss.game.historyTable, ss.killers[ply], moves, ply)
 }
 
-// updateKillers records m as a killer at ply if it is a quiet move and not
-// already the first killer.  The second killer is displaced by the first.
+// updateKillers records m as the primary killer at ply, shifting the existing
+// primary into the secondary slot.  Only nonCapture moves are stored; captures
+// are already ordered by SEE and do not benefit from the killer heuristic.
+// A move already occupying the primary slot is not duplicated.
 func (ss *searchState) updateKillers(ply int, m move) {
 	if m.kind() != nonCapture {
 		return
@@ -174,9 +181,11 @@ func (ss *searchState) updateKillers(ply int, m move) {
 	}
 }
 
-// runWorker is the body of a parallel search goroutine.  It blocks until a
-// slot is free, searches m with a null window, signals cutoff on fail-high,
-// and sends the scored move to resultCh.
+// runWorker is the body of a parallel search goroutine.  It acquires a slot
+// from the parallelSlots semaphore (blocking if all slots are busy), searches
+// move with a null window [alpha, alpha+1], and on a fail-high signals the
+// per-batch wasCutoff flag so sibling workers abort early.  The result is
+// sent to resultCh as a move with the search score packed into bits 32–63.
 func runWorker(ss *searchState, move move, depth, ply, alpha, beta int, resultCh chan<- move, wg *sync.WaitGroup) {
 	if beta != alpha+1 {
 		panic("runWorker called on non null window")
@@ -204,7 +213,10 @@ func runWorker(ss *searchState, move move, depth, ply, alpha, beta int, resultCh
 	resultCh <- move.withScore(score)
 }
 
-// searchMovesParallel dispatches moves to parallel workers and returns the best move found (with score packed in).
+// searchMovesParallel dispatches each move in moves to a separate goroutine via
+// runWorker and returns the best-scoring result with its score packed in.
+// All searches use the null window [alpha, alpha+1]; a fail-high from any
+// worker sets the shared cutoff flag so the others abort promptly.
 func searchMovesParallel(ss *searchState, moves []move, depth, ply, alpha, beta int) move {
 	if beta != alpha+1 {
 		panic("searchMovesParallel called on non null window")

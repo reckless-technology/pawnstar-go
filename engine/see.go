@@ -14,8 +14,8 @@ type seeBoard struct {
 }
 
 // newSeeBoard initialises a seeBoard from the piece bitboards of pos.
-func newSeeBoard(pos *position) seeBoard {
-	return seeBoard{pieces: pos.pieces, colors: pos.colors}
+func newSeeBoard(pos *position) *seeBoard {
+	return &seeBoard{pieces: pos.pieces, colors: pos.colors}
 }
 
 // evaluateStaticExchange returns the SEE score for m (positive = winning capture)
@@ -32,18 +32,25 @@ func evaluateStaticExchange(pos *position, move move) (int, bool) {
 	captured := move.captured()
 	if promoted != noPiece {
 		s := seeValues[captured] + seeValues[promoted] - seeValues[pawn] -
-			evaluateSwapOff(&bb, move.to(), nextColor, promoted)
+			evaluateSwapOff(bb, move.to(), nextColor, promoted)
 		return s, isChecking
 	}
-	s := seeValues[captured] - evaluateSwapOff(&bb, move.to(), nextColor, piece)
+	s := seeValues[captured] - evaluateSwapOff(bb, move.to(), nextColor, piece)
 	return s, isChecking
 }
 
-// evaluateSwapOff simulates the sequence of recaptures on location starting with
-// color playing pieceOnSquare.  Returns the gain for the side that just captured,
-// accounting for the fact that each side will only recapture when it is beneficial.
-// Uses the classic "negamax unwind" technique: scores are computed forward then
-// propagated backward so each side can choose whether to recapture.
+// evaluateSwapOff simulates the full exchange sequence on location, starting with
+// color recapturing pieceOnSquare with its least-valuable available attacker.
+// It returns the net material gain for the side that initiated the sequence (the
+// caller), after both sides play optimally — each side only recaptures when it
+// is profitable to do so.
+//
+// Implementation: gains are accumulated in a forward pass using the least-valuable
+// attacker (LVA) ordering, then unwound with the recurrence
+//
+//	gain[i] = max(0, capturedValue − gain[i+1])
+//
+// which lets each side "stand pat" rather than recapture into a loss.
 func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare piece) int {
 	var pawnTargets bitboard
 	if color == white {
