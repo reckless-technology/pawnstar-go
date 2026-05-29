@@ -625,12 +625,13 @@ func searchRootNode(game *Game) move {
 
 		alphaAspiration := max(initialAlpha, prevScore-aspirationDelta)
 		betaAspiration := min(initialBeta, prevScore+aspirationDelta)
-		alpha := initialAlpha
+		alpha := alphaAspiration
 
 		for attempt := 0; attempt < 2; attempt++ {
 			var pv variation
 			alpha = alphaAspiration
 			hasFailedHigh := false
+			hasRaisedAlpha := false
 
 			for i, move := range moves {
 				score := searchSingleMove(ss, depth, 0, alpha, betaAspiration, move, &pv, i)
@@ -639,6 +640,7 @@ func searchRootNode(game *Game) move {
 					return bestMove
 				}
 				if score > alpha {
+					hasRaisedAlpha = true
 					alpha = score
 					bestMove = move
 					copyVariation(&principalVariation, pv, bestMove)
@@ -652,17 +654,18 @@ func searchRootNode(game *Game) move {
 				}
 			}
 
-			if (!hasFailedHigh && alpha > alphaAspiration) || attempt == 1 {
-				prevScore = alpha
-				break
-			}
 			if ss.isCancelled() {
 				return bestMove
+			}
+
+			if hasRaisedAlpha && !hasFailedHigh {
+				break
 			}
 			dbgx.aspirationFails++
 			alphaAspiration = initialAlpha
 			betaAspiration = initialBeta
 		}
+		prevScore = alpha // update seed for next depth's aspiration window
 
 		if alpha > winThreshold || alpha < loseThreshold {
 			break
