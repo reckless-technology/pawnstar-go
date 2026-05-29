@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,7 +49,7 @@ type Game struct {
 
 // NewGame creates an engine instance ready to accept UCI commands.
 func NewGame() *Game {
-	n := runtime.NumCPU()
+	n := 1000
 	if n < 1 {
 		n = 1
 	}
