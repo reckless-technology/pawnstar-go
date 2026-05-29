@@ -15,19 +15,18 @@ import (
 // addPiece, removePiece, and movePiece so evaluation and hashing are O(1)
 // at every node.
 type position struct {
-	pieces       [7]bitboard    // per-piece-type occupancy; index = piece constant (pawn=1..king=6, 0 unused)
-	colors       [2]bitboard    // per-color occupancy; colors[white]|colors[black] == occupied()
-	squares      [64]piece      // reverse lookup: squares[sq] gives the piece type on sq, or noPiece
-	checkers     bitboard       // pieces currently giving check to the side to move; refreshed by makeMove
-	hash         zobrist        // Zobrist hash; updated incrementally, recomputed from scratch only in positionFromFen
-	scores       [2]int         // material + PST totals per color, king excluded (king PST is phase-dependent)
-	kingLocation [2]square      // king square per color; mirrors pieces[king] for direct O(1) access in hot paths
-	epSquare     square         // target square of the last double pawn push, or noSquare if none
-	halfMove     uint8          // half-move clock; reset on pawn moves and captures; draw at 100
-	fullMove     uint8          // full-move number stored 0-based (add 1 when writing FEN)
-	flags        uint8          // transient move flags; currently only flagNullMove
-	castling     castlingRights // which castling moves remain legal for each side
-	colorToMove  color          // side whose turn it is to move
+	pieces      [7]bitboard    // per-piece-type occupancy; index = piece constant (pawn=1..king=6, 0 unused)
+	colors      [2]bitboard    // per-color occupancy; colors[white]|colors[black] == occupied()
+	squares     [64]piece      // reverse lookup: squares[sq] gives the piece type on sq, or noPiece
+	checkers    bitboard       // pieces currently giving check to the side to move; refreshed by makeMove
+	hash        zobrist        // Zobrist hash; updated incrementally, recomputed from scratch only in positionFromFen
+	scores      [2]int32       // material + PST totals per color, king excluded (king PST is phase-dependent)
+	epSquare    square         // target square of the last double pawn push, or noSquare if none
+	halfMove    uint8          // half-move clock; reset on pawn moves and captures; draw at 100
+	fullMove    uint8          // full-move number stored 0-based (add 1 when writing FEN)
+	flags       uint8          // transient move flags; currently only flagNullMove
+	castling    castlingRights // which castling moves remain legal for each side
+	colorToMove color          // side whose turn it is to move
 }
 
 const (
@@ -42,6 +41,11 @@ func (position *position) isInCheck() bool { return position.checkers.isNotEmpty
 
 // occupied returns a bitboard of all squares containing any piece.
 func (position *position) occupied() bitboard { return position.colors[white] | position.colors[black] }
+
+// kingSquare returns the square occupied by the king of color c.
+func (position *position) kingSquare(c color) square {
+	return (position.pieces[king] & position.colors[c]).lsb()
+}
 
 // addPiece places p of color c on sq and updates the bitboards, squares array,
 // Zobrist hash, and incremental PST score.
@@ -131,9 +135,6 @@ func positionFromFen(fen string) position {
 		pos.colorToMove = black
 	}
 
-	pos.kingLocation[white] = (pos.pieces[king] & pos.colors[white]).lsb()
-	pos.kingLocation[black] = (pos.pieces[king] & pos.colors[black]).lsb()
-
 	// Castling rights
 	if len(fields) > 2 {
 		pos.castling = castlingRightsFromFen(fields[2])
@@ -158,7 +159,7 @@ func positionFromFen(fen string) position {
 
 	pos.hash = pos.computeHash()
 	c := pos.colorToMove
-	pos.checkers = pos.attacksTo(pos.kingLocation[c], enemyOf(c))
+	pos.checkers = pos.attacksTo(pos.kingSquare(c), enemyOf(c))
 	return pos
 }
 
@@ -307,8 +308,7 @@ func (position *position) makeMove(m move) {
 	if color == black {
 		position.fullMove++
 	}
-	position.kingLocation[color] = (position.pieces[king] & position.colors[color]).lsb()
-	position.checkers = position.attacksTo(position.kingLocation[enemyOf(color)], color)
+	position.checkers = position.attacksTo(position.kingSquare(enemyOf(color)), color)
 }
 
 // makeNullMove passes the turn without moving a piece.  Used by null-move pruning.

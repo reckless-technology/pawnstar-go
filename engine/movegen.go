@@ -39,7 +39,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 	friendlyPieces := position.colors[color]
 	enemyPieces := occupied ^ friendlyPieces
 	enemyPawns := position.pieces[pawn] & enemyPieces
-	kingLocation := position.kingLocation[color]
+	kingLocation := position.kingSquare(color)
 
 	// Build forbidden squares for the king by computing all enemy attacks
 	// (temporarily removing our king so X-ray attacks are included).

@@ -311,7 +311,7 @@ func evalKing(pos *position, color color, endgame bool) int {
 	enemyColor := enemyOf(color)
 	friendlyPawns := friendly & pos.pieces[pawn]
 	enemyPawns := pos.colors[enemyColor] & pos.pieces[pawn]
-	kingLocation := pos.kingLocation[color]
+	kingLocation := pos.kingSquare(color)
 
 	var pstScore int
 	if endgame {
