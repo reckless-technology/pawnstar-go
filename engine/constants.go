@@ -49,8 +49,8 @@ const (
 	// evalHashTableSize is the number of slots in the evaluation hash table.
 	evalHashTableSize = 0x10000
 
-	// aspirDelta is the initial aspiration window half-width in centipawns.
-	aspirDelta = 50
+	// aspirationDelta is the initial aspiration window half-width in centipawns.
+	aspirationDelta = 50
 
 	// killerScore0 and killerScore1 are added to a quiet move's sort score when
 	// it matches the first or second killer at the current ply.  Values are chosen
