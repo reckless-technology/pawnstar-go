@@ -6,57 +6,25 @@ var seeValues = [7]int{0, 100, 300, 300, 500, 900, 10000}
 
 // seeBoard is a lightweight copy of the piece bitboards used during SEE so that
 // pieces can be removed as the exchange sequence is simulated without mutating
-// the real position.
+// the real position.  pieces is indexed by piece type (noPiece=0 unused, pawn=1
+// through king=6); colors is indexed by color (white=0, black=1).
 type seeBoard struct {
-	pawns       bitboard // all pawns (both colours)
-	knights     bitboard // all knights
-	bishops     bitboard // all bishops
-	rooks       bitboard // all rooks
-	queens      bitboard // all queens
-	kings       bitboard // all kings
-	whitePieces bitboard // all White pieces
-	blackPieces bitboard // all Black pieces
+	pieces [7]bitboard
+	colors [2]bitboard
 }
 
 // newSeeBoard initialises a seeBoard from the piece bitboards of pos.
 func newSeeBoard(pos *position) seeBoard {
-	return seeBoard{
-		pawns:       pos.pawns,
-		knights:     pos.knights,
-		bishops:     pos.bishops,
-		rooks:       pos.rooks,
-		queens:      pos.queens,
-		kings:       pos.kings,
-		whitePieces: pos.whitePieces,
-		blackPieces: pos.blackPieces,
-	}
-}
-
-// piecesOfType returns a pointer to the bitboard for piece type p.
-func (b *seeBoard) piecesOfType(p piece) *bitboard {
-	switch p {
-	case pawn:
-		return &b.pawns
-	case knight:
-		return &b.knights
-	case bishop:
-		return &b.bishops
-	case rook:
-		return &b.rooks
-	case queen:
-		return &b.queens
-	case king:
-		return &b.kings
-	}
-	return nil
-}
-
-// piecesOfColor returns a pointer to the bitboard for all pieces of color c.
-func (b *seeBoard) piecesOfColor(c color) *bitboard {
-	if c == white {
-		return &b.whitePieces
-	}
-	return &b.blackPieces
+	var b seeBoard
+	b.pieces[pawn] = pos.pawns
+	b.pieces[knight] = pos.knights
+	b.pieces[bishop] = pos.bishops
+	b.pieces[rook] = pos.rooks
+	b.pieces[queen] = pos.queens
+	b.pieces[king] = pos.kings
+	b.colors[white] = pos.whitePieces
+	b.colors[black] = pos.blackPieces
+	return b
 }
 
 // evaluateStaticExchange returns the SEE score for m (positive = winning capture)
@@ -95,47 +63,47 @@ func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare p
 	knightTargets := knightAttacks[location]
 	kingTargets := kingAttacks[location]
 	sqBB := squareBB(location)
-	occupied := bb.whitePieces | bb.blackPieces
+	occupied := bb.colors[white] | bb.colors[black]
 	var scores [32]int
 	ply := 0
 	for ; ply < 32; ply++ {
-		attackingPieces := *bb.piecesOfColor(color)
+		attackingPieces := bb.colors[color]
 		var capturingPiece piece
 		var attackers, bishopTargets, rookTargets bitboard
 
-		attackers = pawnTargets & attackingPieces & bb.pawns
+		attackers = pawnTargets & attackingPieces & bb.pieces[pawn]
 		if attackers.isNotEmpty() {
 			capturingPiece = pawn
 			goto AttackFound
 		}
 
-		attackers = knightTargets & attackingPieces & bb.knights
+		attackers = knightTargets & attackingPieces & bb.pieces[knight]
 		if attackers.isNotEmpty() {
 			capturingPiece = knight
 			goto AttackFound
 		}
 
 		bishopTargets = bishopAttacks(occupied, location)
-		attackers = bishopTargets & attackingPieces & bb.bishops
+		attackers = bishopTargets & attackingPieces & bb.pieces[bishop]
 		if attackers.isNotEmpty() {
 			capturingPiece = bishop
 			goto AttackFound
 		}
 
 		rookTargets = rookAttacks(occupied, location)
-		attackers = rookTargets & attackingPieces & bb.rooks
+		attackers = rookTargets & attackingPieces & bb.pieces[rook]
 		if attackers.isNotEmpty() {
 			capturingPiece = rook
 			goto AttackFound
 		}
 
-		attackers = (bishopTargets | rookTargets) & attackingPieces & bb.queens
+		attackers = (bishopTargets | rookTargets) & attackingPieces & bb.pieces[queen]
 		if attackers.isNotEmpty() {
 			capturingPiece = queen
 			goto AttackFound
 		}
 
-		attackers = kingTargets & attackingPieces & bb.kings
+		attackers = kingTargets & attackingPieces & bb.pieces[king]
 		if attackers.isNotEmpty() {
 			capturingPiece = king
 			goto AttackFound
@@ -149,10 +117,10 @@ func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare p
 		// Use only the least-valuable attacker (LSB of attackers).
 		attacker := attackers & (-attackers)
 		enemy := enemyOf(color)
-		*bb.piecesOfType(pieceOnSquare) ^= sqBB
-		*bb.piecesOfColor(enemy) ^= sqBB
-		*bb.piecesOfType(capturingPiece) ^= attacker | sqBB
-		*bb.piecesOfColor(color) ^= attacker | sqBB
+		bb.pieces[pieceOnSquare] ^= sqBB
+		bb.colors[enemy] ^= sqBB
+		bb.pieces[capturingPiece] ^= attacker | sqBB
+		bb.colors[color] ^= attacker | sqBB
 		occupied ^= attacker
 		scores[ply] = seeValues[pieceOnSquare]
 		pieceOnSquare = capturingPiece
@@ -161,8 +129,8 @@ func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare p
 		// Pawn reaching the back rank promotes to queen.
 		if pieceOnSquare == pawn && (sqBB & (rank1 | rank8)).isNotEmpty() {
 			pieceOnSquare = queen
-			bb.pawns ^= sqBB
-			bb.queens ^= sqBB
+			bb.pieces[pawn] ^= sqBB
+			bb.pieces[queen] ^= sqBB
 		}
 	}
 
