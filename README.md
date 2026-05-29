@@ -36,7 +36,8 @@ The engine runs at approximately **42 Mnps** on the perft suite. The C++ origina
 `position` ([engine/position.go](engine/position.go)) is a value type; `makeMove` and `makeNullMove` operate on a caller-owned copy. `Game` maintains a `posStack []position` history stack (capacity 512, heap-allocated); undoing a move is a slice truncation — there is no unmake logic.
 
 The struct holds:
-- Named bitboard fields: `pawns`, `knights`, `bishops`, `rooks`, `queens`, `kings`, `whitePieces`, `blackPieces`
+- `pieces [7]bitboard` — indexed by piece type constant (`pawn`=1 … `king`=6; index 0 unused)
+- `colors [2]bitboard` — indexed by color constant (`white`=0, `black`=1)
 - `squares[64]piece` — O(1) piece lookup by square
 - `scores[2]int` — incremental material + PST totals per side (excludes king; updated by `addPiece`/`removePiece`/`movePiece`)
 - `kingLocation[2]square` — king locations (updated separately because king PST is phase-dependent)
