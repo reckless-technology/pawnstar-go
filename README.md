@@ -146,9 +146,9 @@ All shared state — TT, history table, eval cache, time control, cancel flag, s
 1. Return the opening book move if available; return immediately for forced moves (single legal move).
 2. Run an initial pass at `startDepth` to score and order moves.
 3. For each depth from `startDepth+1` to `maxPly`:
-   - Open a ±50 cp aspiration window around the previous depth's score (`aspirDelta = 50`).
-   - Search all root moves within `[aspirAlpha, aspirBeta]`. Break out of the move loop immediately on a fail-high (score ≥ aspirBeta) to avoid searching remaining moves with an inverted window.
-   - If the result falls outside the window (fail-low: no move exceeded aspirAlpha; fail-high: a move hit aspirBeta), widen to `[initialAlpha, initialBeta]` and retry once.
+   - Open a ±50 cp aspiration window around the previous depth's score (`aspirationDelta = 50`).
+   - Search all root moves within `[alphaAspiration, betaAspiration]`. Break out of the move loop immediately on a fail-high (score ≥ betaAspiration) to avoid searching remaining moves with an inverted window.
+   - If the result falls outside the window (fail-low: no move exceeded alphaAspiration; fail-high: a move hit betaAspiration), widen to `[initialAlpha, initialBeta]` and retry once.
    - Apply early-exit heuristics (Standard clock only): stop early if the best move is consistent and/or the score is stable across depths, as a fraction of the allocated time budget.
 
 **Time allocation (Standard clock):** `allocated = timeRemaining / movesRemaining`. Hard stop = `max(100ms, min(allocated × 2, timeRemaining − 1s))`. The clock is checked every 65 536 nodes (`nodeCount & 0xFFFF == 0`).
