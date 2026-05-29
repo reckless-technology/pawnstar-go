@@ -19,7 +19,7 @@ func computePins(pos *position) pins {
 	color := pos.colorToMove
 	occupied := pos.occupied()
 	friendlyPieces := pos.colors[color]
-	kingLocation := pos.kingLocation[color]
+	kingLocation := pos.kingSquare(color)
 	intervening := &interveningSquares[kingLocation]
 
 	// Candidate pinners: enemy sliders on a bishop or rook ray from the king.
