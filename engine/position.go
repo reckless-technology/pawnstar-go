@@ -150,7 +150,7 @@ func positionFromFen(fen string) position {
 		case '/':
 			y--
 			x = 0
-		case '1', '2', '3', '4', '5', '6', '7', '8':
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8':
 			x += int(ch - '0')
 		default:
 			color := white
