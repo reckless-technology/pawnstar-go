@@ -2,16 +2,38 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
+func TestSearch(t *testing.T) {
+	maxDepth := 10
+	if testing.Short() {
+		maxDepth = 9
+	}
+	for _, s := range perftEPD {
+		fen := s[:strings.IndexRune(s, ';')]
+		t.Logf("\n\r%s\n", fen)
+		game := NewGame()
+		game.newGameFromFen(fen)
+		game.openingBook.clearOpeningBook()
+		game.timeControl.clockType = clockFixedDepth
+		game.timeControl.depth = maxDepth
+		dbgxClear()
+		game.startThinking()
+		game.wg.Wait()
+		dbgx.historyTableMax = game.historyTable.getMaxCount()
+		dbgxPrint()
+	}
+}
+
 type bkCase struct {
 	fen      string
-	accepted [3]string // up to 3 acceptable best moves observed at depth 7; empty strings ignored
+	accepted [3]string // up to 3 acceptable best moves observed at depth 8; empty strings ignored
 }
 
 // bkCases are the 24 Bratko-Kopec positions with accepted best moves
-// observed from 3 runs at depth 7.
+// observed from multiple runs at depth 8.
 var bkCases = [24]bkCase{
 	{"1k1r4/pp1b1R02/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - -", [3]string{"d6d1"}},
 	{"3r1k2/4npp1/1ppr3p/p6P/P2PPPP1/1NR5/5K2/2R5 w - -", [3]string{"e4e5"}},
