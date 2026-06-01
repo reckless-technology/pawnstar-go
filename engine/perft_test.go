@@ -282,24 +282,3 @@ func BenchmarkPerft7(b *testing.B) {
 		perft(pos, 7)
 	}
 }
-
-func TestSearch(t *testing.T) {
-	maxDepth := 10
-	if testing.Short() {
-		maxDepth = 9
-	}
-	for _, s := range perftEPD {
-		fen := s[:strings.IndexRune(s, ';')]
-		t.Logf("\n\r%s\n", fen)
-		game := NewGame()
-		game.newGameFromFen(fen)
-		game.openingBook.clearOpeningBook()
-		game.timeControl.clockType = clockFixedDepth
-		game.timeControl.depth = maxDepth
-		dbgxClear()
-		game.startThinking()
-		game.wg.Wait()
-		dbgx.historyTableMax = game.historyTable.getMaxCount()
-		dbgxPrint()
-	}
-}
