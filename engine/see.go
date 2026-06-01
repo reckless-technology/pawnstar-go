@@ -14,14 +14,15 @@ type seeBoard struct {
 }
 
 // newSeeBoard initialises a seeBoard from the piece bitboards of pos.
-func newSeeBoard(pos *position) *seeBoard {
-	return &seeBoard{pieces: pos.pieces, colors: pos.colors}
+func newSeeBoard(pos *position) seeBoard {
+	return seeBoard{pieces: pos.pieces, colors: pos.colors}
 }
 
 // evaluateStaticExchange returns the SEE score for m (positive = winning capture)
 // and whether m gives check.  The score accounts for all recaptures on the target
 // square by the least-valuable available attacker on each side in turn.
 func evaluateStaticExchange(pos *position, move move) (int, bool) {
+	dbgx.seeCalls++
 	child := *pos
 	child.makeMove(move)
 	isChecking := child.isInCheck()
@@ -32,10 +33,10 @@ func evaluateStaticExchange(pos *position, move move) (int, bool) {
 	captured := move.captured()
 	if promoted != noPiece {
 		s := seeValues[captured] + seeValues[promoted] - seeValues[pawn] -
-			evaluateSwapOff(bb, move.to(), nextColor, promoted)
+			evaluateSwapOff(&bb, move.to(), nextColor, promoted)
 		return s, isChecking
 	}
-	s := seeValues[captured] - evaluateSwapOff(bb, move.to(), nextColor, piece)
+	s := seeValues[captured] - evaluateSwapOff(&bb, move.to(), nextColor, piece)
 	return s, isChecking
 }
 
