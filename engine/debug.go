@@ -40,7 +40,12 @@ type debugX struct {
 	nullMoveFails            uint // times the null-move score did not reach beta
 	lmrAttempts1             uint // times single-ply late-move reduction was applied
 	lmrAttempts2             uint // times double-ply LMR was applied (deep node, late move)
+	lmrAttempts3             uint // times triple-ply LMR was applied (late move, zero history)
 	lmrFails                 uint // times LMR re-search was required (score > alpha at reduced depth)
+	iirReductions            uint // times internal iterative reduction fired (no TT move)
+	rfpPrunes                uint // times reverse-futility pruning returned early
+	lmpPrunes                uint // times late-move (move-count) pruning skipped a quiet move
+	qsearchSeePrunes         uint // times quiescence SEE pruning stopped on a losing capture
 	pvsAttempts              uint // times a PVS null-window search was attempted
 	pvsFails                 uint // times PVS failed high and a full-window re-search was needed
 	aspirationFails          uint // times aspiration window failed and was widened to full window

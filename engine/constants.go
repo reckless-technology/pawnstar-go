@@ -55,6 +55,14 @@ const (
 	// to sit above equal-exchange captures (SEE ≈ 0) and below winning captures.
 	killerScore0 = 90_000
 	killerScore1 = 80_000
+
+	// Pruning / reduction tuning (ported from C++ Pawnstar; centipawn margins carry over because the
+	// Go NNUE evaluation is bit-identical in scale to the C++ evaluator).
+	rfpMaxDepth        = 7 // reverse-futility pruning: only applied at depth ≤ this
+	rfpMargin          = 80 // reverse-futility pruning: centipawn margin per ply
+	lmpMaxDepth        = 8 // late-move (move-count) pruning: only applied at depth ≤ this
+	lmpBase            = 3 // a quiet move is skipped once its index ≥ lmpBase + depth*depth
+	noTTReduceMinDepth = 4 // internal iterative reduction: min depth at which a node lacking a TT move is reduced
 )
 
 // direction is one of the eight compass directions used to index ray tables.

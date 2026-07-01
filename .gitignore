@@ -4,4 +4,4 @@ pawnstar-go-baseline
 # fastchess SPRT artifacts
 config.json
 *.pgn
-pawnstar-go-nnue-*
+pawnstar-go-*
