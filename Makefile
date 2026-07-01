@@ -12,7 +12,7 @@ export GOEXPERIMENT := simd
 BINARY := pawnstar-go
 PKG    := ./engine/
 
-.PHONY: all build test test-short perft search bk see bench baseline vet fmt clean
+.PHONY: all build test test-short perft search bk see test-uci bench baseline vet fmt clean
 
 all: build
 
@@ -38,6 +38,11 @@ bk:
 
 see:
 	$(GO) test $(PKG) -run TestSEE -v
+
+# UCI protocol regression test — drives the built binary as a UCI process (handshake, seldepth,
+# searchmoves, currmove, bench determinism).
+test-uci: build
+	./test/uci_test.sh $(BINARY)
 
 bench:
 	$(GO) test $(PKG) -bench BenchmarkPerft7 -benchtime=10s -run '^$$'
