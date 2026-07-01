@@ -390,8 +390,8 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 	// Transposition table lookup.
 	transpos, isTransposition := ss.game.transpositionTable.find(position.hash)
-	if isTransposition && int(transpos.depth) >= depth {
-		switch transpos.nodeType {
+	if isTransposition && transpos.depth() >= depth {
+		switch transpos.nodeType() {
 		case nodeCut:
 			if transpos.move.score() >= beta {
 				dbgx.tableHitBeta++

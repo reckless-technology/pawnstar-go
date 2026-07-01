@@ -60,10 +60,13 @@ bits 12–14   moving piece
 bits 15–17   captured piece (noPiece if non-capture)
 bits 18–21   move type (nonCapture/capture/promotionKnight/…/castling)
 bit     22   gives-check flag
-bits 32–63   sort score (i32, not part of move identity)
+bits 23–24   transposition node type (nodeType)
+bits 25–32   transposition depth searched (int8)
+bits 33–40   transposition age / generation (uint8)
+bits 41–63   score (signed 23-bit)
 ```
 
-`move.equal` masks the score field when comparing. `move(0)` is the null sentinel (`moveNone()`). `String()` outputs UCI long-algebraic notation (`e2e4`, `e7e8q`). The sort score field doubles as storage for the search score inside transposition table entries (packed via `move.withScore`).
+`move.equal`/`isNone` mask to the identity bits (0–21), so the score and TT metadata never affect identity. `move(0)` is the null sentinel (`moveNone()`). `String()` outputs UCI long-algebraic notation (`e2e4`, `e7e8q`). Bits 23–63 are dual-purpose: a move-ordering sort score (`withScore`/`score`, bits 41–63) during search, or packed `{score, depth, nodeType, age}` metadata inside a transposition entry (`withTTData`/`setTTAge`). A move is only ever one or the other, so the spare bits are shared — which lets a TT cell be exactly two 64-bit words for the lockless table.
 
 Move lists are plain `[]move` slices allocated with `make([]move, 0, 64)` — no fixed-capacity struct.
 
@@ -191,28 +194,27 @@ Within `searchAlphaBeta`, moves are ordered as follows:
 
 ### Transposition table
 
-Single 512 MB table ([engine/transposition.go](engine/transposition.go)). The entry count is rounded up to the next power of 2 so entries are indexed by `hash & mask` (a bitmask) rather than modulo.
+Single table ([engine/transposition.go](engine/transposition.go)) sized from `hashTableMB`. The entry count is rounded up to the next power of 2 so entries are indexed by `hash & mask` (a bitmask) rather than modulo.
 
-Each `transposition` entry is exactly 24 bytes:
+**Lockless — Hyatt's XOR trick** (ported from the C++ engine). All of score, depth, node type and age are packed into the move's spare bits (see *Move encoding*), so a cell holds just two 64-bit words:
 
 ```
-hash     zobrist   8 bytes   Zobrist hash of the stored position
-move     move      8 bytes   best move; search score packed into upper 32 bits
-depth    int16     2 bytes   search depth at which this entry was written
-nodeType nodeType  1 byte    Cut / All / PV
-age      uint8     1 byte    generation counter at write time
-lock     uint32    4 bytes   per-entry spinlock (0 = unlocked, 1 = locked)
+data  atomic.Uint64   the packed move (move identity + score/depth/nodeType/age)
+key   atomic.Uint64   hash ^ data
 ```
 
-The `lock` field occupies the 4 bytes of natural padding that would otherwise follow `age`, keeping the struct at 24 bytes.
+`find` loads both words with relaxed atomics and accepts the cell only when `key ^ data == hash`. This one check does two jobs:
 
-**Concurrency:** each entry carries its own `uint32` spinlock protected by `atomic.CompareAndSwapUint32` / `atomic.StoreUint32`. Workers contend only when they access the exact same slot simultaneously, which is rare given table size.
+- **Torn-pair detection.** If two workers store to the same cell concurrently and a reader catches `key` from one store and `data` from the other, `key ^ data` no longer equals any real hash, so the read is rejected as a **miss** — never returned as a wrong entry. A data race on the pair is therefore harmless *by construction*: the worst outcome is a spurious miss and a re-search, never a bad move or a corrupt score. No per-entry lock is needed.
+- **Collision guard.** Reconstructing the full 64-bit hash also rejects entries stored for a different position that happens to index to the same slot.
 
-**Aging:** `transpositionTable.currentAge uint8` is incremented by `age()` — an O(1) operation — at the start of each root search. `record()` stamps `tt.currentAge` onto every entry it writes. An entry is considered stale when `entry.age != tt.currentAge`.
+Each individual word is an `atomic.Uint64` (relaxed load/store), so no *single* word is ever torn and Go's race detector stays quiet; the XOR key supplies the cross-word consistency that per-word atomicity alone cannot. Racing writers resolve to a benign last-writer-wins.
 
-**Replacement policy:** replace if the slot is empty, the entry is from a previous search (`age ≠ currentAge`), the new entry is at least as deep, or the new entry is a PV node.
+**Replacement policy** (`record`): overwrite when the slot is empty, the existing entry is from an older generation (`cur.ttAge() != currentAge`), the new depth is ≥ the stored depth, or the new node is PV.
 
-**`record()` signature:** `record(hash zobrist, m move, depth int16, nt nodeType)` — takes individual fields and builds the entry internally, stamping `currentAge` itself. Callers pass the move with score already packed via `m.withScore(score)`.
+**Aging:** `currentAge uint8` is bumped by `age()` (O(1), wraps at 256) at the start of each root search; `record` stamps it onto each entry via `setTTAge`.
+
+**API:** `find(hash) → (transposition, bool)` returns `{hash, move}` with `score()`/`depth()`/`nodeType()`/`age()` reading straight out of the packed move; `record(hash, m, depth, nt)` takes a move whose search score is already packed via `m.withScore(score)`.
 
 ### Evaluation
 

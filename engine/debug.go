@@ -12,8 +12,6 @@ import (
 // a search and dbgxPrint after to inspect search behaviour.
 type debugX struct {
 	seeCalls                 uint
-	spinlocksRecord          uint
-	spinlocksFind            uint
 	historyTableMax          uint
 	checkmates               uint
 	stalemates               uint
