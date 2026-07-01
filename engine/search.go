@@ -34,6 +34,12 @@ type searchState struct {
 	nodeCount int              // nodes searched since the last root iteration reset
 	game      *Game            // shared: time control, cancel flag, TT, history, eval table
 
+	// Move-ordering follow-up heuristics keyed by the previous move (persist across a whole search).
+	// countermoves[prev.pieceTo()] is the best quiet refutation observed to the previous move.
+	// continuationHistory[prev.pieceTo()*contKeys + move.pieceTo()] scores playing move after prev.
+	countermoves        [contKeys]move
+	continuationHistory []int16
+
 	// NNUE lazy accumulator stack, indexed by posStack depth: accStack[i] is the accumulator for
 	// posStack[i], valid iff accValid[i]. Maintained deferred — playMove/makeNullMove only mark the
 	// new depth invalid; the accumulator is brought current on demand by currentAccumulator (nearest
@@ -50,9 +56,10 @@ func newSearchState(hs []hashStackEntry, startPos *position, game *Game) *search
 	ps := make([]position, 1, maxPly)
 	ps[0] = *startPos
 	ss := &searchState{
-		posStack:  ps,
-		hashStack: hs,
-		game:      game,
+		posStack:            ps,
+		hashStack:           hs,
+		game:                game,
+		continuationHistory: make([]int16, contKeys*contKeys),
 	}
 	// Seed the current position's accumulator (depth 0); deeper accumulators are computed on demand.
 	// accStack grows lazily to the search depth so construction stays cheap.
@@ -196,24 +203,91 @@ func (ss *searchState) isCancelled() bool {
 	return ss.game.isCancelPending.Load()
 }
 
-// scoreAndSortMoves scores and sorts moves at ply using SEE for captures,
-// killer bonuses for quiet moves that previously caused cutoffs, and the
-// history heuristic for all quiet moves.
-func (ss *searchState) scoreAndSortMoves(moves []move, ply int) {
-	scoreAndSortMovesInner(ss.currentPosition(), &ss.game.historyTable, ss.killers[ply], moves, ply)
+// scoreAndSortMoves assigns each move a sort score and sorts best-first, mirroring the C++
+// ScoreAndSortMoves banded scheme: winning captures/promotions (by SEE) on top, then the two killers,
+// then the countermove to prevMove, then quiet moves by history + continuation history (clamped just
+// below the countermove); losing captures score by their negative SEE and sink below the quiet moves.
+// prevMove is the move played at the parent (moveNone at the root, after a null move, and in qsearch).
+func (ss *searchState) scoreAndSortMoves(moves []move, ply int, prevMove move) {
+	pos := ss.currentPosition()
+	killer0 := ss.killers[ply][0]
+	killer1 := ss.killers[ply][1]
+	for i, m := range moves {
+		var sort int
+		switch {
+		case !m.isQuiet(): // capture or promotion: order by static exchange evaluation
+			see, _ := evaluateStaticExchange(pos, m)
+			if see >= 0 {
+				sort = winningCaptureBase + see
+			} else {
+				sort = see // losing captures sort below quiet moves
+			}
+		case killer0.equal(m):
+			sort = killerScore0
+		case killer1.equal(m):
+			sort = killerScore1
+		case ss.isCountermove(prevMove, m):
+			sort = countermoveScore
+		default: // quiet move: main history + continuation history, clamped below the countermove
+			h := int(ss.game.historyTable.getCount(ply, m)) + ss.contHistScore(prevMove, m)
+			if h > maxQuietScore {
+				h = maxQuietScore
+			}
+			sort = h
+		}
+		moves[i] = m.withScore(sort)
+	}
+	sortMovesUnstable(moves)
 }
 
-// updateKillers records m as the primary killer at ply, shifting the existing
-// primary into the secondary slot.  Only nonCapture moves are stored; captures
-// are already ordered by SEE and do not benefit from the killer heuristic.
-// A move already occupying the primary slot is not duplicated.
+// updateKillers records a quiet move m that caused a beta cutoff as the primary killer at ply,
+// shifting the existing primary into the secondary slot; duplicates are not re-recorded.
 func (ss *searchState) updateKillers(ply int, m move) {
-	if m.kind() != nonCapture {
-		return
-	}
 	if !ss.killers[ply][0].equal(m) {
 		ss.killers[ply][1] = ss.killers[ply][0]
 		ss.killers[ply][0] = m
+	}
+}
+
+// contHistScore returns the continuation-history score for playing m after prevMove.
+func (ss *searchState) contHistScore(prevMove, m move) int {
+	return int(ss.continuationHistory[prevMove.pieceTo()*contKeys+m.pieceTo()])
+}
+
+// isCountermove reports whether m is the recorded countermove (best quiet refutation) to prevMove.
+func (ss *searchState) isCountermove(prevMove, m move) bool {
+	return ss.countermoves[prevMove.pieceTo()].equal(m)
+}
+
+// recordContinuationHistory rewards a quiet m that was good (raised alpha or cut) after prevMove.
+// Captures are ignored (they are ordered by SEE). The count saturates like the history table.
+func (ss *searchState) recordContinuationHistory(prevMove, m move) {
+	if !m.isQuiet() {
+		return
+	}
+	idx := prevMove.pieceTo()*contKeys + m.pieceTo()
+	if ss.continuationHistory[idx] < 16384 {
+		ss.continuationHistory[idx]++
+	}
+}
+
+// recordCountermove records a quiet m that caused a beta cutoff as the countermove to prevMove.
+func (ss *searchState) recordCountermove(prevMove, m move) {
+	if m.isQuiet() {
+		ss.countermoves[prevMove.pieceTo()] = m
+	}
+}
+
+// recordGood credits move m (which raised alpha, or caused a beta cutoff when isCutoff) into the
+// move-ordering heuristics: the main history and continuation history for any move; additionally, on a
+// beta cutoff, a quiet m becomes a killer at ply and the countermove to prevMove.
+func (ss *searchState) recordGood(ply int, prevMove, m move, isCutoff bool) {
+	ss.game.historyTable.recordGoodMove(ply, m)
+	ss.recordContinuationHistory(prevMove, m)
+	if isCutoff && m.isQuiet() {
+		ss.updateKillers(ply, m)
+		ss.recordCountermove(prevMove, m)
+		dbgx.killerBetaCutoffs++
 	}
 }
 
@@ -242,14 +316,14 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 	if beta > alpha+1 && moveIdx > 0 && !wasInCheck && !isChecking {
 		// Try principal variation search.
 		dbgx.pvsAttempts++
-		score = -searchAlphaBeta(ss, childDepth, ply+1, -alpha-1, -alpha, pv)
+		score = -searchAlphaBeta(ss, childDepth, ply+1, -alpha-1, -alpha, pv, m)
 		if score > alpha {
 			// PVS failed high — re-search with full window.
 			dbgx.pvsFails++
-			score = -searchAlphaBeta(ss, childDepth, ply+1, -beta, -alpha, pv)
+			score = -searchAlphaBeta(ss, childDepth, ply+1, -beta, -alpha, pv, m)
 		}
 	} else {
-		score = -searchAlphaBeta(ss, childDepth, ply+1, -beta, -alpha, pv)
+		score = -searchAlphaBeta(ss, childDepth, ply+1, -beta, -alpha, pv, m)
 	}
 	ss.undoMove()
 	return score
@@ -258,20 +332,26 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 // searchAlphaBeta is the main recursive alpha-beta function. The pruning/reduction stack is ported
 // from the C++ Pawnstar (constants carry over because the NNUE eval is the same centipawn scale).
 //
+// prevMove is the move played at the parent (moveNone at the root, after a null move, and in qsearch);
+// it keys the countermove and continuation-history move-ordering heuristics.
+//
 // Techniques applied (in order):
 //   - Periodic time check every 65 536 nodes; draw detection (material, 50-move, repetition).
+//   - Check extension: a node in check is searched one ply deeper.
 //   - Transposition table lookup: Cut/All nodes prune; PV nodes extend depth by 1.
 //   - Internal iterative reduction: −1 ply at depth ≥ noTTReduceMinDepth when there is no TT move.
 //   - Quiescence search at depth ≤ 0 (when not in check).
 //   - At non-PV, non-check nodes the static eval is computed once and drives:
 //       · Reverse futility pruning: return eval when depth ≤ rfpMaxDepth and eval − rfpMargin·depth ≥ beta.
 //       · Null-move pruning (R = 4): only when eval ≥ beta and there is enough material (no zugzwang).
-//   - TT move tried before generating all legal moves.
+//   - TT move tried before generating all legal moves; remaining moves ordered by scoreAndSortMoves
+//     (winning captures, killers, countermove, then history + continuation history).
 //   - Late move pruning: skip quiet moves at depth ≤ lmpMaxDepth once moveIdx ≥ lmpBase + depth².
 //   - Late move reduction (null-window, non-check): −1 from moveIdx > 3; −2 from moveIdx > 6 (depth > 3);
 //     −3 additionally when history count is zero. Re-search at full depth if the reduced search beats alpha.
-//   - TT write with Cut/All/PV node type on exit.
-func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *variation) int {
+//   - On a beta cutoff or alpha raise, recordGood credits the move to history / continuation history
+//     (and, for a quiet cutoff, killers + countermove). TT write with Cut/All/PV node type on exit.
+func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *variation, prevMove move) int {
 	ss.nodeCount++
 	if (ss.nodeCount&0xFFFF) == 0 && (ss.game.timeControl.clockType == clockStandard || ss.game.timeControl.clockType == clockFixedTime) &&
 		time.Now().After(ss.game.timeControl.stopTime) {
@@ -282,6 +362,13 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	position := ss.currentPosition()
 	if position.isDrawByMaterial() || ss.isDrawByFiftyMoves() || ss.isDrawByRepetition() {
 		return drawScore
+	}
+
+	// Check extension: searching a node that is in check one ply deeper resolves the forcing line
+	// before evaluating, and gates off the static-eval pruning below (which is disabled in check).
+	if position.isInCheck() {
+		dbgx.checkExtensions++
+		depth++
 	}
 
 	if ply >= maxPly {
@@ -345,7 +432,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			ss.makeNullMove()
 			dbgx.nullMoveAttempts++
 			var dummy variation
-			score := -searchAlphaBeta(ss, depth-4, ply+1, -beta, -alpha, &dummy)
+			score := -searchAlphaBeta(ss, depth-4, ply+1, -beta, -alpha, &dummy, moveNone())
 			ss.undoMove()
 			if ss.isCancelled() {
 				return searchCancelledScore
@@ -373,8 +460,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		if score >= beta {
 			dbgx.tableMoveBetaCutoff++
 			ss.game.transpositionTable.record(position.hash, transpos.move.withScore(score), int16(depth), nodeCut)
-			ss.game.historyTable.recordGoodMove(ply, transpos.move)
-			ss.updateKillers(ply, transpos.move)
+			ss.recordGood(ply, prevMove, transpos.move, true)
 			return score
 		}
 		bestScore = score
@@ -383,7 +469,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			dbgx.tableMoveRaiseAlpha++
 			alpha = score
 			hasRaisedAlpha = true
-			ss.game.historyTable.recordGoodMove(ply, transpos.move)
+			ss.recordGood(ply, prevMove, transpos.move, false)
 		}
 	}
 
@@ -397,7 +483,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		return drawScore
 	}
 
-	ss.scoreAndSortMoves(moves, ply)
+	ss.scoreAndSortMoves(moves, ply, prevMove)
 
 	inCheck := position.isInCheck()
 	nullWindow := beta == alpha+1
@@ -441,11 +527,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		}
 		if score >= beta {
 			ss.game.transpositionTable.record(position.hash, move.withScore(score), int16(depth), nodeCut)
-			ss.game.historyTable.recordGoodMove(ply, move)
-			ss.updateKillers(ply, move)
-			if move.kind() == nonCapture {
-				dbgx.killerBetaCutoffs++
-			}
+			ss.recordGood(ply, prevMove, move, true)
 			dbgx.nodesCut++
 			return score
 		}
@@ -456,7 +538,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 				dbgx.nodesPvChanged++
 				alpha = score
 				hasRaisedAlpha = true
-				ss.game.historyTable.recordGoodMove(ply, move)
+				ss.recordGood(ply, prevMove, move, false)
 				copyVariation(parentPV, pv, move)
 			}
 		}
@@ -465,7 +547,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	if hasRaisedAlpha {
 		dbgx.nodesPv++
 		ss.game.transpositionTable.record(position.hash, bestMove.withScore(alpha), int16(depth), nodePV)
-		ss.game.historyTable.recordGoodMove(ply, bestMove)
+		ss.recordGood(ply, prevMove, bestMove, false)
 		copyVariation(parentPV, pv, bestMove)
 	} else {
 		dbgx.nodesAll++
@@ -486,7 +568,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 	if pos.isInCheck() {
 		dbgx.quiescentChecks++
 		var dummy variation
-		return searchAlphaBeta(ss, depth, ply, alpha, beta, &dummy)
+		return searchAlphaBeta(ss, depth, ply, alpha, beta, &dummy, moveNone())
 	}
 	// Stand-pat: if the static eval already beats beta we can prune.
 	score := evaluatePosition(ss, alpha, beta)
@@ -500,7 +582,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 	}
 	bestScore := score
 	moves := pos.generateLegalCaptures()
-	ss.scoreAndSortMoves(moves, ply)
+	ss.scoreAndSortMoves(moves, ply, moveNone())
 	for _, m := range moves {
 		// SEE pruning: captures are sorted by SEE, and their sort score is negative exactly when the
 		// capture loses material. Once we reach the first losing capture every remaining move also
