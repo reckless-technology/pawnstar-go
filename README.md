@@ -169,13 +169,17 @@ The search walks the move list sequentially (single-threaded). Lazy SMP is plann
 
 #### Move ordering
 
-Within `searchAlphaBeta`, moves are ordered as follows:
+Within `searchAlphaBeta`, moves are ordered by `scoreAndSortMoves`, a banded scheme ported from the C++ engine (keyed by `prevMove`, the move played at the parent):
 
 1. **TT move** — tried first, before generating the full legal move list; on a beta cutoff, saves generating and scoring all moves.
-2. **Remaining legal moves** sorted by `scoreAndSortMovesInner`:
-   - *Captures and promotions* — scored by Static Exchange Evaluation (`evaluateStaticExchange`): `seeScore × 1000`. Winning captures (SEE > 0) rank highest; losing captures (SEE < 0) rank lowest.
-   - *Killer moves* — quiet moves that caused beta cutoffs at this ply in sibling branches. Each ply stores two killers (`killers[ply][0/1]`). Killer 0 scores +90 000, killer 1 scores +80 000, placing them between winning captures and ordinary quiet moves.
-   - *Other quiet moves* — scored by enemy-attack penalty (`−pieceValue × 1000` if the destination is attacked), plus PST delta and history count.
+2. **Remaining legal moves** sorted into disjoint score bands:
+   - *Winning captures/promotions* — `winningCaptureBase (1<<20) + SEE`, on top.
+   - *Killers* — the two quiet moves that caused beta cutoffs at this ply (`killers[ply][0/1]`), scoring `1<<19 + 1` and `1<<19`.
+   - *Countermove* — the best quiet refutation recorded for `prevMove` (`1<<19 − 1`).
+   - *Other quiet moves* — `history + continuationHistory`, clamped just below the countermove.
+   - *Losing captures* — their negative SEE, sinking below the quiet moves (this sign is what quiescence SEE pruning keys on).
+
+On a beta cutoff or alpha raise, `recordGood` credits the move to the history and continuation-history tables; a quiet cutoff additionally records it as a killer and as the countermove to `prevMove`. The countermove table and 1-ply continuation history live on the `searchState` and persist across a search.
 
 ### Transposition table
 
@@ -217,7 +221,7 @@ All scores are in centipawns from the perspective of the side to move.
 
 **King safety:** King PST switches between midgame and endgame tables via `isEndgame` (true if neither side has a queen, or every queen-side has no rooks and at most one minor piece). In the midgame: a three-row pawn shelter scores friendly pawns +15/+10/+5 and enemy pawns −15/−10/−5 across the three ranks in front of the king; open files near the king score −15 (king's file) and −10 (adjacent files); friendly non-pawn pieces score +10 (adjacent ring) and +5 (two-square ring).
 
-An alpha/beta material early-exit skips the full evaluation when the material score alone is more than 200 cp outside the search window. Results are cached in a 64 K-entry `evalHashTable`; each entry carries its own `lock uint32` spinlock (atomic CAS/store), matching the transposition table's locking design.
+An alpha/beta material early-exit skips the full evaluation when the material score alone is more than 200 cp outside the search window. Results are cached in the **lockless** `evalHashTable` (~8 MB, ported from the C++ `EvalCache`): each slot is a single `atomic.Uint64` packing the top 48 bits of the hash and a 16-bit score, so a load/store is atomic with no lock and a foreign/evicted entry fails the key check and reads as a miss. Because the cached score depends on the active evaluator, `clear()` is called whenever it changes (NNUE toggle / net load). The **NNUE** evaluator below is the default; this handcrafted eval is the fallback.
 
 **Static Exchange Evaluation** ([engine/see.go](engine/see.go)) simulates the sequence of captures on a square using the least-valuable-attacker method, propagating scores backwards so each side can choose not to recapture if it would lose material. Used in move ordering to distinguish winning from losing captures.
 
