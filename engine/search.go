@@ -255,18 +255,21 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 	return score
 }
 
-// searchAlphaBeta is the main recursive alpha-beta function.
+// searchAlphaBeta is the main recursive alpha-beta function. The pruning/reduction stack is ported
+// from the C++ Pawnstar (constants carry over because the NNUE eval is the same centipawn scale).
 //
 // Techniques applied (in order):
-//   - Periodic time check every 65 536 nodes.
-//   - Draw detection: material, 50-move rule, repetition.
+//   - Periodic time check every 65 536 nodes; draw detection (material, 50-move, repetition).
 //   - Transposition table lookup: Cut/All nodes prune; PV nodes extend depth by 1.
+//   - Internal iterative reduction: −1 ply at depth ≥ noTTReduceMinDepth when there is no TT move.
 //   - Quiescence search at depth ≤ 0 (when not in check).
-//   - Null-move pruning with R = 4 (skipped in check, zugzwang-risk positions, non-null windows).
+//   - At non-PV, non-check nodes the static eval is computed once and drives:
+//       · Reverse futility pruning: return eval when depth ≤ rfpMaxDepth and eval − rfpMargin·depth ≥ beta.
+//       · Null-move pruning (R = 4): only when eval ≥ beta and there is enough material (no zugzwang).
 //   - TT move tried before generating all legal moves.
-//   - Late move reduction: −1 ply from the 2nd move onward (moveIdx > 0, quiet, non-check, non-pawn/king, depth > 2);
-//     −2 ply additionally from moveIdx 7 (depth > 3, zero history count).
-//   - LMR re-search at full depth if the reduced search exceeds alpha.
+//   - Late move pruning: skip quiet moves at depth ≤ lmpMaxDepth once moveIdx ≥ lmpBase + depth².
+//   - Late move reduction (null-window, non-check): −1 from moveIdx > 3; −2 from moveIdx > 6 (depth > 3);
+//     −3 additionally when history count is zero. Re-search at full depth if the reduced search beats alpha.
 //   - TT write with Cut/All/PV node type on exit.
 func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *variation) int {
 	ss.nodeCount++
@@ -306,35 +309,52 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		}
 	}
 
+	// Internal iterative reduction: with no usable transposition-table move our move ordering is weak,
+	// so rather than spend the full depth with a poor first move, reduce by one ply. The shallower
+	// search still fills the TT with a best move, recouping the cost via better ordering on revisit.
+	if depth >= noTTReduceMinDepth && (!isTransposition || transpos.move.isNone()) {
+		dbgx.iirReductions++
+		depth--
+	}
+
 	// Enter quiescence at depth <= 0 (unless in check, which quiescence handles
 	// by re-entering alpha-beta at the same depth).
 	if depth <= 0 && !position.isInCheck() {
 		return searchQuiescent(ss, depth, ply, alpha, beta)
 	}
 
-	// Null-move pruning: skip our turn and search at depth−4.  If the result still
-	// beats beta, the position is likely good enough to prune.  Skipped when:
-	// already in a null-move position, in check, not a null window, or in an
-	// endgame scenario.
-	pstScore := position.scores[white] - position.scores[black]
-	if position.colorToMove == black {
-		pstScore = -pstScore
-	}
-	if beta == alpha+1 && pstScore > (beta+100) && !position.isNullMove() && !position.isInCheck() &&
-		position.colors[position.colorToMove].popCount() > 3 {
-		ss.makeNullMove()
-		dbgx.nullMoveAttempts++
-		var dummy variation
-		score := -searchAlphaBeta(ss, depth-4, ply+1, -beta, -alpha, &dummy)
-		ss.undoMove()
-		if ss.isCancelled() {
-			return searchCancelledScore
-		}
-		if score >= beta {
-			return beta
-		}
-		dbgx.nullMoveFails++
+	// Static-eval-based pruning at non-PV nodes that are not in check. The static eval is computed
+	// once here and reused by reverse-futility pruning and null-move pruning.
+	isPV := beta-alpha > 1
+	if !isPV && !position.isInCheck() {
+		evalScore := evaluatePosition(ss, alpha, beta)
 
+		// Reverse futility pruning (static null move): at shallow depth, if we are far enough above
+		// beta that even conceding rfpMargin per ply still leaves us at/above beta, assume a quiet
+		// move holds the advantage and cut. Disabled in the mate zone so it cannot mask a forced mate.
+		if depth <= rfpMaxDepth && absInt(beta) < winThreshold && evalScore-rfpMargin*depth >= beta {
+			dbgx.rfpPrunes++
+			return evalScore
+		}
+
+		// Null-move pruning: skip our turn and search at depth−4.  Only when we are already failing
+		// high statically (evalScore ≥ beta), have enough material to avoid zugzwang, and the previous
+		// move was not itself a null move.
+		if evalScore >= beta && !position.isNullMove() &&
+			position.colors[position.colorToMove].popCount() > 3 {
+			ss.makeNullMove()
+			dbgx.nullMoveAttempts++
+			var dummy variation
+			score := -searchAlphaBeta(ss, depth-4, ply+1, -beta, -alpha, &dummy)
+			ss.undoMove()
+			if ss.isCancelled() {
+				return searchCancelledScore
+			}
+			if score >= beta {
+				return beta
+			}
+			dbgx.nullMoveFails++
+		}
 	}
 
 	// Try the transposition table move first. If we can get a beta cutoff from the table move
@@ -379,18 +399,35 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 	ss.scoreAndSortMoves(moves, ply)
 
+	inCheck := position.isInCheck()
+	nullWindow := beta == alpha+1
+
 	for i, move := range moves {
 		if isTransposition && move.equal(transpos.move) {
 			continue
 		}
 
+		// Late move pruning (move-count pruning): at shallow depth in a null-window node not in check,
+		// once we are deep into the (SEE/history-sorted) move list, skip the remaining quiet moves —
+		// they almost never raise alpha. Captures and promotions are never pruned.
+		if nullWindow && !inCheck && depth <= lmpMaxDepth && move.isQuiet() && i >= lmpBase+depth*depth {
+			dbgx.lmpPrunes++
+			continue
+		}
+
+		// Late move reduction: reduce late moves at null-window nodes not in check (any move type;
+		// the SEE/history sort has already pushed the unpromising moves here).
 		childDepth := depth
-		if depth > 2 && i > 0 && beta == alpha+1 && !position.isInCheck() && move.kind() == nonCapture {
+		if nullWindow && i > 3 && !inCheck && depth > 2 {
 			dbgx.lmrAttempts1++
 			childDepth--
-			if depth > 3 && i > 6 && ss.game.historyTable.getCount(ply, move) == 0 {
+			if depth > 3 && i > 6 {
 				dbgx.lmrAttempts2++
 				childDepth--
+				if ss.game.historyTable.getCount(ply, move) == 0 {
+					dbgx.lmrAttempts3++
+					childDepth--
+				}
 			}
 		}
 
@@ -465,6 +502,13 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 	moves := pos.generateLegalCaptures()
 	ss.scoreAndSortMoves(moves, ply)
 	for _, m := range moves {
+		// SEE pruning: captures are sorted by SEE, and their sort score is negative exactly when the
+		// capture loses material. Once we reach the first losing capture every remaining move also
+		// loses, so stop searching them.
+		if m.score() < 0 {
+			dbgx.qsearchSeePrunes++
+			return bestScore
+		}
 		ss.playMove(m)
 		score = -searchQuiescent(ss, depth-1, ply+1, -beta, -alpha)
 		ss.undoMove()

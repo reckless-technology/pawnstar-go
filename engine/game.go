@@ -206,11 +206,13 @@ func scoreAndSortMovesInner(pos *position, history *historyTable, killers [2]mov
 		piece := m.piece()
 		var score int
 		if m.captured() != noPiece || m.promoted() != noPiece {
-			// SEE replaces MVV-LVA for captures and promotions.
+			// SEE replaces MVV-LVA for captures and promotions.  Captures are scored by pure SEE
+			// (no history/PST) so the sign of the sort score is exactly the sign of the SEE value —
+			// which is what quiescence SEE pruning relies on to skip losing captures.
 			seeScore, _ := evaluateStaticExchange(pos, m)
 			score = seeScore * 1000
 		} else {
-			// Quiet move: penalise walking into an enemy attack; boost killers.
+			// Quiet move: penalise walking into an enemy attack; boost killers; add history + PST delta.
 			if (enemyAttacks & squareBB(m.to())).isNotEmpty() {
 				score -= pieceVals[piece] * 1000
 			}
@@ -219,9 +221,9 @@ func scoreAndSortMovesInner(pos *position, history *historyTable, killers [2]mov
 			} else if !killers[1].isNone() && killers[1].equal(m) {
 				score += killerScore1
 			}
+			score += int(history.getCount(ply, m))
+			score += pstValue(color, piece, m.to()) - pstValue(color, piece, m.from())
 		}
-		score += int(history.getCount(ply, m))
-		score += pstValue(color, piece, m.to()) - pstValue(color, piece, m.from())
 		moves[i] = m.withScore(score)
 	}
 	sortMovesUnstable(moves)

@@ -128,6 +128,10 @@ func (m move) ttAge() uint8         { return uint8((int64(m) >> moveAgeShift) & 
 func (m move) bits() uint64        { return uint64(m) }
 func moveFromBits(b uint64) move   { return move(int64(b)) }
 
+// isQuiet reports whether the move is neither a capture nor a promotion (mirrors the C++
+// Move::IsQuiet). Pawn pushes and castling count as quiet. Used by late-move pruning.
+func (m move) isQuiet() bool { return m.captured() == noPiece && m.promoted() == noPiece }
+
 // fromTo returns the combined from+to index (bits 0–11) used as a hash key in
 // the history table.
 func (m move) fromTo() int { return int(m) & moveFromToMask }
