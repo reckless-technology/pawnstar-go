@@ -22,7 +22,6 @@ func newSeeBoard(pos *position) seeBoard {
 // and whether m gives check.  The score accounts for all recaptures on the target
 // square by the least-valuable available attacker on each side in turn.
 func evaluateStaticExchange(pos *position, move move) (int, bool) {
-	dbgx.seeCalls++
 	child := *pos
 	child.makeMove(move)
 	isChecking := child.isInCheck()
