@@ -324,8 +324,9 @@ func loadEmbeddedNet() *nnueNetwork {
 	return defaultNet
 }
 
-// EnableNNUE loads the embedded NNUE network as this game's evaluator, so evaluatePosition uses the
-// neural net instead of the handcrafted evaluation. Returns an error if the embedded net is unusable.
+// EnableNNUE (re)installs the embedded NNUE network as this game's evaluator, replacing any net loaded
+// via EvalFile. NewGame already installs it, so this is only needed to revert to the embedded net.
+// Returns an error if the embedded net is unusable.
 func (game *Game) EnableNNUE() error {
 	net := loadEmbeddedNet()
 	if net == nil {

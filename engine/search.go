@@ -68,12 +68,10 @@ func newSearchState(hs []hashStackEntry, startPos *position, game *Game) *search
 	}
 	// Seed the current position's accumulator (depth 0); deeper accumulators are computed on demand.
 	// accStack grows lazily to the search depth so construction stays cheap.
-	if game.nnue != nil {
-		ss.accStack = make([]nnueAccumulator, 1, 8)
-		ss.accValid = make([]bool, 1, maxPly+8)
-		game.nnue.refresh(&ss.accStack[0], &ss.posStack[0])
-		ss.accValid[0] = true
-	}
+	ss.accStack = make([]nnueAccumulator, 1, 8)
+	ss.accValid = make([]bool, 1, maxPly+8)
+	game.nnue.refresh(&ss.accStack[0], &ss.posStack[0])
+	ss.accValid[0] = true
 	return ss
 }
 
@@ -138,9 +136,7 @@ func (ss *searchState) playMove(m move) {
 	ss.posStack[n].makeMove(m)
 	pos := &ss.posStack[n]
 	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
-	if ss.game.nnue != nil {
-		ss.invalidateAcc(n) // depth n's accumulator is now stale; computed on demand by currentAccumulator
-	}
+	ss.invalidateAcc(n) // depth n's accumulator is now stale; computed on demand by currentAccumulator
 }
 
 // makeNullMove appends a copy of the current position to posStack, applies a
@@ -153,9 +149,7 @@ func (ss *searchState) makeNullMove() {
 	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
 	// A null move leaves piece placement unchanged, so the deferred update is a no-op copy; still mark
 	// the new depth invalid so a deeper eval recomputes through it correctly.
-	if ss.game.nnue != nil {
-		ss.invalidateAcc(n)
-	}
+	ss.invalidateAcc(n)
 }
 
 // undoMove removes the last position from posStack and the last entry from
@@ -391,7 +385,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	}
 
 	if ply >= maxPly {
-		return evaluatePosition(ss, alpha, beta)
+		return evaluatePosition(ss)
 	}
 
 	// Transposition table lookup.
@@ -433,7 +427,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	// once here and reused by reverse-futility pruning and null-move pruning.
 	isPV := beta-alpha > 1
 	if !isPV && !position.isInCheck() {
-		evalScore := evaluatePosition(ss, alpha, beta)
+		evalScore := evaluatePosition(ss)
 
 		// Reverse futility pruning (static null move): at shallow depth, if we are far enough above
 		// beta that even conceding rfpMargin per ply still leaves us at/above beta, assume a quiet
@@ -586,7 +580,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 		ss.seldepth = ply
 	}
 	if ply >= maxPly {
-		return evaluatePosition(ss, alpha, beta)
+		return evaluatePosition(ss)
 	}
 	pos := ss.currentPosition()
 	if pos.isInCheck() {
@@ -595,7 +589,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 		return searchAlphaBeta(ss, depth, ply, alpha, beta, &dummy, moveNone())
 	}
 	// Stand-pat: if the static eval already beats beta we can prune.
-	score := evaluatePosition(ss, alpha, beta)
+	score := evaluatePosition(ss)
 	if score >= beta {
 		ss.dbg.quiescentEvalCutoffs++
 		return score
