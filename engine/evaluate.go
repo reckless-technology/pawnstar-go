@@ -368,6 +368,22 @@ func evalKing(pos *position, color color, endgame bool) int {
 	return pstScore + safetyScore
 }
 
+// rule50ScaleThreshold is the halfmove-clock ply below which the static eval is untouched, so normal
+// play (where the clock is reset often by pawn moves/captures) is unaffected.
+const rule50ScaleThreshold = 20
+
+// scaleByRule50 scales a static eval toward draw as the fifty-move clock climbs, giving the search a
+// standing incentive to make progress (reset the clock) rather than shuffle in a won-but-unconverted
+// position — without it a placement-only NNUE eval is identical at clock 0 and clock 99, and leaks won
+// endgames (notably KBN-vs-K) to the rule. Identity for rule50 ≤ threshold, then a linear ramp to 0 as
+// the clock approaches 100 (the hard draw handled by isDrawByFiftyMoves). Mirrors the C++ ScaleByRule50.
+func scaleByRule50(score, rule50 int) int {
+	if rule50 <= rule50ScaleThreshold {
+		return score
+	}
+	return int(int64(score) * int64(100-rule50) / int64(100-rule50ScaleThreshold))
+}
+
 // evaluatePosition returns the score from the side-to-move's perspective.
 // Returns drawScore for positions with insufficient material.
 // If the material score alone is more than 200 cp outside [alpha, beta], it returns early.
@@ -378,10 +394,13 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 		return drawScore
 	}
 
+	// The eval cache stores the RAW, clock-independent eval (the hash excludes the fifty-move clock, so
+	// the same position can be probed at different clock values); scaleByRule50 is applied on the way
+	// out, never stored.
 	hashScore := ss.game.evalTable.find(pos.hash)
 	if hashScore != hashNotFoundScore {
 		ss.dbg.evalHashHits++
-		return hashScore
+		return scaleByRule50(hashScore, int(pos.halfMove))
 	}
 
 	// NNUE evaluator: neural-net eval from the incrementally-maintained accumulator (no handcrafted
@@ -389,7 +408,7 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 	if ss.game.nnue != nil {
 		score := ss.game.nnue.searchEvalAcc(ss.currentAccumulator(), pos.colorToMove)
 		ss.game.evalTable.record(pos.hash, score)
-		return score
+		return scaleByRule50(score, int(pos.halfMove))
 	}
 
 	wScore := pos.scores[white] + evalMaterialExtra(pos, white)
@@ -420,8 +439,8 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 
 	if pos.colorToMove == white {
 		ss.game.evalTable.record(pos.hash, wScore-bScore)
-		return wScore - bScore
+		return scaleByRule50(wScore-bScore, int(pos.halfMove))
 	}
 	ss.game.evalTable.record(pos.hash, bScore-wScore)
-	return bScore - wScore
+	return scaleByRule50(bScore-wScore, int(pos.halfMove))
 }
