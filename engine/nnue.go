@@ -332,6 +332,7 @@ func (game *Game) EnableNNUE() error {
 		return fmt.Errorf("nnue: embedded net unavailable")
 	}
 	game.nnue = net
+	game.evalTable.clear() // cached scores are net-dependent
 	return nil
 }
 
@@ -344,5 +345,6 @@ func (game *Game) LoadNNUEFile(path string) error {
 		return err
 	}
 	game.nnue = net
+	game.evalTable.clear() // cached scores are net-dependent
 	return nil
 }

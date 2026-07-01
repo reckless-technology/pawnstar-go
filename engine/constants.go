@@ -44,8 +44,9 @@ const (
 	// hashTableMB is the default transposition table size in megabytes.
 	hashTableMB = 512
 
-	// evalHashTableSize is the number of slots in the evaluation hash table.
-	evalHashTableSize = 0x10000
+	// evalHashTableSize is the number of slots in the evaluation cache. At 8 bytes per lockless entry
+	// this is ~8 MB, the size the C++ engine found optimal (larger regressed slightly).
+	evalHashTableSize = 1 << 20
 
 	// aspirationDelta is the initial aspiration window half-width in centipawns.
 	aspirationDelta = 50
