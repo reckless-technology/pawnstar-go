@@ -259,12 +259,18 @@ The handcrafted evaluation above is the fallback; the **NNUE** evaluator below i
 | `go movetime <ms>` | Fixed time per move |
 | `go depth <n>` | Fixed depth |
 | `go infinite` | Search until `stop` |
-| `stop` | Signals search goroutine to halt |
+| `go nodes <n>` | Search until the node limit (checked per thread) |
+| `go searchmoves <m…>` | Restrict the root search to the given moves |
+| `stop` | Signals search goroutines to halt |
 | `quit` | Stops search and exits |
 | `setoption name UseNNUE value <true\|false>` | Switch between NNUE and the handcrafted eval |
 | `setoption name EvalFile value <path\|<embedded>>` | Load an external PSN1 net, or reload the embedded one |
+| `setoption name Threads value <n>` | Lazy SMP search-thread count |
+| `setoption name Hash value <mb>` | Resize the transposition table |
+| `setoption name Clear Hash` | Clear the TT and eval cache |
+| `setoption name Move Overhead value <ms>` | Time reserved from every deadline for GUI/network lag |
 
-[main.go](main.go) is a thin entry point: reads stdin line-by-line and calls `game.HandleCommand`, enabling NNUE at startup unless `PAWNSTAR_NNUE=0`.
+`info` lines carry `depth`, `seldepth`, `score cp`/`score mate N`, `time`, `nodes`, `nps`, `hashfull`, and `pv`. [main.go](main.go) reads stdin line-by-line and calls `game.HandleCommand`, enabling NNUE at startup (unless `PAWNSTAR_NNUE=0`) and setting the thread count from `PAWNSTAR_THREADS`/`NumCPU`. (Pondering is the one UCI feature not implemented.)
 
 ### Search diagnostics
 
