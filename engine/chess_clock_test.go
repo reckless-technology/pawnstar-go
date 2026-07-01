@@ -6,7 +6,8 @@ import (
 )
 
 // TestTimeControlDefaults ports the C++ chess-clock Reset check: newTimeControl restores the standard
-// clock, 5-minute remaining time, 40 moves-to-go, and depth 10.
+// clock, 5-minute remaining time, no moves-to-go (0 → the armDeadline horizon formula, matching C++
+// moves_to_go_ = 0), and depth 10.
 func TestTimeControlDefaults(t *testing.T) {
 	tc := newTimeControl()
 	if tc.clockType != clockStandard {
@@ -15,8 +16,8 @@ func TestTimeControlDefaults(t *testing.T) {
 	if tc.timeRemaining != 5*time.Minute {
 		t.Errorf("timeRemaining = %v, want 5m", tc.timeRemaining)
 	}
-	if tc.numMovesRemaining != 40 {
-		t.Errorf("numMovesRemaining = %d, want 40", tc.numMovesRemaining)
+	if tc.numMovesRemaining != 0 {
+		t.Errorf("numMovesRemaining = %d, want 0", tc.numMovesRemaining)
 	}
 	if tc.depth != 10 {
 		t.Errorf("depth = %d, want 10", tc.depth)
@@ -32,7 +33,7 @@ func TestArmDeadline(t *testing.T) {
 	// Standard clock: soft budget = remaining / moves-to-go; hard stop = min(2×soft, remaining−1s).
 	{
 		tc := timeControl{clockType: clockStandard, timeRemaining: 40 * time.Second, numMovesRemaining: 40}
-		allocated := tc.armDeadline(now, 0)
+		allocated := tc.armDeadline(now, 0, 0)
 		if allocated != time.Second { // 40s / 40
 			t.Errorf("allocated = %v, want 1s", allocated)
 		}
@@ -44,10 +45,22 @@ func TestArmDeadline(t *testing.T) {
 		}
 	}
 
+	// No movestogo: the horizon formula max(40−fullMove, 5) sets moves-to-go. Early game divides by ~40;
+	// late game floors at 5, spending more per move.
+	{
+		tc := timeControl{clockType: clockStandard, timeRemaining: 40 * time.Second} // numMovesRemaining 0
+		if a := tc.armDeadline(now, 0, 0); a != time.Second {                         // 40s / max(40−0,5)=40
+			t.Errorf("horizon allocated (move 0) = %v, want 1s", a)
+		}
+		if a := tc.armDeadline(now, 0, 38); a != 8*time.Second { // 40s / max(40−38,5)=5
+			t.Errorf("horizon allocated (move 38) = %v, want 8s", a)
+		}
+	}
+
 	// The move overhead is reserved from the hard deadline.
 	{
 		tc := timeControl{clockType: clockStandard, timeRemaining: 40 * time.Second, numMovesRemaining: 40}
-		tc.armDeadline(now, 200*time.Millisecond)
+		tc.armDeadline(now, 200*time.Millisecond, 0)
 		if got := tc.stopTime.Sub(now); got != 2*time.Second-200*time.Millisecond {
 			t.Errorf("deadline with overhead = now+%v, want now+1.8s", got)
 		}
@@ -56,7 +69,7 @@ func TestArmDeadline(t *testing.T) {
 	// Fixed-time (movetime) is a straight hard budget less the overhead, no soft budget.
 	{
 		tc := timeControl{clockType: clockFixedTime, timeRemaining: 500 * time.Millisecond}
-		if a := tc.armDeadline(now, 50*time.Millisecond); a != 0 {
+		if a := tc.armDeadline(now, 50*time.Millisecond, 0); a != 0 {
 			t.Errorf("fixed-time allocated = %v, want 0", a)
 		}
 		if got := tc.stopTime.Sub(now); got != 450*time.Millisecond {
@@ -67,7 +80,7 @@ func TestArmDeadline(t *testing.T) {
 	// The 1ms floor: a movetime shorter than the overhead still leaves at least 1ms.
 	{
 		tc := timeControl{clockType: clockFixedTime, timeRemaining: 10 * time.Millisecond}
-		tc.armDeadline(now, 100*time.Millisecond)
+		tc.armDeadline(now, 100*time.Millisecond, 0)
 		if got := tc.stopTime.Sub(now); got != time.Millisecond {
 			t.Errorf("floored deadline = now+%v, want now+1ms", got)
 		}
@@ -76,7 +89,7 @@ func TestArmDeadline(t *testing.T) {
 	// Fixed-depth and infinite clocks arm no deadline (the periodic time check ignores them).
 	for _, ct := range []clockType{clockFixedDepth, clockInfinite} {
 		tc := timeControl{clockType: ct}
-		if a := tc.armDeadline(now, 30*time.Millisecond); a != 0 {
+		if a := tc.armDeadline(now, 30*time.Millisecond, 0); a != 0 {
 			t.Errorf("clock %v allocated = %v, want 0", ct, a)
 		}
 	}

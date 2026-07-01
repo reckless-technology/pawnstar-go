@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"io"
 	"math/rand"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -14,21 +12,12 @@ type openingBook struct {
 	moves map[zobrist][]move
 }
 
-// newOpeningBookFromFile reads book.txt from the same directory as the running binary
-// and builds the hash→moves index.  Returns an empty book if the file is absent.
-// Each line is a sequence of moves from the starting position; for every prefix
-// of a line, the next move is recorded as a candidate for that position's hash.
-func newOpeningBookFromFile() openingBook {
-	exe, err := os.Executable()
-	if err != nil {
-		return openingBook{moves: make(map[zobrist][]move)}
-	}
-	f, err := os.Open(filepath.Join(filepath.Dir(exe), "book.txt"))
-	if err != nil {
-		return openingBook{moves: make(map[zobrist][]move)}
-	}
-	defer f.Close()
-	return loadOpeningBook(f)
+// newOpeningBook builds the hash→moves index from the embedded book (engine/book.txt, compiled in via
+// go:embed), so the engine always has a book with no external file to ship. Each line is a sequence of
+// moves from the starting position; for every prefix of a line, the next move is recorded as a candidate
+// for that position's hash.
+func newOpeningBook() openingBook {
+	return loadOpeningBook(strings.NewReader(embeddedBook))
 }
 
 // loadOpeningBook builds a hash→moves index from book text (one move-sequence per line). A move written

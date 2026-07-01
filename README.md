@@ -228,7 +228,7 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 
 ### Opening book
 
-`openingBook` ([engine/book.go](engine/book.go)) reads [book.txt](book.txt) (385 lines from TSCP) from the same directory as the binary at startup. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves; an absent file silently produces an empty book. `getMove` returns a random candidate, giving variety across games.
+`openingBook` ([engine/book.go](engine/book.go)) parses [engine/book.txt](engine/book.txt) (385 lines from TSCP), embedded in the binary via `go:embed` ([engine/book_embed.go](engine/book_embed.go)) so no external file is needed. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves. `getMove` returns a random candidate, giving variety across games.
 
 ### History heuristic
 
@@ -245,7 +245,7 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 | `ucinewgame` | Stops search, resets position and clock |
 | `position startpos [moves ...]` | Sets position from start FEN, applies move list |
 | `position fen <fen> [moves ...]` | Sets position from FEN, applies move list |
-| `go wtime <ms> btime <ms> [movestogo <n>]` | Standard clock |
+| `go wtime <ms> btime <ms> [winc <ms> binc <ms>] [movestogo <n>]` | Standard clock; without `movestogo`, moves-to-go is a decreasing horizon `max(40−move, 5)`. Increment is parsed but not folded into the budget (SPRT-neutral) |
 | `go movetime <ms>` | Fixed time per move |
 | `go depth <n>` | Fixed depth |
 | `go infinite` | Search until `stop` |

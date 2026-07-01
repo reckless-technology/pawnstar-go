@@ -132,6 +132,15 @@ func moveFromBits(b uint64) move   { return move(int64(b)) }
 // Move::IsQuiet). Pawn pushes and castling count as quiet. Used by late-move pruning.
 func (m move) isQuiet() bool { return m.captured() == noPiece && m.promoted() == noPiece }
 
+// isChecking reports whether the move is flagged as giving check (bit 22). The flag is set during move
+// ordering for captures/promotions from the SEE check test; late-move pruning uses it to never prune a
+// checking move. Mirrors the C++ Move::IsChecking.
+func (m move) isChecking() bool { return int64(m)&moveCheckBit != 0 }
+
+// withCheck returns a copy of m with the gives-check flag (bit 22) set. Mirrors the C++
+// Move::GivesCheck (which mutates in place; move values here are copied, so this returns the update).
+func (m move) withCheck() move { return move(int64(m) | moveCheckBit) }
+
 // pieceTo returns a (piece, to-square) index in [0, contKeys) used to key the countermove and
 // continuation-history tables. moveNone maps to 0 (a harmless slot). Mirrors the C++ Move::piece_to.
 func (m move) pieceTo() int { return int(m.piece())<<6 | int(m.to()) }

@@ -215,7 +215,10 @@ func (ss *searchState) scoreAndSortMoves(moves []move, ply int, prevMove move) {
 		var sort int
 		switch {
 		case !m.isQuiet(): // capture or promotion: order by static exchange evaluation
-			see, _ := evaluateStaticExchange(pos, m)
+			see, isChecking := evaluateStaticExchange(pos, m)
+			if isChecking { // carry the checking status out of ordering so LMP never prunes it
+				m = m.withCheck()
+			}
 			if see >= 0 {
 				sort = winningCaptureBase + see
 			} else {
@@ -509,8 +512,8 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 		// Late move pruning (move-count pruning): at shallow depth in a null-window node not in check,
 		// once we are deep into the (SEE/history-sorted) move list, skip the remaining quiet moves —
-		// they almost never raise alpha. Captures and promotions are never pruned.
-		if nullWindow && !inCheck && depth <= lmpMaxDepth && move.isQuiet() && i >= lmpBase+depth*depth {
+		// they almost never raise alpha. Captures, promotions and checking moves are never pruned.
+		if nullWindow && !inCheck && depth <= lmpMaxDepth && move.isQuiet() && !move.isChecking() && i >= lmpBase+depth*depth {
 			ss.dbg.lmpPrunes++
 			continue
 		}
@@ -679,7 +682,7 @@ func searchRootNode(game *Game) move {
 	// Set up time management: arm the hard deadline and get the soft budget for between-iteration stops.
 	tc := &game.timeControl
 	startTime := time.Now()
-	allocatedTime := tc.armDeadline(startTime, game.moveOverhead)
+	allocatedTime := tc.armDeadline(startTime, game.moveOverhead, int(game.currentPosition().fullMove))
 	game.isCancelPending.Store(false)
 	game.transpositionTable.age()
 
