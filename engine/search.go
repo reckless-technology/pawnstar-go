@@ -39,7 +39,15 @@ type searchState struct {
 	nodeCount int              // nodes searched by this goroutine since the last root iteration reset
 	game      *Game            // shared: time control, cancel flag, parallel semaphore, TT, history, eval table
 	wasCutoff *atomic.Bool     // per-batch cutoff signal; nil for the main search
-	acc       nnueAccumulator  // NNUE accumulator for the current position; maintained across play/undo
+
+	// NNUE lazy accumulator stack, indexed by posStack depth: accStack[i] is the accumulator for
+	// posStack[i], valid iff accValid[i]. Maintained deferred — playMove/makeNullMove only mark the
+	// new depth invalid; the accumulator is brought current on demand by currentAccumulator (nearest
+	// valid ancestor + forward updates) only when an eval actually reads it (on eval-cache miss), so
+	// cut-off nodes never pay for it. undoMove is free: ancestors stay valid, and the popped depth is
+	// re-invalidated by the next playMove into that slot. Both slices are nil when nnue is disabled.
+	accStack []nnueAccumulator
+	accValid []bool
 }
 
 // newSearchState is the private constructor shared by newSearchStateFromGame and
@@ -54,9 +62,13 @@ func newSearchState(hs []hashStackEntry, startPos *position, game *Game, cutoff 
 		game:      game,
 		wasCutoff: cutoff,
 	}
-	// Seed the NNUE accumulator from the fork position; it is then maintained incrementally.
+	// Seed the fork position's accumulator (depth 0); deeper accumulators are computed on demand.
+	// accStack grows lazily to the search depth so a shallow worker fork stays cheap.
 	if game.nnue != nil {
-		game.nnue.refresh(&ss.acc, &ss.posStack[0])
+		ss.accStack = make([]nnueAccumulator, 1, 8)
+		ss.accValid = make([]bool, 1, maxPly+8)
+		game.nnue.refresh(&ss.accStack[0], &ss.posStack[0])
+		ss.accValid[0] = true
 	}
 	return ss
 }
@@ -91,6 +103,41 @@ func (ss *searchState) currentPosition() *position {
 	return &ss.posStack[len(ss.posStack)-1]
 }
 
+// ensureAccDepth grows the lazy accumulator stack so depth d is indexable. Growth appends zeroed
+// (invalid) entries and happens only when the search first reaches a new maximum depth.
+func (ss *searchState) ensureAccDepth(d int) {
+	for len(ss.accStack) <= d {
+		ss.accStack = append(ss.accStack, nnueAccumulator{})
+		ss.accValid = append(ss.accValid, false)
+	}
+}
+
+// invalidateAcc marks depth d's accumulator stale (its position just changed). O(1) — no computation.
+func (ss *searchState) invalidateAcc(d int) {
+	ss.ensureAccDepth(d)
+	ss.accValid[d] = false
+}
+
+// currentAccumulator brings the current (top) position's accumulator up to date and returns it.
+// It walks back to the deepest valid ancestor, then applies incremental updates forward one ply at a
+// time (copy the parent accumulator, apply the piece delta). Called only on an eval-cache miss, so a
+// node that never evaluates never triggers any accumulator work. accValid[0] is seeded true at
+// construction, so the backward walk always terminates.
+func (ss *searchState) currentAccumulator() *nnueAccumulator {
+	d := len(ss.posStack) - 1
+	ss.ensureAccDepth(d)
+	k := d
+	for k > 0 && !ss.accValid[k] {
+		k--
+	}
+	for j := k + 1; j <= d; j++ {
+		ss.accStack[j] = ss.accStack[j-1]
+		ss.game.nnue.update(&ss.accStack[j], &ss.posStack[j-1], &ss.posStack[j])
+		ss.accValid[j] = true
+	}
+	return &ss.accStack[d]
+}
+
 // playMove appends a copy of the current position to posStack, applies m to it,
 // and records the resulting (hash, halfMove) in hashStack.
 func (ss *searchState) playMove(m move) {
@@ -100,7 +147,7 @@ func (ss *searchState) playMove(m move) {
 	pos := &ss.posStack[n]
 	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
 	if ss.game.nnue != nil {
-		ss.game.nnue.update(&ss.acc, &ss.posStack[n-1], &ss.posStack[n])
+		ss.invalidateAcc(n) // depth n's accumulator is now stale; computed on demand by currentAccumulator
 	}
 }
 
@@ -112,20 +159,19 @@ func (ss *searchState) makeNullMove() {
 	ss.posStack[n].makeNullMove()
 	pos := &ss.posStack[n]
 	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
-	// A null move leaves piece placement unchanged, so update is a no-op; called for undo symmetry.
+	// A null move leaves piece placement unchanged, so the deferred update is a no-op copy; still mark
+	// the new depth invalid so a deeper eval recomputes through it correctly.
 	if ss.game.nnue != nil {
-		ss.game.nnue.update(&ss.acc, &ss.posStack[n-1], &ss.posStack[n])
+		ss.invalidateAcc(n)
 	}
 }
 
 // undoMove removes the last position from posStack and the last entry from
 // hashStack, reverting to the state before the most recent playMove or makeNullMove.
+// The accumulator needs no work: ancestor accumulators stay valid, and the popped depth's slot is
+// re-invalidated by the next playMove into it.
 func (ss *searchState) undoMove() {
 	n := len(ss.posStack)
-	// Reverse the accumulator delta (swap from/to); a no-op for a null move.
-	if ss.game.nnue != nil {
-		ss.game.nnue.update(&ss.acc, &ss.posStack[n-1], &ss.posStack[n-2])
-	}
 	ss.posStack = ss.posStack[:n-1]
 	ss.hashStack = ss.hashStack[:len(ss.hashStack)-1]
 }

@@ -65,10 +65,12 @@ func TestNNUEReference(t *testing.T) {
 	t.Logf("NNUE reference: %d positions, max |diff| = %d cp (tolerance %d)", checked, maxDiff, tolerance)
 }
 
-// TestNNUEIncremental verifies the incrementally-maintained search accumulator (updated across
-// playMove/undoMove) stays bit-identical to a full refresh at every node of a legal-move walk, and
-// is fully restored after each undo. This is the gate for the incremental accumulator: if it holds,
-// the fast incremental path evaluates exactly as the reference full-refresh path.
+// TestNNUEIncremental verifies the lazy search accumulator stays bit-identical to a full refresh at
+// every node of a legal-move walk, and after every undo. It exercises two paths: findAccMismatch
+// forces currentAccumulator at every node (single-ply catch-ups over all move types), and
+// findDeepCatchUpMismatch descends without evaluating and catches up in one multi-ply sweep — the
+// deferred path a real search takes when interior nodes never evaluate. If both hold, the fast lazy
+// path evaluates exactly as the reference full-refresh path.
 func TestNNUEIncremental(t *testing.T) {
 	game := NewGame()
 	if err := game.EnableNNUE(); err != nil {
@@ -89,19 +91,30 @@ func TestNNUEIncremental(t *testing.T) {
 		game.newGameFromFen(fen)
 		ss := newSearchStateFromGame(game)
 		if msg := findAccMismatch(game.nnue, ss, depth); msg != "" {
-			t.Errorf("fen %q: %s", fen, msg)
+			t.Errorf("fen %q (per-node): %s", fen, msg)
+		}
+		ss = newSearchStateFromGame(game)
+		if msg := findDeepCatchUpMismatch(game.nnue, ss, depth); msg != "" {
+			t.Errorf("fen %q (deep catch-up): %s", fen, msg)
 		}
 	}
 }
 
-// findAccMismatch walks all legal move sequences to the given depth, comparing the maintained
-// accumulator with a full refresh at every node and after every undo. Returns "" if all match, else
-// a description (move path + lane-diff counts) of the first mismatch found.
+// accsEqual reports whether the maintained (caught-up) accumulator for the current node matches a
+// full refresh of the current position.
+func accsEqual(net *nnueNetwork, ss *searchState) (bool, *nnueAccumulator, *nnueAccumulator) {
+	fresh := &nnueAccumulator{}
+	net.refresh(fresh, ss.currentPosition())
+	got := ss.currentAccumulator()
+	return *fresh == *got, fresh, got
+}
+
+// findAccMismatch walks all legal move sequences to the given depth, forcing a catch-up and comparing
+// against a full refresh at every node and after every undo. Returns "" if all match, else a
+// description (move path + lane-diff counts) of the first mismatch found.
 func findAccMismatch(net *nnueNetwork, ss *searchState, depth int) string {
-	var fresh nnueAccumulator
-	net.refresh(&fresh, ss.currentPosition())
-	if fresh != ss.acc {
-		dw, db := accDiffCount(&fresh, &ss.acc)
+	if ok, fresh, got := accsEqual(net, ss); !ok {
+		dw, db := accDiffCount(fresh, got)
 		return fmt.Sprintf("depth %d: accumulator differs (%d white / %d black lanes)", depth, dw, db)
 	}
 	if depth == 0 {
@@ -113,10 +126,31 @@ func findAccMismatch(net *nnueNetwork, ss *searchState, depth int) string {
 			return m.String() + " > " + msg
 		}
 		ss.undoMove()
-		net.refresh(&fresh, ss.currentPosition())
-		if fresh != ss.acc {
+		if ok, _, _ := accsEqual(net, ss); !ok {
 			return "accumulator not restored after undo " + m.String()
 		}
+	}
+	return ""
+}
+
+// findDeepCatchUpMismatch descends the first legal move at each node all the way to the leaf WITHOUT
+// ever evaluating, then forces a single multi-ply catch-up at the leaf and compares to a full refresh.
+// This exercises the deferred path where several plies are brought current in one sweep.
+func findDeepCatchUpMismatch(net *nnueNetwork, ss *searchState, depth int) string {
+	played := 0
+	for d := depth; d > 0; d-- {
+		moves := ss.currentPosition().generateLegalMoves()
+		if len(moves) == 0 {
+			break
+		}
+		ss.playMove(moves[0]) // no currentAccumulator call here — leaves intermediate depths invalid
+		played++
+	}
+	fresh := &nnueAccumulator{}
+	net.refresh(fresh, ss.currentPosition())
+	if got := ss.currentAccumulator(); *fresh != *got { // single sweep catches up all `played` plies
+		dw, db := accDiffCount(fresh, got)
+		return fmt.Sprintf("deep catch-up over %d plies differs (%d white / %d black lanes)", played, dw, db)
 	}
 	return ""
 }
