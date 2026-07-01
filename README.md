@@ -5,13 +5,13 @@ A UCI chess engine written in Go. This is a port of the original C++ Pawnstar en
 ## Build and run
 
 ```bash
-go build -o pawnstar-go .
-./pawnstar-go              # interactive UCI session
+make build                # build with GOEXPERIMENT=simd -> ./pawnstar-go
+./pawnstar-go             # interactive UCI session
 ```
 
-Requires Go 1.24 or later.
+Requires Go 1.26 or later. The engine evaluates with an embedded **NNUE** network by default; its SIMD kernels use `simd/archsimd`, which is gated behind `GOEXPERIMENT=simd` (the `Makefile` sets this). A plain `go build` also works, falling back to bit-identical scalar kernels. Start with `PAWNSTAR_NNUE=0` to use the handcrafted evaluation instead.
 
-Point any UCI-compatible GUI (Arena, Cute Chess, etc.) at the binary — no configuration needed.
+Point any UCI-compatible GUI (Arena, Cute Chess, etc.) at the binary — no configuration needed. UCI options: `UseNNUE` (default true) and `EvalFile` (path to a PSN1 net, or `<embedded>` for the built-in one).
 
 ## Testing
 
@@ -23,12 +23,14 @@ go test ./engine/ -run TestPerftExtra -short -v  # verify incremental Zobrist ha
 go test ./engine/ -run TestSearch -short -v       # search every EPD position to depth 9; exercises TT and search
 go test ./engine/ -run TestBratkoKopec -v         # 24 Bratko-Kopec positions at depth 8; regression test for search quality
 go test ./engine/ -run TestSEE -v                 # 18 static exchange evaluation cases; unit tests for evaluateStaticExchange
+go test ./engine/ -run TestNNUEReference -v       # NNUE exact eval == C++ 250-FEN reference (0 cp)
+go test ./engine/ -run TestNNUEIncremental -v     # lazy accumulator == full refresh (bit-identical)
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
-Move generation correctness is verified by perft — counting leaf nodes to a given depth against known values. All 131 EPD positions must pass at every depth before any change is considered correct.
+Run with `GOEXPERIMENT=simd` (or `make test`) to exercise the SIMD kernels. Move generation correctness is verified by perft — counting leaf nodes to a given depth against known values. All 131 EPD positions must pass at every depth before any change is considered correct.
 
-The engine runs at approximately **42 Mnps** on the perft suite. The C++ original reaches ~600 Mnps via BMI2 PEXT instructions.
+The engine runs at approximately **42 Mnps** on the perft suite with the handcrafted eval. NNUE evaluates fewer nodes per second but is far stronger — a fixed-depth self-play SPRT put it **+572 Elo** over the handcrafted baseline (146W/3L/5D). The C++ original reaches ~600 Mnps via BMI2 PEXT instructions.
 
 ## Architecture
 
@@ -232,6 +234,17 @@ An alpha/beta material early-exit skips the full evaluation when the material sc
 
 **Static Exchange Evaluation** ([engine/see.go](engine/see.go)) simulates the sequence of captures on a square using the least-valuable-attacker method, propagating scores backwards so each side can choose not to recapture if it would lose material. Used in move ordering to distinguish winning from losing captures.
 
+The handcrafted evaluation above is the fallback; the **NNUE** evaluator below is the default and is what the engine actually plays with.
+
+### NNUE evaluation
+
+[engine/nnue.go](engine/nnue.go) is a direct Go port of the C++ Pawnstar NNUE — a Chess768 → 1024 → 1 network with 8 king buckets and SCReLU activation, quantised (QA=255, QB=64, scale=400). It reads the C++ `pawnstar-*.bin` net format directly (32-byte `PSN1` header + little-endian int16 weight arrays); the v12 net is embedded in the binary via `go:embed`. Against the handcrafted eval it is worth **+572 Elo** (fixed-depth self-play SPRT).
+
+- **Feature transformer / accumulator:** two 1024-int16 perspective accumulators. Feature row per perspective is `bucket*768 + colour*384 + (type−1)*64 + square`, with the black perspective mirroring colour and square (`sq ^ 0x38`); the king bucket comes from `nnueKingBucketMap`.
+- **Lazy accumulator:** maintained on `searchState` and computed on demand. `playMove`/`makeNullMove` only invalidate the new ply; `undoMove` is free; `currentAccumulator` catches up from the nearest valid ancestor (copy + incremental `update`) **only when an eval reads it on an eval-cache miss**. A king move that crosses a bucket boundary refreshes that perspective from scratch. Captures, en passant, castling and promotion are handled uniformly through the colour bitboards plus the `squares[]` array.
+- **Kernels** are build-tag split into SIMD (`amd64 && goexperiment.simd`, 256-bit `simd/archsimd`) and scalar fallbacks, and are bit-identical. SIMD is ~3–5× faster on the output dot and column updates.
+- **Correctness:** `TestNNUEReference` matches the C++ exact evaluator on 250 FENs to 0 cp; `TestNNUEIncremental` proves the lazy accumulator equals a full refresh at every node. Toggle at runtime with the `UseNNUE`/`EvalFile` UCI options or the `PAWNSTAR_NNUE` env var.
+
 ### Opening book
 
 `openingBook` ([engine/book.go](engine/book.go)) reads [book.txt](book.txt) (385 lines from TSCP) from the same directory as the binary at startup. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves; an absent file silently produces an empty book. `getMove` returns a random candidate, giving variety across games.
@@ -257,8 +270,10 @@ An alpha/beta material early-exit skips the full evaluation when the material sc
 | `go infinite` | Search until `stop` |
 | `stop` | Signals search goroutine to halt |
 | `quit` | Stops search and exits |
+| `setoption name UseNNUE value <true\|false>` | Switch between NNUE and the handcrafted eval |
+| `setoption name EvalFile value <path\|<embedded>>` | Load an external PSN1 net, or reload the embedded one |
 
-[main.go](main.go) is a thin entry point: reads stdin line-by-line and calls `game.HandleCommand`.
+[main.go](main.go) is a thin entry point: reads stdin line-by-line and calls `game.HandleCommand`, enabling NNUE at startup unless `PAWNSTAR_NNUE=0`.
 
 ### Search diagnostics
 
