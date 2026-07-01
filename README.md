@@ -22,7 +22,9 @@ go test ./engine/ -run TestPerft/002 -v           # single position by 1-based i
 go test ./engine/ -run TestPerftExtra -short -v  # verify incremental Zobrist hash vs recomputed hash at every node
 go test ./engine/ -run TestSearch -short -v       # search every EPD position to depth 9; exercises TT and search
 go test ./engine/ -run TestBratkoKopec -v         # 24 Bratko-Kopec positions at depth 8; regression test for search quality
-go test ./engine/ -run TestSEE -v                 # 18 static exchange evaluation cases; unit tests for evaluateStaticExchange
+go test ./engine/ -run TestSEE -v                 # 24 SEE cases + TestSEECrossCheck (fast == make-move reference over ~1M captures)
+go test ./engine/ -run TestOpeningBook -v         # opening-book '?' (questionable) move handling
+make test-uci                                     # UCI protocol as a process (handshake, seldepth, searchmoves, currmove, bench)
 go test ./engine/ -run TestNNUEReference -v       # NNUE exact eval == C++ 250-FEN reference (0 cp)
 go test ./engine/ -run TestNNUEIncremental -v     # lazy accumulator == full refresh (bit-identical)
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
@@ -261,9 +263,11 @@ The handcrafted evaluation above is the fallback; the **NNUE** evaluator below i
 | `go infinite` | Search until `stop` |
 | `go nodes <n>` | Search until the node limit (checked per thread) |
 | `go searchmoves <m…>` | Restrict the root search to the given moves |
+| `bench` | Fixed-position node-count benchmark (deterministic; single-threaded, book off) |
 | `stop` | Signals search goroutines to halt |
 | `quit` | Stops search and exits |
 | `setoption name UseNNUE value <true\|false>` | Switch between NNUE and the handcrafted eval |
+| `setoption name OwnBook value <true\|false>` | Consult the opening book (false forces a real search) |
 | `setoption name EvalFile value <path\|<embedded>>` | Load an external PSN1 net, or reload the embedded one |
 | `setoption name Threads value <n>` | Lazy SMP search-thread count |
 | `setoption name Hash value <mb>` | Resize the transposition table |
