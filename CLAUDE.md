@@ -4,14 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-Requires Go 1.24 or later.
+Requires Go 1.26 or later (the NNUE SIMD kernels use the `simd/archsimd` package, gated behind `GOEXPERIMENT=simd`).
 
 ```bash
-go build -o pawnstar-go .   # build the engine binary
-go test ./engine/            # run all tests
+make build                  # build with GOEXPERIMENT=simd (recommended) -> ./pawnstar-go
+make test                   # run all tests with SIMD enabled
+make test-short             # -short variant
+make baseline               # snapshot the current binary as ./pawnstar-go-baseline for SPRT
 ```
 
-Run the engine interactively via UCI: `./pawnstar-go`
+The `Makefile` sets `GOEXPERIMENT=simd` for you. Building directly still works — `GOEXPERIMENT=simd go build -o pawnstar-go .` — and a plain `go build` compiles too, falling back to the scalar NNUE kernels (`engine/nnue_kernels_generic.go`) selected by build tag. The SIMD and scalar kernels are bit-identical; SIMD is ~3–5× faster on the hot paths.
+
+Run the engine interactively via UCI: `./pawnstar-go`. NNUE is the default evaluator; set env `PAWNSTAR_NNUE=0` to start on the handcrafted eval instead.
 
 ## Running Tests
 
@@ -25,12 +29,19 @@ go test ./engine/ -run TestPerftExtra -short -v  # verify incremental Zobrist ha
 go test ./engine/ -run TestSearch -short -v       # run search on every EPD position to depth 9
 go test ./engine/ -run TestBratkoKopec -v         # 24 Bratko-Kopec positions at depth 8; search quality regression
 go test ./engine/ -run TestSEE -v                 # 18 static exchange evaluation unit tests
+go test ./engine/ -run TestNNUEReference -v       # NNUE EvaluateExact vs 250-FEN C++ reference (gate: 0 cp)
+go test ./engine/ -run TestNNUEIncremental -v     # lazy accumulator == full refresh, bit-identical
+go test ./engine/ -bench BenchmarkNNUE -benchmem   # NNUE evaluate/refresh/update micro-benchmarks
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
-Always run `TestPerft` and `TestSearch` together when verifying engine changes. `TestBratkoKopec` is the search quality gate; its accepted move set was observed across multiple runs and baked in.
+Run these with `GOEXPERIMENT=simd` (or via `make test`) so the SIMD kernels are exercised. Always run `TestPerft` and `TestSearch` together when verifying engine changes. `TestBratkoKopec` is the search quality gate; it runs with **NNUE enabled** and its accepted move set was generated from multiple NNUE runs at depths 7–8 (regenerate with `GEN_BK=1 go test -run TestGenerateBratkoKopecNNUE` after swapping the embedded net). `TestNNUEReference` (exact-eval correctness) and `TestNNUEIncremental` (lazy accumulator correctness) are the NNUE gates — both must stay green after any accumulator or kernel change.
 
-The Go port runs at ~42 Mnps; the C++ original reaches ~700 Mnps via BMI2 PEXT. Perft benchmarks are the primary tool for tracking performance regressions.
+The Go port runs at ~42 Mnps with the handcrafted eval; NNUE is slower per node but far stronger (SPRT: +572 Elo vs the handcrafted baseline at fixed depth). The C++ original reaches ~700 Mnps via BMI2 PEXT. Perft benchmarks are the primary tool for tracking move-generation performance regressions.
+
+## SPRT self-play harness
+
+`tools/sprt.sh <candidate-bin> <baseline-bin> [rounds]` runs a fastchess binary-vs-binary SPRT (single-core engines via `GOMAXPROCS=1`, fixed depth via `DEPTH=`, openings from `~/pawnstar_nnue/openings.epd`). Snapshot a baseline with `make baseline`. Every eval or search change that could affect strength is gated this way — run it in the background, they are long. The NNUE port itself passed [0, 10] with LLR 2.96 (146W/3L/5D over 154 games).
 
 ## Playing test games
 
@@ -84,10 +95,18 @@ Move ordering: (1) TT move tried first; (2) remaining moves scored by `scoreAndS
 
 **Evaluation** — [engine/evaluate.go](engine/evaluate.go) returns the score from the side-to-move's perspective. Search piece values (used by `pstValue`): P=100, N=350, B=350, R=525, Q=1000 cp. SEE uses simplified values (P=100, N/B=300, R=500, Q=900) for speed. PST tables are stored with rank 8 at low indices; White reads via `sq ^ 0x38` (rank flip), Black reads directly. PST scores for all non-king pieces are accumulated into `scores[c]` incrementally. Evaluation adds: bishop-pair bonus (+30 cp), pawn structure scores (passed-pawn PST, defended +5, backward −10, doubled −10, isolated −20 cp), bishop and rook mobility (lookup tables by available-square count), and king safety (phase-dependent PST, three-row pawn shelter with friendly/enemy weights of ±15/±10/±5, open-file penalties, adjacent-piece bonuses). An alpha/beta material early-exit skips the full evaluation when material alone is more than 200 cp outside the search window. Results are cached in a 64 K-entry `evalHashTable`; each entry carries its own `lock uint32` CAS spinlock, matching the transposition table's locking design. SEE ([engine/see.go](engine/see.go)) is used in move ordering for captures.
 
+**NNUE evaluation** — [engine/nnue.go](engine/nnue.go) is the default evaluator (a `*nnueNetwork` on `Game`; `nil` selects the handcrafted eval above). It is a direct port of the C++ Pawnstar NNUE: a Chess768 → 1024 → 1 network with 8 king buckets and SCReLU activation, quantised (QA=255, QB=64, scale=400). The net is loaded from a 32-byte `PSN1`-stamped `.bin` (little-endian int16 arrays: feature weights, feature bias, output weights, output bias) — the exact C++ `pawnstar-*.bin` format, read directly with no conversion. The v12 net is embedded via `go:embed` ([engine/nnue_embed.go](engine/nnue_embed.go), `engine/nnue/pawnstar-v12.bin`).
+
+- **Feature indexing** (`nnueFeatureRow`): per perspective, `bucket*768 + colour*384 + (type−1)*64 + square`; the black perspective flips the colour bit and mirrors the square (`sq ^ 0x38`). King bucket per perspective from `nnueKingBucketMap[kingSquare]` (black king mirrored first).
+- **Accumulator** (`nnueAccumulator`: two 1024-int16 perspectives) is maintained **lazily** on `searchState`. `playMove`/`makeNullMove` only mark the new ply's accumulator invalid; `undoMove` is free; `currentAccumulator` brings the current node up to date from the nearest valid ancestor (copy + incremental `update`) **only on an eval-cache miss**, so cut-off nodes and eval-cache hits never touch it. A king move crossing a bucket boundary triggers a full `refreshSide` of that perspective. Captures/EP/castling/promotion are handled uniformly via colour-bitboard diff + the `squares[]` array.
+- **Kernels** are build-tag split: SIMD (`nnue_kernels_amd64.go`, `amd64 && goexperiment.simd`, 256-bit archsimd) and scalar (`nnue_kernels_generic.go`); bit-identical. `outputDot` is the SCReLU output dot; `addColumn`/`subColumn` are the accumulator column updates.
+- **Score band**: `evaluateExact` keeps the faithful ±30000 clamp for the reference test; the search path (`searchEvalAcc`) clamps into ±(`winThreshold`−1000)=±8000 so a large eval can never collide with mate scores.
+- **Gates**: `TestNNUEReference` (== C++ 250-FEN reference at 0 cp), `TestNNUEIncremental` (lazy accumulator == full refresh, bit-identical). Enable per-game with `game.EnableNNUE()` (embedded) or `game.LoadNNUEFile(path)` (external).
+
 **History heuristic** — [engine/history.go](engine/history.go) records how often each (ply, from→to) pair raised alpha or caused a beta cutoff. Counts are added to the move sort score via `scoreAndSortMovesInner` and reset at the start of each root search via `historyTable.clear()`.
 
 **Opening book** — [engine/book.go](engine/book.go) reads [book.txt](book.txt) (385 lines from TSCP) from the same directory as the binary at startup via `os.Executable()`. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves; an absent file silently produces an empty book. `getMove` returns a random candidate for variety across games.
 
-**UCI protocol** — `Game.HandleCommand` in [engine/game.go](engine/game.go) parses all standard UCI commands: `uci`, `isready`, `ucinewgame`, `position`, `go` (all clock types), `stop`, `quit`. [main.go](main.go) is a thin entry point that reads stdin line-by-line and delegates to `HandleCommand`.
+**UCI protocol** — `Game.HandleCommand` in [engine/game.go](engine/game.go) parses all standard UCI commands: `uci`, `isready`, `ucinewgame`, `position`, `go` (all clock types), `stop`, `quit`, and `setoption`. Two options are advertised: `UseNNUE` (check, default true — false selects the handcrafted eval) and `EvalFile` (string, default `<embedded>` — a path to a PSN1 net, or `<embedded>`/`default`/empty to reload the embedded net). `handleUciSetOption`/`parseSetOption` span multi-word option names and values. [main.go](main.go) is a thin entry point that reads stdin line-by-line and delegates to `HandleCommand`; it enables NNUE at startup unless `PAWNSTAR_NNUE=0`.
 
 **Search diagnostics** — [engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, draw detection (`drawsByRepetition`), parallel search counts (`parallelSearches`, `parallelCutoffs`, `parallelMovesSearched`), aspiration window failures (`aspirationFails`), killer move beta cutoffs (`killerBetaCutoffs`), and TT spinlock contention (`spinlocksFind`, `spinlocksRecord`). Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect search behaviour. Counters accumulate across searches unless explicitly reset.
