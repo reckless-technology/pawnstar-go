@@ -1,2 +1,6 @@
 pawnstar-go
+pawnstar-go-baseline
 .claude/worktrees/
+# fastchess SPRT artifacts
+config.json
+*.pgn

@@ -39,6 +39,7 @@ type searchState struct {
 	nodeCount int              // nodes searched by this goroutine since the last root iteration reset
 	game      *Game            // shared: time control, cancel flag, parallel semaphore, TT, history, eval table
 	wasCutoff *atomic.Bool     // per-batch cutoff signal; nil for the main search
+	acc       nnueAccumulator  // NNUE accumulator for the current position; maintained across play/undo
 }
 
 // newSearchState is the private constructor shared by newSearchStateFromGame and
@@ -47,12 +48,17 @@ type searchState struct {
 func newSearchState(hs []hashStackEntry, startPos *position, game *Game, cutoff *atomic.Bool) *searchState {
 	ps := make([]position, 1, maxPly)
 	ps[0] = *startPos
-	return &searchState{
+	ss := &searchState{
 		posStack:  ps,
 		hashStack: hs,
 		game:      game,
 		wasCutoff: cutoff,
 	}
+	// Seed the NNUE accumulator from the fork position; it is then maintained incrementally.
+	if game.nnue != nil {
+		game.nnue.refresh(&ss.acc, &ss.posStack[0])
+	}
+	return ss
 }
 
 // newSearchStateFromGame creates a searchState for the main (serial) search.
@@ -93,6 +99,9 @@ func (ss *searchState) playMove(m move) {
 	ss.posStack[n].makeMove(m)
 	pos := &ss.posStack[n]
 	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
+	if ss.game.nnue != nil {
+		ss.game.nnue.update(&ss.acc, &ss.posStack[n-1], &ss.posStack[n])
+	}
 }
 
 // makeNullMove appends a copy of the current position to posStack, applies a
@@ -103,12 +112,21 @@ func (ss *searchState) makeNullMove() {
 	ss.posStack[n].makeNullMove()
 	pos := &ss.posStack[n]
 	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
+	// A null move leaves piece placement unchanged, so update is a no-op; called for undo symmetry.
+	if ss.game.nnue != nil {
+		ss.game.nnue.update(&ss.acc, &ss.posStack[n-1], &ss.posStack[n])
+	}
 }
 
 // undoMove removes the last position from posStack and the last entry from
 // hashStack, reverting to the state before the most recent playMove or makeNullMove.
 func (ss *searchState) undoMove() {
-	ss.posStack = ss.posStack[:len(ss.posStack)-1]
+	n := len(ss.posStack)
+	// Reverse the accumulator delta (swap from/to); a no-op for a null move.
+	if ss.game.nnue != nil {
+		ss.game.nnue.update(&ss.acc, &ss.posStack[n-1], &ss.posStack[n-2])
+	}
+	ss.posStack = ss.posStack[:n-1]
 	ss.hashStack = ss.hashStack[:len(ss.hashStack)-1]
 }
 
