@@ -11,16 +11,14 @@ import (
 // maintaining the game-history stack in Game.posStack.
 //
 // All bitboard fields are kept in sync with squares at all times.
-// Piece-square scores and the Zobrist hash are maintained incrementally by
-// addPiece, removePiece, and movePiece so evaluation and hashing are O(1)
-// at every node.
+// The Zobrist hash is maintained incrementally by addPiece, removePiece, and
+// movePiece so hashing is O(1) at every node.
 type position struct {
 	pieces      [7]bitboard    // per-piece-type occupancy; index = piece constant (pawn=1..king=6, 0 unused)
 	colors      [2]bitboard    // per-color occupancy; colors[white]|colors[black] == occupied()
 	squares     [64]piece      // reverse lookup: squares[sq] gives the piece type on sq, or noPiece
 	checkers    bitboard       // pieces currently giving check to the side to move; refreshed by makeMove
 	hash        zobrist        // Zobrist hash; updated incrementally, recomputed from scratch only in positionFromFen
-	scores      [2]int         // material + PST totals per color, king excluded (king PST is phase-dependent)
 	epSquare    square         // target square of the last double pawn push, or noSquare if none
 	halfMove    uint8          // half-move clock; reset on pawn moves and captures; draw at 100
 	fullMove    uint8          // full-move number stored 0-based (add 1 when writing FEN)
@@ -48,14 +46,13 @@ func (position *position) kingSquare(c color) square {
 }
 
 // addPiece places p of color c on sq and updates the bitboards, squares array,
-// Zobrist hash, and incremental PST score.
+// and Zobrist hash.
 func (position *position) addPiece(c color, p piece, sq square) {
 	bb := squareBB(sq)
 	position.pieces[p] ^= bb
 	position.colors[c] ^= bb
 	position.hash ^= pieceSquareHashes[c][p-1][sq]
 	position.squares[sq] = p
-	position.scores[c] += pstValue(c, p, sq)
 }
 
 // removePiece removes the piece of color c on sq and updates the same fields.
@@ -65,7 +62,6 @@ func (position *position) removePiece(c color, p piece, sq square) {
 	position.colors[c] ^= bb
 	position.hash ^= pieceSquareHashes[c][p-1][sq]
 	position.squares[sq] = noPiece
-	position.scores[c] -= pstValue(c, p, sq)
 }
 
 // movePiece slides piece p of color c from from to to, updating all incremental state.
@@ -76,7 +72,6 @@ func (position *position) movePiece(c color, p piece, from, to square) {
 	position.hash ^= pieceSquareHashes[c][p-1][from] ^ pieceSquareHashes[c][p-1][to]
 	position.squares[from] = noPiece
 	position.squares[to] = p
-	position.scores[c] += pstValue(c, p, to) - pstValue(c, p, from)
 }
 
 // attacksTo returns a bitboard of all pieces of color c that attack sq.

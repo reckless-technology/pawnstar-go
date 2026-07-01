@@ -62,7 +62,7 @@ type Game struct {
 	timeControl        timeControl        // clock configuration for the current search
 	evalTable          evalHashTable      // lockless evaluation cache, shared by all Lazy SMP threads
 	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
-	nnue               *nnueNetwork       // NNUE evaluator; nil selects the handcrafted evaluation
+	nnue               *nnueNetwork       // NNUE evaluator (the only evaluator); installed by NewGame, swappable via EvalFile
 	threadCount        int                // Lazy SMP search threads; 1 = single-threaded (default; tests rely on it)
 	moveOverhead       time.Duration      // reserved from every hard deadline for GUI/network lag (UCI Move Overhead)
 	useOwnBook         bool               // consult the opening book (UCI OwnBook); false forces a real search
@@ -72,13 +72,15 @@ type Game struct {
 	isCancelPending    atomic.Bool        // set true to signal all search goroutines to stop
 }
 
-// NewGame creates an engine instance ready to accept UCI commands.
+// NewGame creates an engine instance ready to accept UCI commands. NNUE is the only evaluator, so the
+// embedded net is installed at construction; a different net can still be loaded later via EvalFile.
 func NewGame() *Game {
 	game := &Game{
 		transpositionTable: newTranspositionTable(hashTableMB),
 		timeControl:        newTimeControl(),
 		openingBook:        newOpeningBookFromFile(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
+		nnue:               loadEmbeddedNet(),
 		threadCount:        1, // single-threaded by default; main() / UCI `Threads` raise it for play
 		moveOverhead:       30 * time.Millisecond,
 		useOwnBook:         true,
@@ -100,7 +102,6 @@ func (game *Game) HandleCommand(line string) bool {
 	case "uci":
 		fmt.Println("id name Pawnstar-Go")
 		fmt.Println("id author Jonny Reckless")
-		fmt.Println("option name UseNNUE type check default true")
 		fmt.Println("option name OwnBook type check default true")
 		fmt.Println("option name EvalFile type string default <embedded>")
 		fmt.Printf("option name Threads type spin default %d min 1 max %d\n", game.threadCount, maxSearchThreads)
@@ -138,20 +139,11 @@ func (game *Game) SetThreads(n int) {
 }
 
 // handleUciSetOption processes "setoption name <Name> [value <Value>]". Supported options:
-//   - UseNNUE (check): true installs the embedded NNUE evaluator, false selects the handcrafted eval.
 //   - EvalFile (string): a path to a PSN1 net to load; "<embedded>", "default" or empty reload the
 //     embedded net. Names and values may contain spaces, so both are parsed span-wise.
 func (game *Game) handleUciSetOption(fields []string) {
 	name, value := parseSetOption(fields)
 	switch strings.ToLower(name) {
-	case "usennue":
-		if strings.EqualFold(value, "false") {
-			game.nnue = nil
-			game.evalTable.clear() // switching evaluators invalidates cached scores
-			fmt.Println("info string NNUE disabled; using handcrafted eval")
-		} else if err := game.EnableNNUE(); err != nil {
-			fmt.Printf("info string %v\n", err)
-		}
 	case "evalfile":
 		if value == "" || value == "<embedded>" || strings.EqualFold(value, "default") {
 			if err := game.EnableNNUE(); err != nil {

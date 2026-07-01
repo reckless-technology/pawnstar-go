@@ -9,9 +9,9 @@ make build                # build with GOEXPERIMENT=simd -> ./pawnstar-go
 ./pawnstar-go             # interactive UCI session
 ```
 
-Requires Go 1.26 or later. The engine evaluates with an embedded **NNUE** network by default; its SIMD kernels use `simd/archsimd`, which is gated behind `GOEXPERIMENT=simd` (the `Makefile` sets this). A plain `go build` also works, falling back to bit-identical scalar kernels. Start with `PAWNSTAR_NNUE=0` to use the handcrafted evaluation instead.
+Requires Go 1.26 or later. The engine evaluates with an embedded **NNUE** network (the only evaluator); its SIMD kernels use `simd/archsimd`, which is gated behind `GOEXPERIMENT=simd` (the `Makefile` sets this). A plain `go build` also works, falling back to bit-identical scalar kernels.
 
-Point any UCI-compatible GUI (Arena, Cute Chess, etc.) at the binary — no configuration needed. UCI options: `UseNNUE` (default true) and `EvalFile` (path to a PSN1 net, or `<embedded>` for the built-in one).
+Point any UCI-compatible GUI (Arena, Cute Chess, etc.) at the binary — no configuration needed. UCI option `EvalFile` (path to a PSN1 net, or `<embedded>` for the built-in one) loads an alternative network.
 
 ## Testing
 
@@ -32,7 +32,7 @@ go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 
 Run with `GOEXPERIMENT=simd` (or `make test`) to exercise the SIMD kernels. Move generation correctness is verified by perft — counting leaf nodes to a given depth against known values. All 131 EPD positions must pass at every depth before any change is considered correct.
 
-The engine runs at approximately **42 Mnps** on the perft suite with the handcrafted eval. NNUE evaluates fewer nodes per second but is far stronger — a fixed-depth self-play SPRT put it **+572 Elo** over the handcrafted baseline (146W/3L/5D). The C++ original reaches ~600 Mnps via BMI2 PEXT instructions.
+Perft (move generation only) runs at approximately **42 Mnps**. The NNUE evaluator used in real search is slower per node but far stronger — when first ported it measured **+572 Elo** over the engine's former handcrafted evaluation in a fixed-depth self-play SPRT (146W/3L/5D); that handcrafted eval has since been removed. The C++ original reaches ~600 Mnps via BMI2 PEXT instructions.
 
 ## Architecture
 
@@ -209,34 +209,22 @@ Each individual word is an `atomic.Uint64` (relaxed load/store), so no *single* 
 
 ### Evaluation
 
-All scores are in centipawns from the perspective of the side to move.
+The engine evaluates exclusively with the embedded **NNUE** network (see below); scores are in centipawns from the perspective of the side to move. Two pieces of shared, evaluator-independent machinery live in [engine/evaluate.go](engine/evaluate.go):
 
-**Piece values:** P = 100, N = 350, B = 350, R = 525, Q = 1000. SEE uses simplified values (P=100, N/B=300, R=500, Q=900) for speed.
+**Eval cache:** results are cached in the **lockless** `evalHashTable` (~8 MB, ported from the C++ `EvalCache`): each slot is a single `atomic.Uint64` packing the top 48 bits of the hash and a 16-bit score, so a load/store is atomic with no lock and a foreign/evicted entry fails the key check and reads as a miss. The cached value is the raw, clock-independent eval; `clear()` is called whenever the loaded net changes (`EvalFile`).
 
-**Piece-square tables** ([engine/evaluate.go](engine/evaluate.go)) ported from the C Pawnstar engine. Stored with rank 8 at low indices; White reads via `sq ^ 0x38` (rank flip), Black reads directly. PST scores for all non-king pieces are accumulated into `scores[c]` incrementally by `addPiece`/`removePiece`/`movePiece` in `position.go` — no re-scan on evaluation.
+**Fifty-move scaling:** `scaleByRule50` ramps the raw eval toward draw as the halfmove clock climbs past 20 plies (`rule50ScaleThreshold`), applied on the way out of the cache (never stored), so the search has a gradient to make progress rather than shuffle a won-but-unconverted position (fixes leaks like KBN-vs-K).
 
-**Bishop pair:** +30 cp when both bishops are present (one on each colour).
-
-**Pawn structure** is computed per side by `determinePawnStructure` and scored as: passed pawns (rank-based PST bonus), defended pawns (+5 cp each), backward pawns (−10 cp each), doubled pawns (−10 cp each), isolated pawns (−20 cp each). A doubled passed pawn is not counted as passed (the rear pawn is obstructed).
-
-**Mobility:** Bishop attacks (excluding squares defended by enemy pawns) and rook attacks are each scored via a lookup table indexed by the number of available squares (bishop: −20 to +20 over 14 buckets; rook: −10 to +20 over 15 buckets).
-
-**King safety:** King PST switches between midgame and endgame tables via `isEndgame` (true if neither side has a queen, or every queen-side has no rooks and at most one minor piece). In the midgame: a three-row pawn shelter scores friendly pawns +15/+10/+5 and enemy pawns −15/−10/−5 across the three ranks in front of the king; open files near the king score −15 (king's file) and −10 (adjacent files); friendly non-pawn pieces score +10 (adjacent ring) and +5 (two-square ring).
-
-An alpha/beta material early-exit skips the full evaluation when the material score alone is more than 200 cp outside the search window. Results are cached in the **lockless** `evalHashTable` (~8 MB, ported from the C++ `EvalCache`): each slot is a single `atomic.Uint64` packing the top 48 bits of the hash and a 16-bit score, so a load/store is atomic with no lock and a foreign/evicted entry fails the key check and reads as a miss. Because the cached score depends on the active evaluator, `clear()` is called whenever it changes (NNUE toggle / net load). The **NNUE** evaluator below is the default; this handcrafted eval is the fallback.
-
-**Static Exchange Evaluation** ([engine/see.go](engine/see.go)) simulates the sequence of captures on a square using the least-valuable-attacker method, propagating scores backwards so each side can choose not to recapture if it would lose material. Used in move ordering to distinguish winning from losing captures.
-
-The handcrafted evaluation above is the fallback; the **NNUE** evaluator below is the default and is what the engine actually plays with.
+**Static Exchange Evaluation** ([engine/see.go](engine/see.go)) simulates the sequence of captures on a square using the least-valuable-attacker method, propagating scores backwards so each side can choose not to recapture if it would lose material. `evaluateStaticExchange` is MakeMove-free (it applies the capture to a bitboard `seeBoard` and detects check with `seeAttackersTo`) and is used in move ordering and quiescence pruning to distinguish winning from losing captures. Piece values here are the simplified P=100, N/B=300, R=500, Q=900.
 
 ### NNUE evaluation
 
-[engine/nnue.go](engine/nnue.go) is a direct Go port of the C++ Pawnstar NNUE — a Chess768 → 1024 → 1 network with 8 king buckets and SCReLU activation, quantised (QA=255, QB=64, scale=400). It reads the C++ `pawnstar-*.bin` net format directly (32-byte `PSN1` header + little-endian int16 weight arrays); the v12 net is embedded in the binary via `go:embed`. Against the handcrafted eval it is worth **+572 Elo** (fixed-depth self-play SPRT).
+[engine/nnue.go](engine/nnue.go) is the engine's only evaluator, a direct Go port of the C++ Pawnstar NNUE — a Chess768 → 1024 → 1 network with 8 king buckets and SCReLU activation, quantised (QA=255, QB=64, scale=400). It reads the C++ `pawnstar-*.bin` net format directly (32-byte `PSN1` header + little-endian int16 weight arrays); the v12 net is embedded in the binary via `go:embed`. When first ported it measured **+572 Elo** over the engine's former handcrafted evaluation (fixed-depth self-play SPRT); that handcrafted eval has since been removed.
 
 - **Feature transformer / accumulator:** two 1024-int16 perspective accumulators. Feature row per perspective is `bucket*768 + colour*384 + (type−1)*64 + square`, with the black perspective mirroring colour and square (`sq ^ 0x38`); the king bucket comes from `nnueKingBucketMap`.
 - **Lazy accumulator:** maintained on `searchState` and computed on demand. `playMove`/`makeNullMove` only invalidate the new ply; `undoMove` is free; `currentAccumulator` catches up from the nearest valid ancestor (copy + incremental `update`) **only when an eval reads it on an eval-cache miss**. A king move that crosses a bucket boundary refreshes that perspective from scratch. Captures, en passant, castling and promotion are handled uniformly through the colour bitboards plus the `squares[]` array.
 - **Kernels** are build-tag split into SIMD (`amd64 && goexperiment.simd`, 256-bit `simd/archsimd`) and scalar fallbacks, and are bit-identical. SIMD is ~3–5× faster on the output dot and column updates.
-- **Correctness:** `TestNNUEReference` matches the C++ exact evaluator on 250 FENs to 0 cp; `TestNNUEIncremental` proves the lazy accumulator equals a full refresh at every node. Toggle at runtime with the `UseNNUE`/`EvalFile` UCI options or the `PAWNSTAR_NNUE` env var.
+- **Correctness:** `TestNNUEReference` matches the C++ exact evaluator on 250 FENs to 0 cp; `TestNNUEIncremental` proves the lazy accumulator equals a full refresh at every node. Load a different net at runtime with the `EvalFile` UCI option.
 
 ### Opening book
 
@@ -266,7 +254,6 @@ The handcrafted evaluation above is the fallback; the **NNUE** evaluator below i
 | `bench` | Fixed-position node-count benchmark (deterministic; single-threaded, book off) |
 | `stop` | Signals search goroutines to halt |
 | `quit` | Stops search and exits |
-| `setoption name UseNNUE value <true\|false>` | Switch between NNUE and the handcrafted eval |
 | `setoption name OwnBook value <true\|false>` | Consult the opening book (false forces a real search) |
 | `setoption name EvalFile value <path\|<embedded>>` | Load an external PSN1 net, or reload the embedded one |
 | `setoption name Threads value <n>` | Lazy SMP search-thread count |
@@ -274,7 +261,7 @@ The handcrafted evaluation above is the fallback; the **NNUE** evaluator below i
 | `setoption name Clear Hash` | Clear the TT and eval cache |
 | `setoption name Move Overhead value <ms>` | Time reserved from every deadline for GUI/network lag |
 
-`info` lines carry `depth`, `seldepth`, `score cp`/`score mate N`, `time`, `nodes`, `nps`, `hashfull`, and `pv`. [main.go](main.go) reads stdin line-by-line and calls `game.HandleCommand`, enabling NNUE at startup (unless `PAWNSTAR_NNUE=0`) and setting the thread count from `PAWNSTAR_THREADS`/`NumCPU`. (Pondering is the one UCI feature not implemented.)
+`info` lines carry `depth`, `seldepth`, `score cp`/`score mate N`, `time`, `nodes`, `nps`, `hashfull`, and `pv`. [main.go](main.go) reads stdin line-by-line and calls `game.HandleCommand` and sets the thread count from `PAWNSTAR_THREADS`/`NumCPU` (NNUE is installed by `NewGame`). (Pondering is the one UCI feature not implemented.)
 
 ### Search diagnostics
 
