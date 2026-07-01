@@ -334,3 +334,15 @@ func (game *Game) EnableNNUE() error {
 	game.nnue = net
 	return nil
 }
+
+// LoadNNUEFile loads an external PSN1 net from disk and installs it as this game's evaluator,
+// replacing the embedded net. Returns an error (leaving the current evaluator unchanged) if the file
+// is missing or incompatible with this build.
+func (game *Game) LoadNNUEFile(path string) error {
+	net, err := loadNNUENetworkFile(path)
+	if err != nil {
+		return err
+	}
+	game.nnue = net
+	return nil
+}

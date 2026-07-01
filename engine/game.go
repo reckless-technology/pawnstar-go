@@ -78,9 +78,13 @@ func (game *Game) HandleCommand(line string) bool {
 	case "uci":
 		fmt.Println("id name Pawnstar-Go")
 		fmt.Println("id author Jonny Reckless")
+		fmt.Println("option name UseNNUE type check default true")
+		fmt.Println("option name EvalFile type string default <embedded>")
 		fmt.Println("uciok")
 	case "isready":
 		fmt.Println("readyok")
+	case "setoption":
+		game.handleUciSetOption(fields[1:])
 	case "ucinewgame":
 		game.stopThinking()
 		game.newGameFromFen(startFen)
@@ -95,6 +99,55 @@ func (game *Game) HandleCommand(line string) bool {
 		return true
 	}
 	return false
+}
+
+// handleUciSetOption processes "setoption name <Name> [value <Value>]". Supported options:
+//   - UseNNUE (check): true installs the embedded NNUE evaluator, false selects the handcrafted eval.
+//   - EvalFile (string): a path to a PSN1 net to load; "<embedded>", "default" or empty reload the
+//     embedded net. Names and values may contain spaces, so both are parsed span-wise.
+func (game *Game) handleUciSetOption(fields []string) {
+	name, value := parseSetOption(fields)
+	switch strings.ToLower(name) {
+	case "usennue":
+		if strings.EqualFold(value, "false") {
+			game.nnue = nil
+			fmt.Println("info string NNUE disabled; using handcrafted eval")
+		} else if err := game.EnableNNUE(); err != nil {
+			fmt.Printf("info string %v\n", err)
+		}
+	case "evalfile":
+		if value == "" || value == "<embedded>" || strings.EqualFold(value, "default") {
+			if err := game.EnableNNUE(); err != nil {
+				fmt.Printf("info string %v\n", err)
+			}
+		} else if err := game.LoadNNUEFile(value); err != nil {
+			fmt.Printf("info string EvalFile %q: %v\n", value, err)
+		} else {
+			fmt.Printf("info string NNUE net loaded from %s\n", value)
+		}
+	}
+}
+
+// parseSetOption splits a "name <Name...> [value <Value...>]" field list into the option name and its
+// value. Everything between "name" and "value" is the (possibly multi-word) name; everything after
+// "value" is the (possibly multi-word) value. Missing "value" yields an empty value.
+func parseSetOption(fields []string) (name, value string) {
+	i := 0
+	for i < len(fields) && fields[i] != "name" {
+		i++
+	}
+	if i < len(fields) {
+		i++ // skip "name"
+	}
+	start := i
+	for i < len(fields) && fields[i] != "value" {
+		i++
+	}
+	name = strings.Join(fields[start:i], " ")
+	if i < len(fields) { // fields[i] == "value"
+		value = strings.Join(fields[i+1:], " ")
+	}
+	return name, value
 }
 
 // newGameFromFen resets the engine state to the position described by fen.
