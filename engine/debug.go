@@ -49,7 +49,6 @@ type debugX struct {
 	qsearchSeePrunes         uint // times quiescence SEE pruning stopped on a losing capture
 	pvsAttempts              uint // times a PVS null-window search was attempted
 	pvsFails                 uint // times PVS failed high and a full-window re-search was needed
-	aspirationFails          uint // times aspiration window failed and was widened to full window
 	killerBetaCutoffs        uint // times a killer move produced a beta cutoff
 }
 

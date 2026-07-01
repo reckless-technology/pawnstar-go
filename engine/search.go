@@ -760,7 +760,6 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, threadID int)
 	tc := &ss.game.timeControl
 	var principalVariation variation
 	var bestMoves []move
-	prevScore := bestMove.score() // seed for aspiration windows
 
 	for depth := startDepth + 1; depth < maxPly; depth++ {
 		if tc.clockType == clockFixedDepth && depth > tc.depth {
@@ -775,66 +774,47 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, threadID int)
 		sortMoves(moves)
 		bestMoves = append(bestMoves, bestMove)
 
-		alphaAspiration := max(initialAlpha, prevScore-aspirationDelta)
-		betaAspiration := min(initialBeta, prevScore+aspirationDelta)
-		alpha := alphaAspiration
-
-		for attempt := 0; attempt < 2; attempt++ {
-			var pv variation
-			alpha = alphaAspiration
-			hasFailedHigh := false
-			hasRaisedAlpha := false
-
-			for i, move := range moves {
-				// Report the move currently being searched at the root, but only once a search is slow
-				// enough that a GUI benefits — avoids flooding info lines on the fast shallow iterations.
-				if isMain && ss.game.elapsedSinceSearchStart() > 3*time.Second {
-					fmt.Printf("info depth %d currmove %s currmovenumber %d\n", depth, move.String(), i+1)
-				}
-				pv.clear()
-				score := searchSingleMove(ss, depth, 0, alpha, betaAspiration, move, &pv, i)
-				moves[i] = move.withScore(score)
-				if ss.isCancelled() {
-					return bestMove
-				}
-				if score > alpha {
-					hasRaisedAlpha = true
-					alpha = score
-					bestMove = move
-					if isMain {
-						copyVariation(&principalVariation, pv, bestMove)
-						// Publish the predicted reply (PV[1]) as it improves, so `bestmove <m> ponder <reply>`
-						// has it on every exit path — including a hard-timeout / stop cancellation.
-						if len(principalVariation.moves) >= 2 {
-							ss.game.ponderMove = principalVariation.moves[1]
-						} else {
-							ss.game.ponderMove = moveNone()
-						}
-						elapsedMs := ss.game.elapsedSinceSearchStart().Milliseconds()
-						nps := int64(ss.nodeCount) * 1000 / max(1, elapsedMs)
-						fmt.Printf("info depth %d seldepth %d score %s time %d nodes %d nps %d hashfull %d pv %s\n",
-							depth, ss.seldepth, formatScore(alpha), elapsedMs, ss.nodeCount, nps,
-							ss.game.transpositionTable.hashfull(), pvString(principalVariation))
-					}
-					if score >= betaAspiration {
-						hasFailedHigh = true
-						break // window failed high — remaining moves must not be searched with inverted window
-					}
-				}
+		// Full-window root search — no aspiration window (mirrors the C++ IterativeDeepen, which tested
+		// and rejected aspiration). alpha starts at the full-window minimum and is raised as root moves
+		// improve; beta stays at initialBeta, so PVS null-windows every move after the first improvement.
+		var pv variation
+		alpha := initialAlpha
+		for i, move := range moves {
+			// Report the move currently being searched at the root, but only once a search is slow
+			// enough that a GUI benefits — avoids flooding info lines on the fast shallow iterations.
+			if isMain && ss.game.elapsedSinceSearchStart() > 3*time.Second {
+				fmt.Printf("info depth %d currmove %s currmovenumber %d\n", depth, move.String(), i+1)
 			}
-
+			pv.clear()
+			score := searchSingleMove(ss, depth, 0, alpha, initialBeta, move, &pv, i)
+			moves[i] = move.withScore(score)
 			if ss.isCancelled() {
 				return bestMove
 			}
-
-			if hasRaisedAlpha && !hasFailedHigh {
-				break
+			if score > alpha {
+				alpha = score
+				bestMove = move
+				if isMain {
+					copyVariation(&principalVariation, pv, bestMove)
+					// Publish the predicted reply (PV[1]) as it improves, so `bestmove <m> ponder <reply>`
+					// has it on every exit path — including a hard-timeout / stop cancellation.
+					if len(principalVariation.moves) >= 2 {
+						ss.game.ponderMove = principalVariation.moves[1]
+					} else {
+						ss.game.ponderMove = moveNone()
+					}
+					elapsedMs := ss.game.elapsedSinceSearchStart().Milliseconds()
+					nps := int64(ss.nodeCount) * 1000 / max(1, elapsedMs)
+					fmt.Printf("info depth %d seldepth %d score %s time %d nodes %d nps %d hashfull %d pv %s\n",
+						depth, ss.seldepth, formatScore(alpha), elapsedMs, ss.nodeCount, nps,
+						ss.game.transpositionTable.hashfull(), pvString(principalVariation))
+				}
 			}
-			ss.dbg.aspirationFails++
-			alphaAspiration = initialAlpha
-			betaAspiration = initialBeta
 		}
-		prevScore = alpha // update seed for next depth's aspiration window
+
+		if ss.isCancelled() {
+			return bestMove
+		}
 
 		if alpha > winThreshold || alpha < loseThreshold {
 			break
