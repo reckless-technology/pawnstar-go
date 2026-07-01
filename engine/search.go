@@ -682,26 +682,10 @@ func searchRootNode(game *Game) move {
 		return moves[0]
 	}
 
-	// Set up time management.
-	allocatedTime := time.Duration(0)
+	// Set up time management: arm the hard deadline and get the soft budget for between-iteration stops.
 	tc := &game.timeControl
-	switch tc.clockType {
-
-	case clockStandard:
-		if tc.numMovesRemaining > 0 {
-			allocatedTime = tc.timeRemaining / time.Duration(tc.numMovesRemaining)
-		} else {
-			allocatedTime = tc.timeRemaining
-		}
-		hardStopDuration := max(100*time.Millisecond, min(allocatedTime*2, tc.timeRemaining-time.Second))
-		// Reserve the move overhead (GUI/network lag) so we don't overshoot the clock and forfeit.
-		tc.stopTime = time.Now().Add(max(time.Millisecond, hardStopDuration-game.moveOverhead))
-
-	case clockFixedTime:
-		tc.stopTime = time.Now().Add(max(time.Millisecond, tc.timeRemaining-game.moveOverhead))
-	}
-
 	startTime := time.Now()
+	allocatedTime := tc.armDeadline(startTime, game.moveOverhead)
 	game.isCancelPending.Store(false)
 	game.transpositionTable.age()
 

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bufio"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -18,17 +19,25 @@ type openingBook struct {
 // Each line is a sequence of moves from the starting position; for every prefix
 // of a line, the next move is recorded as a candidate for that position's hash.
 func newOpeningBookFromFile() openingBook {
-	b := openingBook{moves: make(map[zobrist][]move)}
 	exe, err := os.Executable()
 	if err != nil {
-		return b
+		return openingBook{moves: make(map[zobrist][]move)}
 	}
 	f, err := os.Open(filepath.Join(filepath.Dir(exe), "book.txt"))
 	if err != nil {
-		return b
+		return openingBook{moves: make(map[zobrist][]move)}
 	}
 	defer f.Close()
-	scanner := bufio.NewScanner(f)
+	return loadOpeningBook(f)
+}
+
+// loadOpeningBook builds a hash→moves index from book text (one move-sequence per line). A move written
+// with a trailing "?" is *questionable*: it is replayed so the rest of the line still parses, but is
+// never recorded as a candidate (getMove will never return it) — matching the C++ book. Parsing of a
+// line stops at the first token that is not a legal move in the reached position.
+func loadOpeningBook(r io.Reader) openingBook {
+	b := openingBook{moves: make(map[zobrist][]move)}
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -36,12 +45,14 @@ func newOpeningBookFromFile() openingBook {
 		}
 		pos := positionFromFen(startFen)
 		for _, token := range strings.Fields(line) {
-			m := bookFindMove(&pos, token)
+			questionable := strings.HasSuffix(token, "?")
+			m := bookFindMove(&pos, strings.TrimSuffix(token, "?"))
 			if m.isNone() {
 				break
 			}
-			hash := pos.hash
-			b.moves[hash] = append(b.moves[hash], m)
+			if !questionable {
+				b.moves[pos.hash] = append(b.moves[pos.hash], m)
+			}
 			pos.makeMove(m)
 		}
 	}

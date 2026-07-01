@@ -33,6 +33,27 @@ func newTimeControl() timeControl {
 	}
 }
 
+// armDeadline sets the hard-stop deadline (stopTime) for this clock as of now, reserving moveOverhead,
+// and returns the soft time budget (used by iterativeDeepen for between-iteration early exits). Standard
+// clocks slice the remaining time by moves-to-go and cap the hard stop at 2× that (never into the last
+// second); fixed-time (movetime) is a straight hard budget. Fixed-depth and infinite clocks leave no
+// deadline — the periodic time check ignores them — so stopTime is not set. Mirrors ChessClock::StartSearch.
+func (tc *timeControl) armDeadline(now time.Time, moveOverhead time.Duration) time.Duration {
+	switch tc.clockType {
+	case clockStandard:
+		allocated := tc.timeRemaining
+		if tc.numMovesRemaining > 0 {
+			allocated = tc.timeRemaining / time.Duration(tc.numMovesRemaining)
+		}
+		hardStop := max(100*time.Millisecond, min(allocated*2, tc.timeRemaining-time.Second))
+		tc.stopTime = now.Add(max(time.Millisecond, hardStop-moveOverhead))
+		return allocated
+	case clockFixedTime:
+		tc.stopTime = now.Add(max(time.Millisecond, tc.timeRemaining-moveOverhead))
+	}
+	return 0
+}
+
 // Game is the top-level engine state.  It owns the transposition table, history
 // table, opening book, chess clock, and a stack of positions for copy-make search.
 // Create one with NewGame and drive it via HandleCommand.
