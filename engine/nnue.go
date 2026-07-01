@@ -26,6 +26,7 @@ const (
 	nnueQA            = 255                             // feature-transformer weight/activation scale (SCReLU clamp)
 	nnueQB            = 64                              // output-layer weight scale
 	nnueScale         = 400                             // maps raw network output to centipawns
+	nnueInt8Shift     = 9                               // SCReLU activation >> shift for the int8 output dot (C++ kInt8Shift)
 	nnueMaxEval       = 30000                           // eval clamp magnitude (matches C++ kMaxEvaluation)
 	nnueRankFlip      = 0x38                            // XOR mask to flip a square's rank (a1<->a8)
 	nnueFormatVersion = 1                               // net header format version
@@ -66,7 +67,12 @@ type nnueNetwork struct {
 	featureBias    []int16 // [nnueHiddenSize]
 	outputWeights  []int16 // [2 * nnueHiddenSize]: first hidden weight stm accumulator, next hidden weight the other
 	outputBias     int16   // in QA*QB units
-	loaded         bool
+	// outputWeightsI8 is outputWeights requantised to int8 range (values in [-127,127], stored int16 for the
+	// SIMD kernel): w8 = clamp(round(w / outputWScale), -127, 127). It drives the search's int8 output dot
+	// (evaluateInt8); the int16 outputWeights stay the reference path (evaluateExact). Mirrors the C++ engine.
+	outputWeightsI8 []int16
+	outputWScale    int // divisor mapping the int16 output weights into int8 range (>= 1); 1 when they already fit
+	loaded          bool
 }
 
 // loadNNUENetworkFile reads a stamped net file from disk and loads it.
@@ -120,8 +126,48 @@ func loadNNUENetwork(data []byte) (*nnueNetwork, error) {
 	off = readInt16Slice(p, off, n.featureBias)
 	off = readInt16Slice(p, off, n.outputWeights)
 	n.outputBias = int16(binary.LittleEndian.Uint16(p[off : off+2]))
+	n.deriveInt8OutputWeights()
 	n.loaded = true
 	return n, nil
+}
+
+// deriveInt8OutputWeights requantises the int16 output weights to int8 range for the int8 output dot.
+// The scale keeps the largest-magnitude weight inside [-127,127]; nets whose weights already fit (the
+// shipped one) get scale 1 and a lossless copy. Mirrors the C++ Network::LoadFromMemory tail.
+func (n *nnueNetwork) deriveInt8OutputWeights() {
+	maxOW := 0
+	for _, v := range n.outputWeights {
+		a := int(v)
+		if a < 0 {
+			a = -a
+		}
+		if a > maxOW {
+			maxOW = a
+		}
+	}
+	n.outputWScale = (maxOW + 126) / 127
+	if n.outputWScale < 1 {
+		n.outputWScale = 1
+	}
+	n.outputWeightsI8 = make([]int16, len(n.outputWeights))
+	for i, v := range n.outputWeights {
+		q := divRoundHalfAway(int(v), n.outputWScale) // std::lround(w / scale): ties away from zero
+		if q > 127 {
+			q = 127
+		} else if q < -127 {
+			q = -127
+		}
+		n.outputWeightsI8[i] = int16(q)
+	}
+}
+
+// divRoundHalfAway returns round(num/den) with ties rounded away from zero, matching C++ std::lround on
+// the exact ratio (num, den are small so there is no floating-point rounding to reproduce). den >= 1.
+func divRoundHalfAway(num, den int) int {
+	if num >= 0 {
+		return (num + den/2) / den
+	}
+	return -((-num + den/2) / den)
 }
 
 // readInt16Slice fills dst from little-endian int16 values in b starting at byte offset off,
@@ -278,6 +324,20 @@ func (n *nnueNetwork) evaluateExactPosition(pos *position) int {
 	return n.evaluateExact(&acc, pos.colorToMove)
 }
 
+// evaluateInt8 is the int8 output-layer forward pass — the search's hot-path evaluator (mirrors the C++
+// Network::Evaluate). Activations are requantised to uint8 (SCReLU >> nnueInt8Shift) and the output
+// weights to int8; the dot then scales back by outputWScale * 2^shift before dequant. It is ~faster than
+// the exact int16 dot at a small (~<=40 cp) deviation from evaluateExact, which the search tolerates.
+func (n *nnueNetwork) evaluateInt8(acc *nnueAccumulator, sideToMove color) int {
+	stm, ntm := &acc.white, &acc.black
+	if sideToMove == black {
+		stm, ntm = &acc.black, &acc.white
+	}
+	dot := outputDotInt8(stm, ntm, n.outputWeightsI8)
+	output := dot * int64(n.outputWScale) * (1 << nnueInt8Shift)
+	return nnueDequant(output, n.outputBias)
+}
+
 // nnueSearchClamp keeps a returned NNUE evaluation strictly inside the search's non-mate band, so a
 // large eval can never be mistaken for a forced win (winThreshold) or collide with mate scores.
 const nnueSearchClamp = winThreshold - 1000
@@ -294,15 +354,17 @@ func clampEvalToBand(score int) int {
 }
 
 // searchEvalAcc evaluates from a maintained accumulator and clamps into the search's eval band.
-// This is the hot-path evaluator used by the search.
+// This is the hot-path evaluator used by the search — the int8 output layer, matching the C++ engine.
 func (n *nnueNetwork) searchEvalAcc(acc *nnueAccumulator, stm color) int {
-	return clampEvalToBand(n.evaluateExact(acc, stm))
+	return clampEvalToBand(n.evaluateInt8(acc, stm))
 }
 
 // searchEval evaluates pos with a full accumulator refresh (used where no maintained accumulator is
 // available); the search itself uses searchEvalAcc with the incrementally-maintained accumulator.
 func (n *nnueNetwork) searchEval(pos *position) int {
-	return clampEvalToBand(n.evaluateExactPosition(pos))
+	var acc nnueAccumulator
+	n.refresh(&acc, pos)
+	return clampEvalToBand(n.evaluateInt8(&acc, pos.colorToMove))
 }
 
 var (
