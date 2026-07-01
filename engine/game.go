@@ -16,20 +16,21 @@ const startFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 type timeControl struct {
 	clockType         clockType     // how time is managed (standard, fixed depth, fixed time, infinite)
 	timeRemaining     time.Duration // time left on the clock for the side to move
-	numMovesRemaining int           // moves until next time control (0 = sudden death)
+	increment         time.Duration // per-move increment for the side to move (UCI winc/binc); see armDeadline
+	numMovesRemaining int           // moves until next time control (0 = none given → horizon formula)
 	depth             int           // target depth for clockFixedDepth mode
 	stopTime          time.Time     // hard deadline; search sets isCancelPending when exceeded
 	maxNodes          int           // node limit (`go nodes`); 0 = none. Checked per thread.
 	searchMoves       []string      // if non-empty (`go searchmoves`), restrict the root to these UCI moves
 }
 
-// newTimeControl returns a default timeControl (5-minute standard game, 40 moves).
+// newTimeControl returns a default timeControl (5-minute standard game, no moves-to-go → the armDeadline
+// horizon formula). Mirrors the C++ ChessClock defaults (moves_to_go_ = 0).
 func newTimeControl() timeControl {
 	return timeControl{
-		clockType:         clockStandard,
-		timeRemaining:     5 * time.Minute,
-		depth:             10,
-		numMovesRemaining: 40,
+		clockType:     clockStandard,
+		timeRemaining: 5 * time.Minute,
+		depth:         10,
 	}
 }
 
@@ -37,14 +38,21 @@ func newTimeControl() timeControl {
 // and returns the soft time budget (used by iterativeDeepen for between-iteration early exits). Standard
 // clocks slice the remaining time by moves-to-go and cap the hard stop at 2× that (never into the last
 // second); fixed-time (movetime) is a straight hard budget. Fixed-depth and infinite clocks leave no
-// deadline — the periodic time check ignores them — so stopTime is not set. Mirrors ChessClock::StartSearch.
-func (tc *timeControl) armDeadline(now time.Time, moveOverhead time.Duration) time.Duration {
+// deadline — the periodic time check ignores them — so stopTime is not set. fullMoveCount is the current
+// full-move number, used by the moves-to-go horizon when no `movestogo` was given. Mirrors
+// ChessClock::StartSearch (and the game.h allocation).
+func (tc *timeControl) armDeadline(now time.Time, moveOverhead time.Duration, fullMoveCount int) time.Duration {
 	switch tc.clockType {
 	case clockStandard:
-		allocated := tc.timeRemaining
-		if tc.numMovesRemaining > 0 {
-			allocated = tc.timeRemaining / time.Duration(tc.numMovesRemaining)
+		movesToGo := tc.numMovesRemaining
+		if movesToGo <= 0 {
+			// No `movestogo`: assume a decreasing horizon (~40 moves early, floored at 5) so a sudden-death
+			// or increment game spends progressively more time per move. Mirrors the C++ allocation. The
+			// per-move increment (winc/binc) is parsed but deliberately NOT folded in here — the C++ engine
+			// SPRT-tested `+ increment/2` and found it neutral-to-slightly-negative at 8+0.08 and 10+0.1.
+			movesToGo = max(40-fullMoveCount, 5)
 		}
+		allocated := tc.timeRemaining / time.Duration(movesToGo)
 		hardStop := max(100*time.Millisecond, min(allocated*2, tc.timeRemaining-time.Second))
 		tc.stopTime = now.Add(max(time.Millisecond, hardStop-moveOverhead))
 		return allocated
@@ -78,7 +86,7 @@ func NewGame() *Game {
 	game := &Game{
 		transpositionTable: newTranspositionTable(hashTableMB),
 		timeControl:        newTimeControl(),
-		openingBook:        newOpeningBookFromFile(),
+		openingBook:        newOpeningBook(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
 		nnue:               loadEmbeddedNet(),
 		threadCount:        1, // single-threaded by default; main() / UCI `Threads` raise it for play
@@ -301,8 +309,10 @@ func (game *Game) handleUciPosition(args []string) {
 // handleUciGo handles the "go" command, parsing the clock parameters and starting the search.
 func (game *Game) handleUciGo(args []string) {
 	tc := &game.timeControl
-	tc.maxNodes = 0        // reset per-search limits (a bare `go` clears a previous nodes/searchmoves)
+	tc.maxNodes = 0 // reset per-search limits (a bare `go` clears a previous nodes/searchmoves/movestogo/increment)
 	tc.searchMoves = nil
+	tc.numMovesRemaining = 0 // no movestogo unless this `go` provides one (else armDeadline uses the horizon)
+	tc.increment = 0
 	color := game.currentPosition().colorToMove
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -319,6 +329,20 @@ func (game *Game) handleUciGo(args []string) {
 				tc.clockType = clockStandard
 				if v, err := strconv.Atoi(args[i+1]); err == nil {
 					tc.timeRemaining = time.Duration(v) * time.Millisecond
+				}
+			}
+			i++
+		case "winc":
+			if color == white {
+				if v, err := strconv.Atoi(args[i+1]); err == nil {
+					tc.increment = time.Duration(v) * time.Millisecond
+				}
+			}
+			i++
+		case "binc":
+			if color == black {
+				if v, err := strconv.Atoi(args[i+1]); err == nil {
+					tc.increment = time.Duration(v) * time.Millisecond
 				}
 			}
 			i++
