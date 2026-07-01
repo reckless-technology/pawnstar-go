@@ -33,10 +33,10 @@ type bkCase struct {
 	// among near-equal moves nondeterministically, so this is the union observed over many runs.
 }
 
-// bkCases are the 24 Bratko-Kopec positions with accepted best moves from the NNUE evaluator, run
-// single-threaded so they are deterministic (see forceSerialSearch / TestGenerateBratkoKopecNNUE).
-// Where two moves are listed they are the depth-7 (short) and depth-8 (full) choices. Regenerate with
-// GEN_BK=1 after swapping the embedded net.
+// bkCases are the 24 Bratko-Kopec positions with accepted best moves from the NNUE evaluator. The
+// search is single-threaded and therefore deterministic (see TestGenerateBratkoKopecNNUE). Where two
+// moves are listed they are the depth-7 (short) and depth-8 (full) choices. Regenerate with GEN_BK=1
+// after swapping the embedded net.
 var bkCases = [24]bkCase{
 	{"1k1r4/pp1b1R02/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - -", []string{"d6d1"}},
 	{"3r1k2/4npp1/1ppr3p/p6P/P2PPPP1/1NR5/5K2/2R5 w - -", []string{"d4d5"}},
@@ -64,16 +64,6 @@ var bkCases = [24]bkCase{
 	{"r2qnrnk/p2b2b1/1p1p2pp/2pPpp2/1PP1P3/PRNBB3/3QNPPP/5RK1 w - -", []string{"f2f4"}},
 }
 
-// forceSerialSearch drains the worker semaphore so canGoParallel stays false and the search runs
-// single-threaded. Young Brothers Wait is only nondeterministic in which of several equal-scoring
-// moves it returns; serial search breaks ties the same way every time, making best-move assertions
-// reproducible.
-func forceSerialSearch(game *Game) {
-	for len(game.parallelSlots) > 0 {
-		<-game.parallelSlots
-	}
-}
-
 func TestBratkoKopec(t *testing.T) {
 	failures := 0
 	for i, tc := range bkCases {
@@ -81,7 +71,6 @@ func TestBratkoKopec(t *testing.T) {
 		if err := game.EnableNNUE(); err != nil { // BK gates the shipped (NNUE) evaluator
 			t.Fatalf("enable NNUE: %v", err)
 		}
-		forceSerialSearch(game) // deterministic best move
 		game.newGameFromFen(tc.fen)
 		game.openingBook.clearOpeningBook()
 		game.timeControl.clockType = clockFixedDepth
