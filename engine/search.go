@@ -376,7 +376,9 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	// forfeit on time. 2048 keeps the overrun sub-millisecond while the clock read stays negligible.
 	if (ss.nodeCount & 0x7FF) == 0 {
 		tc := &ss.game.timeControl
-		timedOut := (tc.clockType == clockStandard || tc.clockType == clockFixedTime) && time.Now().After(tc.stopTime)
+		// hardDeadlineNanos is the no-deadline sentinel for fixed-depth / infinite / an in-progress ponder
+		// search, so this never fires there; ponderhit swaps in a real deadline mid-search (atomic).
+		timedOut := time.Now().UnixNano() >= ss.game.hardDeadlineNanos.Load()
 		if timedOut || (tc.maxNodes > 0 && ss.nodeCount >= tc.maxNodes) {
 			ss.game.isCancelPending.Store(true)
 			return searchCancelledScore
@@ -655,6 +657,8 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 //   - Either condition alone: exit if elapsed > ½ of budget.
 //   - Hard stop if elapsed > budget.
 func searchRootNode(game *Game) move {
+	game.ponderMove = moveNone()      // set below by the main thread's iterativeDeepen if the PV has a reply
+	game.isCancelPending.Store(false) // clear before the book/single-move returns so a ponder-wait sees no stale cancel
 	searchMoves := game.timeControl.searchMoves
 	// Opening book — skipped when OwnBook is off, or when `go searchmoves` restricts the root.
 	if game.useOwnBook && len(searchMoves) == 0 {
@@ -687,11 +691,9 @@ func searchRootNode(game *Game) move {
 		return moves[0]
 	}
 
-	// Set up time management: arm the hard deadline and get the soft budget for between-iteration stops.
-	tc := &game.timeControl
-	startTime := time.Now()
-	allocatedTime := tc.armDeadline(startTime, game.moveOverhead, int(game.currentPosition().fullMove))
-	game.isCancelPending.Store(false)
+	// The clock was already armed by armClock — on the UCI goroutine, before this search goroutine started
+	// — so the budgets/deadline are set (and only ponderhit mutates them). Bump the TT generation for the
+	// new search.
 	game.transpositionTable.age()
 
 	ss := newSearchStateFromGame(game)
@@ -727,11 +729,11 @@ func searchRootNode(game *Game) move {
 			defer helpers.Done()
 			helper := newSearchStateFromGame(game)
 			helper.dbg = &debugX{} // helper diagnostics are discarded; keep them off the global dbgx
-			iterativeDeepen(helper, helperMoves, seed, startTime, allocatedTime, threadID)
+			iterativeDeepen(helper, helperMoves, seed, threadID)
 		}(i, append([]move(nil), moves...), bestMove)
 	}
 
-	bestMove = iterativeDeepen(ss, moves, bestMove, startTime, allocatedTime, 0)
+	bestMove = iterativeDeepen(ss, moves, bestMove, 0)
 	game.nodeCount = ss.nodeCount // main-thread node total (used by `bench`)
 
 	game.isCancelPending.Store(true) // main thread is done; signal helpers to stop
@@ -753,7 +755,7 @@ var (
 // helper threads (id ≥ 1) follow the iteration-skip schedule and stay silent. All threads share the
 // lockless TT and eval cache via ss.game; the hard deadline (checked inside searchAlphaBeta) and the
 // game cancel flag stop every thread together.
-func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime time.Time, allocatedTime time.Duration, threadID int) move {
+func iterativeDeepen(ss *searchState, moves []move, bestMove move, threadID int) move {
 	isMain := threadID == 0
 	tc := &ss.game.timeControl
 	var principalVariation variation
@@ -786,7 +788,7 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime tim
 			for i, move := range moves {
 				// Report the move currently being searched at the root, but only once a search is slow
 				// enough that a GUI benefits — avoids flooding info lines on the fast shallow iterations.
-				if isMain && time.Since(startTime) > 3*time.Second {
+				if isMain && ss.game.elapsedSinceSearchStart() > 3*time.Second {
 					fmt.Printf("info depth %d currmove %s currmovenumber %d\n", depth, move.String(), i+1)
 				}
 				pv.clear()
@@ -801,7 +803,14 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime tim
 					bestMove = move
 					if isMain {
 						copyVariation(&principalVariation, pv, bestMove)
-						elapsedMs := time.Since(startTime).Milliseconds()
+						// Publish the predicted reply (PV[1]) as it improves, so `bestmove <m> ponder <reply>`
+						// has it on every exit path — including a hard-timeout / stop cancellation.
+						if len(principalVariation.moves) >= 2 {
+							ss.game.ponderMove = principalVariation.moves[1]
+						} else {
+							ss.game.ponderMove = moveNone()
+						}
+						elapsedMs := ss.game.elapsedSinceSearchStart().Milliseconds()
 						nps := int64(ss.nodeCount) * 1000 / max(1, elapsedMs)
 						fmt.Printf("info depth %d seldepth %d score %s time %d nodes %d nps %d hashfull %d pv %s\n",
 							depth, ss.seldepth, formatScore(alpha), elapsedMs, ss.nodeCount, nps,
@@ -831,8 +840,12 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime tim
 			break
 		}
 
-		if isMain && tc.clockType == clockStandard {
-			elapsedTime := time.Since(startTime)
+		// Soft-time management (main thread, standard clock) — skipped while pondering: a ponder search
+		// runs until ponderhit/stop, and onPonderhit resets the search-start instant so elapsed is then
+		// measured from the ponderhit moment. Mirrors the C++ IterativeDeepen guard.
+		if isMain && tc.clockType == clockStandard && !ss.game.isPondering.Load() {
+			elapsedTime := ss.game.elapsedSinceSearchStart()
+			allocatedTime := ss.game.allocatedTime
 			isBestMoveConsistent := allSame(bestMoves, bestMove)
 			isScoreStable := allScoreStable(bestMoves, bestMove)
 			if isBestMoveConsistent && isScoreStable && elapsedTime*4 > allocatedTime {

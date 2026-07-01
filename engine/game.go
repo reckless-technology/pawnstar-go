@@ -16,10 +16,9 @@ const startFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 type timeControl struct {
 	clockType         clockType     // how time is managed (standard, fixed depth, fixed time, infinite)
 	timeRemaining     time.Duration // time left on the clock for the side to move
-	increment         time.Duration // per-move increment for the side to move (UCI winc/binc); see armDeadline
+	increment         time.Duration // per-move increment for the side to move (UCI winc/binc); see computeBudget
 	numMovesRemaining int           // moves until next time control (0 = none given → horizon formula)
 	depth             int           // target depth for clockFixedDepth mode
-	stopTime          time.Time     // hard deadline; search sets isCancelPending when exceeded
 	maxNodes          int           // node limit (`go nodes`); 0 = none. Checked per thread.
 	searchMoves       []string      // if non-empty (`go searchmoves`), restrict the root to these UCI moves
 }
@@ -34,14 +33,14 @@ func newTimeControl() timeControl {
 	}
 }
 
-// armDeadline sets the hard-stop deadline (stopTime) for this clock as of now, reserving moveOverhead,
-// and returns the soft time budget (used by iterativeDeepen for between-iteration early exits). Standard
-// clocks slice the remaining time by moves-to-go and cap the hard stop at 2× that (never into the last
-// second); fixed-time (movetime) is a straight hard budget. Fixed-depth and infinite clocks leave no
-// deadline — the periodic time check ignores them — so stopTime is not set. fullMoveCount is the current
-// full-move number, used by the moves-to-go horizon when no `movestogo` was given. Mirrors
-// ChessClock::StartSearch (and the game.h allocation).
-func (tc *timeControl) armDeadline(now time.Time, moveOverhead time.Duration, fullMoveCount int) time.Duration {
+// computeBudget returns this move's soft budget (allocated, used by iterativeDeepen for between-iteration
+// early exits) and hard budget (maxSearch, reserving moveOverhead; 0 = no hard deadline). Standard clocks
+// slice the remaining time by moves-to-go and cap the hard stop at 2× that (never into the last second);
+// fixed-time (movetime) is a straight hard budget; fixed-depth and infinite clocks have no deadline.
+// fullMoveCount is the current full-move number, used by the moves-to-go horizon when no `movestogo` was
+// given. Pure (no side effects) — armClock arms the live atomic clock from these. Mirrors the C++ game.h
+// allocation feeding ChessClock::StartSearch.
+func (tc *timeControl) computeBudget(moveOverhead time.Duration, fullMoveCount int) (allocated, maxSearch time.Duration) {
 	switch tc.clockType {
 	case clockStandard:
 		movesToGo := tc.numMovesRemaining
@@ -52,14 +51,56 @@ func (tc *timeControl) armDeadline(now time.Time, moveOverhead time.Duration, fu
 			// SPRT-tested `+ increment/2` and found it neutral-to-slightly-negative at 8+0.08 and 10+0.1.
 			movesToGo = max(40-fullMoveCount, 5)
 		}
-		allocated := tc.timeRemaining / time.Duration(movesToGo)
+		allocated = tc.timeRemaining / time.Duration(movesToGo)
 		hardStop := max(100*time.Millisecond, min(allocated*2, tc.timeRemaining-time.Second))
-		tc.stopTime = now.Add(max(time.Millisecond, hardStop-moveOverhead))
-		return allocated
+		maxSearch = max(time.Millisecond, hardStop-moveOverhead)
 	case clockFixedTime:
-		tc.stopTime = now.Add(max(time.Millisecond, tc.timeRemaining-moveOverhead))
+		maxSearch = max(time.Millisecond, tc.timeRemaining-moveOverhead)
 	}
-	return 0
+	return allocated, maxSearch
+}
+
+// armClock computes this move's budgets and arms the live clock. Called on the UCI goroutine (via
+// startThinking) before the search goroutine launches, so the budgets and the search-start origin are set
+// with a happens-before to the search; only ponderhit mutates the atomics afterwards. A ponder search arms
+// no hard deadline (onPonderhit arms it from the ponderhit moment). Mirrors ChessClock::Start{,Ponder}Search.
+func (game *Game) armClock() {
+	now := time.Now()
+	game.allocatedTime, game.maxSearchTime = game.timeControl.computeBudget(game.moveOverhead, int(game.currentPosition().fullMove))
+	game.searchStartNanos.Store(now.UnixNano())
+	if game.isPondering.Load() {
+		game.hardDeadlineNanos.Store(noDeadlineNanos) // no hard stop until ponderhit
+	} else {
+		game.armHardDeadline(now, game.maxSearchTime)
+	}
+}
+
+// armHardDeadline stores the hard deadline as now+maxSearch, or the no-deadline sentinel when maxSearch is
+// non-positive (fixed-depth / infinite / ponder). Mirrors ChessClock::ArmHardDeadline.
+func (game *Game) armHardDeadline(now time.Time, maxSearch time.Duration) {
+	if maxSearch > 0 {
+		game.hardDeadlineNanos.Store(now.Add(maxSearch).UnixNano())
+	} else {
+		game.hardDeadlineNanos.Store(noDeadlineNanos)
+	}
+}
+
+// elapsedSinceSearchStart returns the time since the soft-budget origin (which onPonderhit resets to the
+// ponderhit moment). Read by the main search thread for info/nps and soft-time management. Mirrors
+// ChessClock::ElapsedSinceSearchStart.
+func (game *Game) elapsedSinceSearchStart() time.Duration {
+	return time.Duration(time.Now().UnixNano() - game.searchStartNanos.Load())
+}
+
+// onPonderhit converts a running ponder search into a normal timed one: reset the soft-budget origin and
+// arm the hard deadline from this moment (budget-from-ponderhit), then clear the pondering flag last so the
+// search never observes an armed deadline while still flagged pondering. Mirrors ChessClock::OnPonderhit +
+// the handle_ponderhit ordering. Called on the UCI goroutine while the search runs; the atomics make it safe.
+func (game *Game) onPonderhit() {
+	now := time.Now()
+	game.searchStartNanos.Store(now.UnixNano())
+	game.armHardDeadline(now, game.maxSearchTime)
+	game.isPondering.Store(false)
 }
 
 // Game is the top-level engine state.  It owns the transposition table, history
@@ -78,7 +119,22 @@ type Game struct {
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
 	posStack           []position         // game history + current search path
 	isCancelPending    atomic.Bool        // set true to signal all search goroutines to stop
+	// Pondering + the live clock. isPondering suppresses the hard/soft time stops while a `go ponder`
+	// search runs. searchStartNanos (soft-budget origin) and hardDeadlineNanos are atomics because
+	// `ponderhit` (UCI goroutine) mutates them while the search goroutines read them every node; the
+	// budgets are set once by armClock before the search starts, so they are plain. Mirrors the C++
+	// Game.is_pondering_ / ChessClock.
+	isPondering       atomic.Bool   // true while a `go ponder` search runs (until ponderhit / stop)
+	ponderMove        move          // predicted reply (PV[1]); emitted as `bestmove <m> ponder <ponderMove>` (search goroutine only)
+	searchStartNanos  atomic.Int64  // unix-nano soft-budget origin; reset by onPonderhit
+	hardDeadlineNanos atomic.Int64  // unix-nano hard deadline, or noDeadlineNanos; set by armClock / onPonderhit
+	allocatedTime     time.Duration // soft budget for this move; set by armClock before the search
+	maxSearchTime     time.Duration // hard budget; re-applied from the ponderhit moment by onPonderhit
 }
+
+// noDeadlineNanos is the hardDeadlineNanos sentinel meaning "no hard stop": time.Now().UnixNano() (year
+// ~2025, ~1.7e18) never reaches it, so the periodic time check never fires. Mirrors the C++ kNoDeadline.
+const noDeadlineNanos int64 = 1<<63 - 1
 
 // NewGame creates an engine instance ready to accept UCI commands. NNUE is the only evaluator, so the
 // embedded net is installed at construction; a different net can still be loaded later via EvalFile.
@@ -93,6 +149,7 @@ func NewGame() *Game {
 		moveOverhead:       30 * time.Millisecond,
 		useOwnBook:         true,
 	}
+	game.hardDeadlineNanos.Store(noDeadlineNanos) // un-armed clock = no hard stop (safe default for tests / bare search)
 	game.newGameFromFen(startFen)
 	return game
 }
@@ -116,6 +173,7 @@ func (game *Game) HandleCommand(line string) bool {
 		fmt.Printf("option name Hash type spin default %d min 1 max 4096\n", hashTableMB)
 		fmt.Println("option name Clear Hash type button")
 		fmt.Printf("option name Move Overhead type spin default %d min 0 max 5000\n", game.moveOverhead.Milliseconds())
+		fmt.Println("option name Ponder type check default false")
 		fmt.Println("uciok")
 	case "isready":
 		fmt.Println("readyok")
@@ -128,6 +186,10 @@ func (game *Game) HandleCommand(line string) bool {
 		game.handleUciPosition(fields[1:])
 	case "go":
 		game.handleUciGo(fields[1:])
+	case "ponderhit":
+		// The predicted move was played: convert the running ponder search into a timed search
+		// (budget starts from now). No-op if no ponder search is running (the next `go` re-arms).
+		game.onPonderhit()
 	case "bench":
 		game.stopThinking()
 		game.runBench()
@@ -242,10 +304,14 @@ func (game *Game) playMoveString(s string) move {
 
 
 // startThinking launches a search goroutine for the current position and time
-// control.  Any previously running search is stopped first.
+// control.  Any previously running search is stopped first.  The clock is armed here — on the calling
+// (UCI) goroutine, before the search goroutine starts — so the budgets are set with a happens-before to
+// the search and only ponderhit mutates the live clock afterwards. isPondering must already be set by the
+// caller (handleUciGo) so armClock arms no hard deadline for a ponder search.
 func (game *Game) startThinking() {
 	game.stopThinking()
 	game.isCancelPending.Store(false)
+	game.armClock()
 	game.wg.Add(1)
 	go func() {
 		game.searchEntry()
@@ -260,15 +326,25 @@ func (game *Game) stopThinking() {
 	game.isCancelPending.Store(false)
 }
 
-// searchEntry is the body of the search goroutine.  It runs the search, plays the
-// best move on the internal position, and prints the UCI bestmove response.
+// searchEntry is the body of the search goroutine.  It runs the search, plays the best move on the
+// internal position, and prints the UCI bestmove response (with `ponder <reply>` when a predicted reply is
+// known). UCI forbids sending bestmove while pondering: if a ponder search finishes on its own (max depth
+// or a forced line) before the GUI resolves it, wait until ponderhit clears isPondering or stop sets the
+// cancel flag. For a normal search isPondering is false, so the wait is a no-op. Mirrors SearchThreadEntry.
 func (game *Game) searchEntry() {
 	m := searchRootNode(game)
-	if m != moveNone() {
-		game.playMove(m)
-		fmt.Println("bestmove " + m.String())
-	} else {
+	for game.isPondering.Load() && !game.isCancelPending.Load() {
+		time.Sleep(time.Millisecond)
+	}
+	if m.isNone() {
 		fmt.Println("bestmove 0000")
+		return
+	}
+	game.playMove(m)
+	if !game.ponderMove.isNone() {
+		fmt.Println("bestmove " + m.String() + " ponder " + game.ponderMove.String())
+	} else {
+		fmt.Println("bestmove " + m.String())
 	}
 }
 
@@ -311,8 +387,9 @@ func (game *Game) handleUciGo(args []string) {
 	tc := &game.timeControl
 	tc.maxNodes = 0 // reset per-search limits (a bare `go` clears a previous nodes/searchmoves/movestogo/increment)
 	tc.searchMoves = nil
-	tc.numMovesRemaining = 0 // no movestogo unless this `go` provides one (else armDeadline uses the horizon)
+	tc.numMovesRemaining = 0 // no movestogo unless this `go` provides one (else computeBudget uses the horizon)
 	tc.increment = 0
+	game.isPondering.Store(false) // set true below if this is a `go ponder`
 	color := game.currentPosition().colorToMove
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -365,6 +442,10 @@ func (game *Game) handleUciGo(args []string) {
 			i++
 		case "infinite":
 			tc.clockType = clockInfinite
+		case "ponder":
+			// Search on the opponent's time until `ponderhit` (convert to a timed search) or `stop`.
+			// armClock (via startThinking) arms no hard deadline while this is set.
+			game.isPondering.Store(true)
 		case "nodes":
 			tc.clockType = clockInfinite // node-limited; the periodic check ends it at maxNodes
 			if v, err := strconv.Atoi(args[i+1]); err == nil {

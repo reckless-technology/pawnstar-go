@@ -87,10 +87,30 @@ out=$(read_until '^bestmove' 30)
 echo "$out" | grep -q 'currmove [a-h][1-8][a-h][1-8].* currmovenumber [0-9]' &&
     pass "info currmove/currmovenumber emitted on a long search" || fail "currmove/currmovenumber not emitted"
 
+# 6) pondering: `go ... ponder` searches on the opponent's time and must NOT emit a bestmove until
+#    `ponderhit` (or `stop`). Then ponderhit converts it into a timed search that returns a bestmove.
+#    Use a position not in the book and advertise the Ponder option.
+send "uci"
+out=$(read_until '^uciok' 10)
+echo "$out" | grep -q 'option name Ponder' && pass "uci: advertises Ponder option" || fail "uci: no Ponder option"
+send "position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
+send "go wtime 3000 btime 3000 ponder"
+sleep 0.3                       # let the ponder search run; it must not resolve on its own this fast
+send "isready"                  # handled concurrently with the running ponder search
+out=$(read_until '^readyok' 10) # everything the engine emitted while pondering, up to readyok
+if echo "$out" | grep -q '^bestmove'; then
+    fail "ponder: bestmove emitted before ponderhit"
+else
+    pass "ponder: no bestmove while pondering"
+fi
+send "ponderhit"                # convert to a timed search (~120ms budget from wtime 3000)
+out=$(read_until '^bestmove' 30)
+echo "$out" | grep -qE '^bestmove [a-h][1-8][a-h][1-8]' && pass "ponder: bestmove after ponderhit" || fail "ponder: no bestmove after ponderhit"
+
 send "quit"
 wait "$ENG_PID" 2>/dev/null
 
-# 6) bench determinism: single-threaded bench is deterministic, so two runs must agree (guards the
+# 7) bench determinism: single-threaded bench is deterministic, so two runs must agree (guards the
 #    uninitialised-read class of bug that made node counts wobble). Run as a plain pipe — bench is
 #    synchronous on the main thread and quits cleanly.
 b1=$(printf 'bench\nquit\n' | GOMAXPROCS=1 "$ENGINE" 2>/dev/null | grep -oE '^[0-9]+ nodes' | grep -oE '^[0-9]+')
