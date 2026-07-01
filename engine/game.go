@@ -40,6 +40,7 @@ type Game struct {
 	timeControl        timeControl        // clock configuration for the current search
 	evalTable          evalHashTable      // shared evaluation cache
 	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
+	nnue               *nnueNetwork       // NNUE evaluator; nil selects the handcrafted evaluation
 	nodeCount          int                // total nodes searched (main goroutine only)
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
 	parallelSlots      chan struct{}      // semaphore: capacity = maxNumGoRoutines, limits parallel workers
