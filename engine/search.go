@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,24 +16,26 @@ type hashStackEntry struct {
 	halfMoveClock uint8   // clock value at this position; a zero entry marks an irreversible move boundary
 }
 
-// searchState holds all mutable state for the search.  The search runs single-threaded on the
-// goroutine launched by startThinking; there is exactly one searchState per search.  (Lazy SMP, where
-// each thread would own an independent searchState searching the whole tree, is planned but not yet
-// reintroduced.)
+// searchState holds all mutable state for one Lazy SMP search thread. Each thread owns an independent
+// searchState searching the whole tree; the threads share only the lockless transposition table and
+// eval cache (via game). Everything on searchState — posStack, hashStack, killers, history,
+// continuation history, countermoves, the accumulator stack, node count, and diagnostics — is
+// per-thread, so no thread ever writes state another reads (which keeps the concurrent search
+// data-race free without locks).
 //
 // posStack is the copy-make stack for the search path.  It starts with exactly one entry (the current
 // position) and grows by one entry for each move played.
 //
 // hashStack is a compact (hash, halfMove) record for every position from the start of the game through
 // the current search node.  It is the only structure consulted by isDrawByRepetition.
-//
-// tt, history, evalTable, and game (for time control and the cancel flag) are shared via pointer.
 type searchState struct {
 	posStack  []position       // copy-make stack: one entry per move played; seeded with the current position
 	hashStack []hashStackEntry // full history from game start through current node, for repetition detection
 	killers   [maxPly][2]move  // per-ply quiet moves that recently caused beta cutoffs
+	history   historyTable     // per-thread history heuristic (per-thread to avoid Lazy-SMP contention)
 	nodeCount int              // nodes searched since the last root iteration reset
-	game      *Game            // shared: time control, cancel flag, TT, history, eval table
+	game      *Game            // shared: time control, cancel flag, lockless TT + eval cache
+	dbg       *debugX          // diagnostic counters: the global dbgx for the main thread, a throwaway per helper
 
 	// Move-ordering follow-up heuristics keyed by the previous move (persist across a whole search).
 	// countermoves[prev.pieceTo()] is the best quiet refutation observed to the previous move.
@@ -60,6 +63,7 @@ func newSearchState(hs []hashStackEntry, startPos *position, game *Game) *search
 		hashStack:           hs,
 		game:                game,
 		continuationHistory: make([]int16, contKeys*contKeys),
+		dbg:                 &dbgx, // main thread / single-threaded default; helper threads get their own
 	}
 	// Seed the current position's accumulator (depth 0); deeper accumulators are computed on demand.
 	// accStack grows lazily to the search depth so construction stays cheap.
@@ -186,7 +190,7 @@ func (ss *searchState) isDrawByRepetition() bool {
 		if ss.hashStack[i].hash == h {
 			repetitions--
 			if repetitions == 0 {
-				dbgx.drawsByRepetition++
+				ss.dbg.drawsByRepetition++
 				return true
 			}
 		}
@@ -229,7 +233,7 @@ func (ss *searchState) scoreAndSortMoves(moves []move, ply int, prevMove move) {
 		case ss.isCountermove(prevMove, m):
 			sort = countermoveScore
 		default: // quiet move: main history + continuation history, clamped below the countermove
-			h := int(ss.game.historyTable.getCount(ply, m)) + ss.contHistScore(prevMove, m)
+			h := int(ss.history.getCount(ply, m)) + ss.contHistScore(prevMove, m)
 			if h > maxQuietScore {
 				h = maxQuietScore
 			}
@@ -282,12 +286,12 @@ func (ss *searchState) recordCountermove(prevMove, m move) {
 // move-ordering heuristics: the main history and continuation history for any move; additionally, on a
 // beta cutoff, a quiet m becomes a killer at ply and the countermove to prevMove.
 func (ss *searchState) recordGood(ply int, prevMove, m move, isCutoff bool) {
-	ss.game.historyTable.recordGoodMove(ply, m)
+	ss.history.recordGoodMove(ply, m)
 	ss.recordContinuationHistory(prevMove, m)
 	if isCutoff && m.isQuiet() {
 		ss.updateKillers(ply, m)
 		ss.recordCountermove(prevMove, m)
-		dbgx.killerBetaCutoffs++
+		ss.dbg.killerBetaCutoffs++
 	}
 }
 
@@ -315,11 +319,11 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 	var score int
 	if beta > alpha+1 && moveIdx > 0 && !wasInCheck && !isChecking {
 		// Try principal variation search.
-		dbgx.pvsAttempts++
+		ss.dbg.pvsAttempts++
 		score = -searchAlphaBeta(ss, childDepth, ply+1, -alpha-1, -alpha, pv, m)
 		if score > alpha {
 			// PVS failed high — re-search with full window.
-			dbgx.pvsFails++
+			ss.dbg.pvsFails++
 			score = -searchAlphaBeta(ss, childDepth, ply+1, -beta, -alpha, pv, m)
 		}
 	} else {
@@ -367,7 +371,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	// Check extension: searching a node that is in check one ply deeper resolves the forcing line
 	// before evaluating, and gates off the static-eval pruning below (which is disabled in check).
 	if position.isInCheck() {
-		dbgx.checkExtensions++
+		ss.dbg.checkExtensions++
 		depth++
 	}
 
@@ -381,17 +385,17 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		switch transpos.nodeType() {
 		case nodeCut:
 			if transpos.move.score() >= beta {
-				dbgx.tableHitBeta++
+				ss.dbg.tableHitBeta++
 				return transpos.move.score()
 			}
 		case nodeAll:
 			if transpos.move.score() <= alpha {
-				dbgx.tableHitAlpha++
+				ss.dbg.tableHitAlpha++
 				return transpos.move.score()
 			}
 		case nodePV:
 			// PV hit: search deeper so the PV is fully verified.
-			dbgx.tableHitPv++
+			ss.dbg.tableHitPv++
 			depth++
 		}
 	}
@@ -400,7 +404,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	// so rather than spend the full depth with a poor first move, reduce by one ply. The shallower
 	// search still fills the TT with a best move, recouping the cost via better ordering on revisit.
 	if depth >= noTTReduceMinDepth && (!isTransposition || transpos.move.isNone()) {
-		dbgx.iirReductions++
+		ss.dbg.iirReductions++
 		depth--
 	}
 
@@ -420,7 +424,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		// beta that even conceding rfpMargin per ply still leaves us at/above beta, assume a quiet
 		// move holds the advantage and cut. Disabled in the mate zone so it cannot mask a forced mate.
 		if depth <= rfpMaxDepth && absInt(beta) < winThreshold && evalScore-rfpMargin*depth >= beta {
-			dbgx.rfpPrunes++
+			ss.dbg.rfpPrunes++
 			return evalScore
 		}
 
@@ -430,7 +434,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		if evalScore >= beta && !position.isNullMove() &&
 			position.colors[position.colorToMove].popCount() > 3 {
 			ss.makeNullMove()
-			dbgx.nullMoveAttempts++
+			ss.dbg.nullMoveAttempts++
 			var dummy variation
 			score := -searchAlphaBeta(ss, depth-4, ply+1, -beta, -alpha, &dummy, moveNone())
 			ss.undoMove()
@@ -440,7 +444,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			if score >= beta {
 				return beta
 			}
-			dbgx.nullMoveFails++
+			ss.dbg.nullMoveFails++
 		}
 	}
 
@@ -452,13 +456,13 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	hasRaisedAlpha := false
 
 	if isTransposition && !transpos.move.isNone() {
-		dbgx.tableMove++
+		ss.dbg.tableMove++
 		score := searchSingleMove(ss, depth, ply, alpha, beta, transpos.move, &pv, 0)
 		if ss.isCancelled() {
 			return searchCancelledScore
 		}
 		if score >= beta {
-			dbgx.tableMoveBetaCutoff++
+			ss.dbg.tableMoveBetaCutoff++
 			ss.game.transpositionTable.record(position.hash, transpos.move.withScore(score), int16(depth), nodeCut)
 			ss.recordGood(ply, prevMove, transpos.move, true)
 			return score
@@ -466,7 +470,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		bestScore = score
 		bestMove = transpos.move
 		if score > alpha {
-			dbgx.tableMoveRaiseAlpha++
+			ss.dbg.tableMoveRaiseAlpha++
 			alpha = score
 			hasRaisedAlpha = true
 			ss.recordGood(ply, prevMove, transpos.move, false)
@@ -476,10 +480,10 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	moves := position.generateLegalMoves()
 	if len(moves) == 0 {
 		if position.isInCheck() {
-			dbgx.checkmates++
+			ss.dbg.checkmates++
 			return checkmatedScore + ply
 		}
-		dbgx.stalemates++
+		ss.dbg.stalemates++
 		return drawScore
 	}
 
@@ -497,7 +501,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		// once we are deep into the (SEE/history-sorted) move list, skip the remaining quiet moves —
 		// they almost never raise alpha. Captures and promotions are never pruned.
 		if nullWindow && !inCheck && depth <= lmpMaxDepth && move.isQuiet() && i >= lmpBase+depth*depth {
-			dbgx.lmpPrunes++
+			ss.dbg.lmpPrunes++
 			continue
 		}
 
@@ -505,13 +509,13 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		// the SEE/history sort has already pushed the unpromising moves here).
 		childDepth := depth
 		if nullWindow && i > 3 && !inCheck && depth > 2 {
-			dbgx.lmrAttempts1++
+			ss.dbg.lmrAttempts1++
 			childDepth--
 			if depth > 3 && i > 6 {
-				dbgx.lmrAttempts2++
+				ss.dbg.lmrAttempts2++
 				childDepth--
-				if ss.game.historyTable.getCount(ply, move) == 0 {
-					dbgx.lmrAttempts3++
+				if ss.history.getCount(ply, move) == 0 {
+					ss.dbg.lmrAttempts3++
 					childDepth--
 				}
 			}
@@ -519,7 +523,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 		score := searchSingleMove(ss, childDepth, ply, alpha, beta, move, &pv, i)
 		if score > alpha && childDepth < depth {
-			dbgx.lmrFails++
+			ss.dbg.lmrFails++
 			score = searchSingleMove(ss, depth, ply, alpha, beta, move, &pv, i)
 		}
 		if ss.isCancelled() {
@@ -528,14 +532,14 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		if score >= beta {
 			ss.game.transpositionTable.record(position.hash, move.withScore(score), int16(depth), nodeCut)
 			ss.recordGood(ply, prevMove, move, true)
-			dbgx.nodesCut++
+			ss.dbg.nodesCut++
 			return score
 		}
 		if score > bestScore {
 			bestScore = score
 			bestMove = move
 			if score > alpha {
-				dbgx.nodesPvChanged++
+				ss.dbg.nodesPvChanged++
 				alpha = score
 				hasRaisedAlpha = true
 				ss.recordGood(ply, prevMove, move, false)
@@ -545,12 +549,12 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	}
 
 	if hasRaisedAlpha {
-		dbgx.nodesPv++
+		ss.dbg.nodesPv++
 		ss.game.transpositionTable.record(position.hash, bestMove.withScore(alpha), int16(depth), nodePV)
 		ss.recordGood(ply, prevMove, bestMove, false)
 		copyVariation(parentPV, pv, bestMove)
 	} else {
-		dbgx.nodesAll++
+		ss.dbg.nodesAll++
 		ss.game.transpositionTable.record(position.hash, bestMove.withScore(bestScore), int16(depth), nodeAll)
 	}
 	return bestScore
@@ -560,25 +564,25 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 // the position is quiet.  An in-check position re-enters searchAlphaBeta at the
 // same depth (no depth decrement) so that all evasions are considered.
 func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
-	dbgx.quiescentCalls++
+	ss.dbg.quiescentCalls++
 	if ply >= maxPly {
 		return evaluatePosition(ss, alpha, beta)
 	}
 	pos := ss.currentPosition()
 	if pos.isInCheck() {
-		dbgx.quiescentChecks++
+		ss.dbg.quiescentChecks++
 		var dummy variation
 		return searchAlphaBeta(ss, depth, ply, alpha, beta, &dummy, moveNone())
 	}
 	// Stand-pat: if the static eval already beats beta we can prune.
 	score := evaluatePosition(ss, alpha, beta)
 	if score >= beta {
-		dbgx.quiescentEvalCutoffs++
+		ss.dbg.quiescentEvalCutoffs++
 		return score
 	}
 	if score > alpha {
 		alpha = score
-		dbgx.quiescentEvalRaisesAlpha++
+		ss.dbg.quiescentEvalRaisesAlpha++
 	}
 	bestScore := score
 	moves := pos.generateLegalCaptures()
@@ -588,7 +592,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 		// capture loses material. Once we reach the first losing capture every remaining move also
 		// loses, so stop searching them.
 		if m.score() < 0 {
-			dbgx.qsearchSeePrunes++
+			ss.dbg.qsearchSeePrunes++
 			return bestScore
 		}
 		ss.playMove(m)
@@ -598,19 +602,19 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 			return searchCancelledScore
 		}
 		if score >= beta {
-			ss.game.historyTable.recordGoodMove(ply, m)
-			dbgx.quiescentBetaCutoffs++
+			ss.history.recordGoodMove(ply, m)
+			ss.dbg.quiescentBetaCutoffs++
 			return score
 		}
 		if score > bestScore {
 			bestScore = score
 			if score > alpha {
 				alpha = score
-				ss.game.historyTable.recordGoodMove(ply, m)
+				ss.history.recordGoodMove(ply, m)
 			}
 		}
 	}
-	dbgx.quiescentAllNodes++
+	ss.dbg.quiescentAllNodes++
 	return bestScore
 }
 
@@ -660,13 +664,9 @@ func searchRootNode(game *Game) move {
 
 	startTime := time.Now()
 	game.isCancelPending.Store(false)
-	game.historyTable.reset()
 	game.transpositionTable.age()
 
 	ss := newSearchStateFromGame(game)
-
-	var principalVariation variation
-	var bestMoves []move
 
 	// Initial shallow pass to get move ordering before deepening.
 	var initPV variation
@@ -677,11 +677,69 @@ func searchRootNode(game *Game) move {
 	}
 	sortMovesStable(moves)
 	bestMove := moves[0]
+
+	// Lazy SMP: each thread runs an independent iterative-deepening search of the same root, sharing
+	// only the lockless transposition table and eval cache (history/killers/continuation/countermoves
+	// are per-thread on each searchState). The main thread (id 0) is authoritative — it prints info,
+	// applies time management, and returns the move — while helper threads deepen the shared TT to
+	// accelerate it, desynchronised by the per-thread iteration-skip schedule. Each helper gets its own
+	// searchState, a private throwaway diagnostics struct, and its own copy of the move list.
+	nThreads := game.threadCount
+	if nThreads < 1 {
+		nThreads = 1
+	} else if nThreads > maxSearchThreads {
+		nThreads = maxSearchThreads
+	}
+	var helpers sync.WaitGroup
+	for i := 1; i < nThreads; i++ {
+		helpers.Add(1)
+		// The move-list clone and seed move are passed as arguments so they are evaluated here, in the
+		// launching goroutine, before the main thread's iterativeDeepen begins mutating moves/bestMove.
+		go func(threadID int, helperMoves []move, seed move) {
+			defer helpers.Done()
+			helper := newSearchStateFromGame(game)
+			helper.dbg = &debugX{} // helper diagnostics are discarded; keep them off the global dbgx
+			iterativeDeepen(helper, helperMoves, seed, startTime, allocatedTime, threadID)
+		}(i, append([]move(nil), moves...), bestMove)
+	}
+
+	bestMove = iterativeDeepen(ss, moves, bestMove, startTime, allocatedTime, 0)
+
+	game.isCancelPending.Store(true) // main thread is done; signal helpers to stop
+	helpers.Wait()
+	return bestMove
+}
+
+// lazySmpSkipSize / lazySmpSkipPhase drive the Stockfish-style per-helper iteration-skip schedule:
+// helper thread t (1-based via (t-1) mod len) skips iteration depth d when ((d + phase) / size) is odd,
+// so helpers desynchronise from the main thread and each other and prefill the shared TT with diverse
+// entries instead of recomputing the same tree in lockstep. The main thread (id 0) never skips.
+var (
+	lazySmpSkipSize  = [20]int{1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4}
+	lazySmpSkipPhase = [20]int{0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7}
+)
+
+// iterativeDeepen runs one thread's iterative-deepening search over its own move list and returns its
+// best move. threadID 0 is the authoritative main thread (prints info, does soft time management);
+// helper threads (id ≥ 1) follow the iteration-skip schedule and stay silent. All threads share the
+// lockless TT and eval cache via ss.game; the hard deadline (checked inside searchAlphaBeta) and the
+// game cancel flag stop every thread together.
+func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime time.Time, allocatedTime time.Duration, threadID int) move {
+	isMain := threadID == 0
+	tc := &ss.game.timeControl
+	var principalVariation variation
+	var bestMoves []move
 	prevScore := bestMove.score() // seed for aspiration windows
 
 	for depth := startDepth + 1; depth < maxPly; depth++ {
 		if tc.clockType == clockFixedDepth && depth > tc.depth {
 			break
+		}
+		if !isMain { // helper iteration-skip schedule
+			s := (threadID - 1) % len(lazySmpSkipSize)
+			if ((depth+lazySmpSkipPhase[s])/lazySmpSkipSize[s])%2 != 0 {
+				continue
+			}
 		}
 		sortMovesStable(moves)
 		bestMoves = append(bestMoves, bestMove)
@@ -707,10 +765,12 @@ func searchRootNode(game *Game) move {
 					hasRaisedAlpha = true
 					alpha = score
 					bestMove = move
-					copyVariation(&principalVariation, pv, bestMove)
-					pvStr := pvString(principalVariation)
-					fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
-						depth, alpha, time.Since(startTime).Milliseconds(), ss.nodeCount, pvStr)
+					if isMain {
+						copyVariation(&principalVariation, pv, bestMove)
+						pvStr := pvString(principalVariation)
+						fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
+							depth, alpha, time.Since(startTime).Milliseconds(), ss.nodeCount, pvStr)
+					}
 					if score >= betaAspiration {
 						hasFailedHigh = true
 						break // window failed high — remaining moves must not be searched with inverted window
@@ -725,7 +785,7 @@ func searchRootNode(game *Game) move {
 			if hasRaisedAlpha && !hasFailedHigh {
 				break
 			}
-			dbgx.aspirationFails++
+			ss.dbg.aspirationFails++
 			alphaAspiration = initialAlpha
 			betaAspiration = initialBeta
 		}
@@ -735,7 +795,7 @@ func searchRootNode(game *Game) move {
 			break
 		}
 
-		if tc.clockType == clockStandard {
+		if isMain && tc.clockType == clockStandard {
 			elapsedTime := time.Since(startTime)
 			isBestMoveConsistent := allSame(bestMoves, bestMove)
 			isScoreStable := allScoreStable(bestMoves, bestMove)

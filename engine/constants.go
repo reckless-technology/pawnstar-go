@@ -63,6 +63,9 @@ const (
 	// countermove table and, squared, the continuation-history table.
 	contKeys = 7 * 64
 
+	// maxSearchThreads caps the Lazy SMP thread count (mirrors the C++ kMaxSearchThreads).
+	maxSearchThreads = 256
+
 	// Pruning / reduction tuning (ported from C++ Pawnstar; centipawn margins carry over because the
 	// Go NNUE evaluation is bit-identical in scale to the C++ evaluator).
 	rfpMaxDepth        = 7 // reverse-futility pruning: only applied at depth ≤ this

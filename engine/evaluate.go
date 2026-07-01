@@ -372,7 +372,7 @@ func evalKing(pos *position, color color, endgame bool) int {
 // Returns drawScore for positions with insufficient material.
 // If the material score alone is more than 200 cp outside [alpha, beta], it returns early.
 func evaluatePosition(ss *searchState, alpha, beta int) int {
-	dbgx.evalCalls++
+	ss.dbg.evalCalls++
 	pos := ss.currentPosition()
 	if pos.isDrawByMaterial() {
 		return drawScore
@@ -380,7 +380,7 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 
 	hashScore := ss.game.evalTable.find(pos.hash)
 	if hashScore != hashNotFoundScore {
-		dbgx.evalHashHits++
+		ss.dbg.evalHashHits++
 		return hashScore
 	}
 
@@ -401,11 +401,11 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 		matScore = -matScore
 	}
 	if matScore > (beta + 200) {
-		dbgx.evalCutoffBeta++
+		ss.dbg.evalCutoffBeta++
 		return matScore
 	}
 	if matScore < (alpha - 200) {
-		dbgx.evalCutoffAlpha++
+		ss.dbg.evalCutoffAlpha++
 		return matScore
 	}
 

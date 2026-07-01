@@ -35,16 +35,16 @@ func newTimeControl() timeControl {
 // table, opening book, chess clock, and a stack of positions for copy-make search.
 // Create one with NewGame and drive it via HandleCommand.
 type Game struct {
-	transpositionTable transpositionTable // search result cache (shared once Lazy SMP is reintroduced)
-	historyTable       historyTable       // move-ordering history heuristic
+	transpositionTable transpositionTable // lockless search-result cache, shared by all Lazy SMP threads
 	timeControl        timeControl        // clock configuration for the current search
-	evalTable          evalHashTable      // evaluation cache
+	evalTable          evalHashTable      // lockless evaluation cache, shared by all Lazy SMP threads
 	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
 	nnue               *nnueNetwork       // NNUE evaluator; nil selects the handcrafted evaluation
+	threadCount        int                // Lazy SMP search threads; 1 = single-threaded (default; tests rely on it)
 	nodeCount          int                // total nodes searched
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
 	posStack           []position         // game history + current search path
-	isCancelPending    atomic.Bool        // set true to signal the search goroutine to stop
+	isCancelPending    atomic.Bool        // set true to signal all search goroutines to stop
 }
 
 // NewGame creates an engine instance ready to accept UCI commands.
@@ -54,6 +54,7 @@ func NewGame() *Game {
 		timeControl:        newTimeControl(),
 		openingBook:        newOpeningBookFromFile(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
+		threadCount:        1, // single-threaded by default; main() / UCI `Threads` raise it for play
 	}
 	game.newGameFromFen(startFen)
 	return game
@@ -74,6 +75,7 @@ func (game *Game) HandleCommand(line string) bool {
 		fmt.Println("id author Jonny Reckless")
 		fmt.Println("option name UseNNUE type check default true")
 		fmt.Println("option name EvalFile type string default <embedded>")
+		fmt.Printf("option name Threads type spin default %d min 1 max %d\n", game.threadCount, maxSearchThreads)
 		fmt.Println("uciok")
 	case "isready":
 		fmt.Println("readyok")
@@ -93,6 +95,12 @@ func (game *Game) HandleCommand(line string) bool {
 		return true
 	}
 	return false
+}
+
+// SetThreads sets the Lazy SMP search-thread count (clamped to [1, maxSearchThreads]). Called by
+// main() to apply the PAWNSTAR_THREADS / hardware default before the UCI loop starts.
+func (game *Game) SetThreads(n int) {
+	game.threadCount = min(max(n, 1), maxSearchThreads)
 }
 
 // handleUciSetOption processes "setoption name <Name> [value <Value>]". Supported options:
@@ -119,6 +127,11 @@ func (game *Game) handleUciSetOption(fields []string) {
 			fmt.Printf("info string EvalFile %q: %v\n", value, err)
 		} else {
 			fmt.Printf("info string NNUE net loaded from %s\n", value)
+		}
+	case "threads":
+		if n, err := strconv.Atoi(value); err == nil {
+			game.threadCount = min(max(n, 1), maxSearchThreads)
+			fmt.Printf("info string Threads set to %d\n", game.threadCount)
 		}
 	}
 }
