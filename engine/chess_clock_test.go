@@ -44,7 +44,7 @@ func TestComputeBudget(t *testing.T) {
 	// late game floors at 5, spending more per move.
 	{
 		tc := timeControl{clockType: clockStandard, timeRemaining: 40 * time.Second} // numMovesRemaining 0
-		if a, _ := tc.computeBudget(0, 0); a != time.Second {                         // 40s / max(40−0,5)=40
+		if a, _ := tc.computeBudget(0, 0); a != time.Second {                        // 40s / max(40−0,5)=40
 			t.Errorf("horizon allocated (move 0) = %v, want 1s", a)
 		}
 		if a, _ := tc.computeBudget(0, 38); a != 8*time.Second { // 40s / max(40−38,5)=5

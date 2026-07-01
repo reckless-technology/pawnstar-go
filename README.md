@@ -41,7 +41,7 @@ Perft (move generation only) runs at approximately **42 Mnps**. The NNUE evaluat
 `position` ([engine/position.go](engine/position.go)) is a value type; `makeMove` and `makeNullMove` operate on a caller-owned copy. `Game` maintains a `posStack []position` history stack (capacity 512, heap-allocated); undoing a move is a slice truncation — there is no unmake logic.
 
 The struct holds:
-- `pieces [7]bitboard` — indexed by piece type constant (`pawn`=1 … `king`=6; index 0 unused)
+- `pieces [7]bitboard` — indexed by piece type constant (`pawn`=1 … `king`=6; index 0 = the occupied-squares bitboard, maintained incrementally so `occupied()` is a plain load)
 - `colors [2]bitboard` — indexed by color constant (`white`=0, `black`=1)
 - `squares[64]piece` — O(1) piece lookup by square
 - `scores[2]int` — incremental material + PST totals per side (excludes king; updated by `addPiece`/`removePiece`/`movePiece`)

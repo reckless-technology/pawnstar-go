@@ -237,8 +237,8 @@ func (n *nnueNetwork) refresh(acc *nnueAccumulator, pos *position) {
 // (read from `from`); for each it now occupies, add the piece now there (read from `to`). A king
 // move that crosses a bucket boundary changes that whole perspective's bank, so it is refreshed.
 func (n *nnueNetwork) update(acc *nnueAccumulator, from, to *position) {
-	wf := nnueKingBucketMap[(from.pieces[king]&from.colors[white]).lsb()]
-	wt := nnueKingBucketMap[(to.pieces[king]&to.colors[white]).lsb()]
+	wf := nnueKingBucketMap[(from.pieces[king] & from.colors[white]).lsb()]
+	wt := nnueKingBucketMap[(to.pieces[king] & to.colors[white]).lsb()]
 	bf := nnueKingBucketMap[(from.pieces[king]&from.colors[black]).lsb()^nnueRankFlip]
 	bt := nnueKingBucketMap[(to.pieces[king]&to.colors[black]).lsb()^nnueRankFlip]
 

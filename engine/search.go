@@ -239,7 +239,7 @@ func (ss *searchState) scoreAndSortMoves(moves []move, ply int, prevMove move) {
 		}
 		moves[i] = m.withScore(sort)
 	}
-	sortMovesUnstable(moves)
+	sortMoves(moves)
 }
 
 // updateKillers records a quiet move m that caused a beta cutoff as the primary killer at ply,
@@ -357,8 +357,8 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 //   - Internal iterative reduction: −1 ply at depth ≥ noTTReduceMinDepth when there is no TT move.
 //   - Quiescence search at depth ≤ 0 (when not in check).
 //   - At non-PV, non-check nodes the static eval is computed once and drives:
-//       · Reverse futility pruning: return eval when depth ≤ rfpMaxDepth and eval − rfpMargin·depth ≥ beta.
-//       · Null-move pruning (R = 4): only when eval ≥ beta and there is enough material (no zugzwang).
+//     · Reverse futility pruning: return eval when depth ≤ rfpMaxDepth and eval − rfpMargin·depth ≥ beta.
+//     · Null-move pruning (R = 4): only when eval ≥ beta and there is enough material (no zugzwang).
 //   - TT move tried before generating all legal moves; remaining moves ordered by scoreAndSortMoves
 //     (winning captures, killers, countermove, then history + continuation history).
 //   - Late move pruning: skip quiet moves at depth ≤ lmpMaxDepth once moveIdx ≥ lmpBase + depth².
@@ -705,7 +705,7 @@ func searchRootNode(game *Game) move {
 		score := searchSingleMove(ss, startDepth, 0, initialAlpha, initialBeta, m, &initPV, i)
 		moves[i] = m.withScore(score)
 	}
-	sortMovesStable(moves)
+	sortMoves(moves)
 	bestMove := moves[0]
 
 	// Lazy SMP: each thread runs an independent iterative-deepening search of the same root, sharing
@@ -772,7 +772,7 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, threadID int)
 				continue
 			}
 		}
-		sortMovesStable(moves)
+		sortMoves(moves)
 		bestMoves = append(bestMoves, bestMove)
 
 		alphaAspiration := max(initialAlpha, prevScore-aspirationDelta)

@@ -53,9 +53,9 @@ const (
 
 	// Move-ordering sort-score bands (mirrors the C++ ScoreAndSortMoves). Winning captures sit on top,
 	// then the two killers, then the countermove, then quiet moves by history + continuation history.
-	winningCaptureBase = 1 << 20 // winning captures/promotions score winningCaptureBase + SEE
+	winningCaptureBase = 1 << 20   // winning captures/promotions score winningCaptureBase + SEE
 	killerScore0       = 1<<19 + 1 // first killer, just below winning captures
-	killerScore1       = 1 << 19 // second killer
+	killerScore1       = 1 << 19   // second killer
 	countermoveScore   = 1<<19 - 1 // countermove: just below the killers
 	maxQuietScore      = 1<<19 - 2 // history + continuation history clamps just below the countermove
 
@@ -68,11 +68,11 @@ const (
 
 	// Pruning / reduction tuning (ported from C++ Pawnstar; centipawn margins carry over because the
 	// Go NNUE evaluation is bit-identical in scale to the C++ evaluator).
-	rfpMaxDepth        = 7 // reverse-futility pruning: only applied at depth ≤ this
+	rfpMaxDepth        = 7  // reverse-futility pruning: only applied at depth ≤ this
 	rfpMargin          = 80 // reverse-futility pruning: centipawn margin per ply
-	lmpMaxDepth        = 8 // late-move (move-count) pruning: only applied at depth ≤ this
-	lmpBase            = 3 // a quiet move is skipped once its index ≥ lmpBase + depth*depth
-	noTTReduceMinDepth = 4 // internal iterative reduction: min depth at which a node lacking a TT move is reduced
+	lmpMaxDepth        = 8  // late-move (move-count) pruning: only applied at depth ≤ this
+	lmpBase            = 3  // a quiet move is skipped once its index ≥ lmpBase + depth*depth
+	noTTReduceMinDepth = 4  // internal iterative reduction: min depth at which a node lacking a TT move is reduced
 )
 
 // direction is one of the eight compass directions used to index ray tables.

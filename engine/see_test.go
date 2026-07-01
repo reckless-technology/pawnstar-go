@@ -331,15 +331,15 @@ func seeReferenceSwapOff(bb seeBoard, sq square, color color, onSquare piece) in
 	}
 	landed := attacker
 	sqBB := squareBB(sq)
-	if attacker == pawn && (sqBB&(rank1|rank8)).isNotEmpty() {
+	if attacker == pawn && (sqBB & (rank1 | rank8)).isNotEmpty() {
 		landed = queen // pawn reaching the back rank promotes
 	}
 	fromBB := squareBB(from)
-	bb.pieces[onSquare] ^= sqBB            // remove the captured piece
-	bb.colors[enemyOf(color)] ^= sqBB      //
-	bb.pieces[attacker] ^= fromBB          // lift the attacker off its square
-	bb.colors[color] ^= fromBB | sqBB      // and land it on sq
-	bb.pieces[landed] ^= sqBB              //
+	bb.pieces[onSquare] ^= sqBB       // remove the captured piece
+	bb.colors[enemyOf(color)] ^= sqBB //
+	bb.pieces[attacker] ^= fromBB     // lift the attacker off its square
+	bb.colors[color] ^= fromBB | sqBB // and land it on sq
+	bb.pieces[landed] ^= sqBB         //
 	net := seeValues[onSquare] - seeReferenceSwapOff(bb, sq, enemyOf(color), landed)
 	if net < 0 {
 		return 0 // stand pat rather than recapture into a loss

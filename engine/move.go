@@ -1,9 +1,5 @@
 package engine
 
-import (
-	"slices"
-)
-
 // move is a packed int64.  Bit layout (identical to the C++ version):
 //
 //	 0– 5  to square
@@ -45,10 +41,10 @@ const (
 	moveFromToMask   = 0xFFF    // bits 0–11: from+to (history-table index)
 	moveIdentityMask = 0x3FFFFF // bits 0–21: to/from/piece/captured/type (move identity)
 
-	moveCheckBit = int64(1) << moveCheckShift                    // bit 22
-	moveAgeMask  = int64(moveByteMask) << moveAgeShift           // bits 33–40
-	moveScoreMask = ^((int64(1) << moveScoreShift) - 1)          // bits 41–63
-	moveTTDataMask = ^((int64(1) << moveNodeTypeShift) - 1)      // bits 23–63 (node type, depth, age, score)
+	moveCheckBit   = int64(1) << moveCheckShift             // bit 22
+	moveAgeMask    = int64(moveByteMask) << moveAgeShift    // bits 33–40
+	moveScoreMask  = ^((int64(1) << moveScoreShift) - 1)    // bits 41–63
+	moveTTDataMask = ^((int64(1) << moveNodeTypeShift) - 1) // bits 23–63 (node type, depth, age, score)
 )
 
 // moveType classifies a move for dispatch in makeMove.
@@ -112,21 +108,23 @@ func moveSinglePush(from, to square) move {
 // moveNone is the null sentinel (all identity bits zero, which is not a legal move).
 func moveNone() move { return move(0) }
 
-func (m move) to() square      { return square(int64(m) & moveSquareMask) }                       // destination square
-func (m move) from() square    { return square((int64(m) >> moveFromShift) & moveSquareMask) }     // origin square
-func (m move) piece() piece    { return piece((int64(m) >> movePieceShift) & movePieceMask) }      // moving piece type
-func (m move) captured() piece { return piece((int64(m) >> moveCapturedShift) & movePieceMask) }   // captured piece (noPiece if none)
-func (m move) kind() moveType  { return moveType((int64(m) >> moveTypeShift) & moveTypeMask) }     // move classification
-func (m move) score() int      { return int(int64(m) >> moveScoreShift) }                          // score (bits 41–63, sign-extended)
+func (m move) to() square      { return square(int64(m) & moveSquareMask) }                      // destination square
+func (m move) from() square    { return square((int64(m) >> moveFromShift) & moveSquareMask) }   // origin square
+func (m move) piece() piece    { return piece((int64(m) >> movePieceShift) & movePieceMask) }    // moving piece type
+func (m move) captured() piece { return piece((int64(m) >> moveCapturedShift) & movePieceMask) } // captured piece (noPiece if none)
+func (m move) kind() moveType  { return moveType((int64(m) >> moveTypeShift) & moveTypeMask) }   // move classification
+func (m move) score() int      { return int(int64(m) >> moveScoreShift) }                        // score (bits 41–63, sign-extended)
 
 // TT-metadata accessors: read the fields packed into a move stored in a transposition entry.
-func (m move) ttNodeType() nodeType { return nodeType((int64(m) >> moveNodeTypeShift) & moveNodeTypeMask) } // bits 23–24
-func (m move) ttDepth() int         { return int(int8((int64(m) >> moveDepthShift) & moveByteMask)) }       // bits 25–32 (int8)
-func (m move) ttAge() uint8         { return uint8((int64(m) >> moveAgeShift) & moveByteMask) }             // bits 33–40
+func (m move) ttNodeType() nodeType {
+	return nodeType((int64(m) >> moveNodeTypeShift) & moveNodeTypeMask)
+}                           // bits 23–24
+func (m move) ttDepth() int { return int(int8((int64(m) >> moveDepthShift) & moveByteMask)) } // bits 25–32 (int8)
+func (m move) ttAge() uint8 { return uint8((int64(m) >> moveAgeShift) & moveByteMask) }       // bits 33–40
 
 // bits / moveFromBits convert to and from the raw 64-bit representation used by the lockless TT.
-func (m move) bits() uint64        { return uint64(m) }
-func moveFromBits(b uint64) move   { return move(int64(b)) }
+func (m move) bits() uint64      { return uint64(m) }
+func moveFromBits(b uint64) move { return move(int64(b)) }
 
 // isQuiet reports whether the move is neither a capture nor a promotion (mirrors the C++
 // Move::IsQuiet). Pawn pushes and castling count as quiet. Used by late-move pruning.
@@ -223,15 +221,22 @@ func (m move) GoString() string {
 // isNone reports whether m is the null sentinel (all identity bits zero).
 func (m move) isNone() bool { return (int64(m) & moveIdentityMask) == 0 }
 
-// sortMovesUnstable sorts moves by descending score.  Does not preserve order of
-// equal-score moves; faster than the stable variant.
-func sortMovesUnstable(moves []move) {
-	slices.SortFunc(moves, func(a, b move) int { return b.score() - a.score() })
-}
-
-// sortMovesStable sorts moves by descending score, preserving the relative order
-// of equal-score moves.  Used at the root so the previous iteration's ordering
-// is maintained among moves with the same score.
-func sortMovesStable(moves []move) {
-	slices.SortStableFunc(moves, func(a, b move) int { return b.score() - a.score() })
+// sortMoves stably sorts moves by descending sort score, in place, via insertion sort. A move list is
+// small and hard-bounded (a few dozen entries in practice, ~218 at most), so a simple in-place sort with
+// its tiny constant factor beats an O(n log n) sort with a scratch buffer and its overhead on tiny slices.
+// Stable — equal scores keep their generation order — which the search relies on for deterministic,
+// reproducible move choices. Descending: larger scores sort to the front. Mirrors the C++ SortMoves.
+func sortMoves(moves []move) {
+	for i := 1; i < len(moves); i++ {
+		key := moves[i]
+		keyScore := key.score()
+		// Shift moves whose score is strictly smaller than key's one place right, stopping at the first
+		// score >= it, so equal scores keep their earlier (generation-order) position.
+		j := i - 1
+		for j >= 0 && moves[j].score() < keyScore {
+			moves[j+1] = moves[j]
+			j--
+		}
+		moves[j+1] = key
+	}
 }
