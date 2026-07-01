@@ -121,29 +121,25 @@ The result is a `pins` struct with a `pinned` bitboard and a `[64]bitboard` of a
 
 ### Search
 
-`Game` ([engine/game.go](engine/game.go)) owns all persistent search state: transposition table, history table, evaluation cache, opening book, chess clock, a `parallelSlots chan struct{}` semaphore (capacity `runtime.NumCPU()`), and the `posStack []position` game-history stack. `isCancelPending` is an `atomic.Bool` set by `stopThinking` or by the time-check logic inside the search.
+`Game` ([engine/game.go](engine/game.go)) owns all persistent search state: transposition table, history table, evaluation cache, opening book, chess clock, and the `posStack []position` game-history stack. `isCancelPending` is an `atomic.Bool` set by `stopThinking` or by the time-check logic inside the search.
 
-#### searchState and parallel structures
+The search is **single-threaded**. It runs on one goroutine launched by `startThinking` so the UCI loop can still handle `stop`, but the search tree itself is walked sequentially. (Lazy SMP — independent whole-tree threads sharing the lockless transposition table, as in the C++ engine — is planned; the previous Young Brothers Wait parallel search was removed to simplify this baseline.)
 
-All recursive search functions ([engine/search.go](engine/search.go)) take `*searchState` rather than `*Game` directly. Each goroutine — the main search and every parallel worker — owns its own `searchState`:
+#### searchState
+
+All recursive search functions ([engine/search.go](engine/search.go)) take `*searchState` rather than `*Game` directly:
 
 ```
 searchState
-├── posStack  []position        goroutine's copy-make stack; seeds with 1 entry (fork position)
+├── posStack  []position        copy-make stack; seeds with 1 entry (current position)
 ├── hashStack []hashStackEntry  compact (hash, halfMoveClock) record for repetition detection
 ├── killers   [maxPly][2]move   quiet moves that caused beta cutoffs, indexed by ply
-├── nodeCount int               nodes searched by this goroutine
-├── game      *Game             pointer to all shared state (TT, history, eval cache, clock, cancel)
-└── wasCutoff *atomic.Bool      per-batch cutoff signal; nil for the main search
+├── accStack  []nnueAccumulator lazy NNUE accumulator per ply (+ accValid []bool)
+├── nodeCount int               nodes searched this iteration
+└── game      *Game             pointer to all shared state (TT, history, eval cache, clock, cancel)
 ```
 
-`hashStackEntry` stores only `hash` (8 bytes) and `halfMoveClock` (1 byte + padding = 16 bytes total), compared to 168 bytes for a full `position`. This matters for worker forks: `newWorkerState` copies the parent's entire `hashStack` — O(depth) entries — at 16 bytes each rather than 168, making the fork ~10× cheaper on the repetition history. Each worker seeds its `posStack` with a single entry: the position at the fork point.
-
-There are two constructors:
-- `newSearchStateFromGame(game)` — builds the main search state. Converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position.
-- `newWorkerState(parent, cutoff)` — builds a worker state. Copies the parent's `hashStack` (already compact), seeds `posStack` with the parent's current position, and wires up the per-batch `cutoff` signal.
-
-All shared state — TT, history table, eval cache, time control, cancel flag, semaphore — is accessed only through the `game *Game` pointer; `searchState` carries no redundant copies.
+`hashStackEntry` stores only `hash` (8 bytes) and `halfMoveClock` (1 byte + padding = 16 bytes total), compared to 168 bytes for a full `position`, keeping the repetition scan cache-friendly. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. All shared state — TT, history table, eval cache, time control, cancel flag — is accessed only through the `game *Game` pointer.
 
 #### Iterative deepening and aspiration windows
 
@@ -166,21 +162,10 @@ All shared state — TT, history table, eval cache, time control, cancel flag, s
 | Principal variation search (PVS) | Null-window on moves 2+ when not in check; re-search full window on fail-high |
 | Null-move pruning | R = 4; skipped in check, null-move positions, non-null windows, endgames; requires `pstScore > beta + 100` |
 | Late move reduction (LMR) | −1 ply from the 2nd quiet non-check non-pawn/king move onward (depth > 2); −2 ply additionally from move index 7 (depth > 3, zero history count); re-search at full depth on fail-high |
-| Young Brothers Wait (YBW) | At null-window nodes with depth ≥ 4, the first two moves are searched sequentially; remaining moves are dispatched to parallel workers via `searchMovesParallel` |
 | Check extension | In quiescence, an in-check position re-enters `searchAlphaBeta` at the same depth instead of standing pat |
 | Transposition table | Cut/All hits return early if score is conclusive; PV hits increment depth by 1 |
 
-#### Young Brothers Wait parallel search
-
-At eligible null-window nodes, `searchMovesParallel` dispatches each remaining move to a goroutine via `runWorker`:
-
-1. A slot is acquired from the `parallelSlots` channel (blocks if all `NumCPU` slots are in use, providing back-pressure).
-2. The worker builds its own `searchState` via `newWorkerState`, searching with a null window `[alpha, alpha+1]`.
-3. On a fail-high, the worker stores `true` into the per-batch `wasCutoff atomic.Bool`, signalling sibling workers to abort their searches via `isCancelled()`.
-4. The worker sends its result (a `move` with score packed into the upper 32 bits) to a buffered channel, then releases its slot.
-5. The dispatcher waits for all workers, drains the channel, and returns the best-scoring move.
-
-Workers never spawn sub-workers, preventing unbounded goroutine creation.
+The search walks the move list sequentially (single-threaded). Lazy SMP is planned; the transposition table is already lockless (see below) in preparation.
 
 #### Move ordering
 
@@ -205,7 +190,7 @@ key   atomic.Uint64   hash ^ data
 
 `find` loads both words with relaxed atomics and accepts the cell only when `key ^ data == hash`. This one check does two jobs:
 
-- **Torn-pair detection.** If two workers store to the same cell concurrently and a reader catches `key` from one store and `data` from the other, `key ^ data` no longer equals any real hash, so the read is rejected as a **miss** — never returned as a wrong entry. A data race on the pair is therefore harmless *by construction*: the worst outcome is a spurious miss and a re-search, never a bad move or a corrupt score. No per-entry lock is needed.
+- **Torn-pair detection.** If two threads store to the same cell concurrently and a reader catches `key` from one store and `data` from the other, `key ^ data` no longer equals any real hash, so the read is rejected as a **miss** — never returned as a wrong entry. A data race on the pair is therefore harmless *by construction*: the worst outcome is a spurious miss and a re-search, never a bad move or a corrupt score. No per-entry lock is needed. (The search is single-threaded today, but the table is kept lockless in preparation for Lazy SMP.)
 - **Collision guard.** Reconstructing the full 64-bit hash also rejects entries stored for a different position that happens to index to the same slot.
 
 Each individual word is an `atomic.Uint64` (relaxed load/store), so no *single* word is ever torn and Go's race detector stays quiet; the XOR key supplies the cross-word consistency that per-word atomicity alone cannot. Racing writers resolve to a benign last-writer-wins.
@@ -279,4 +264,4 @@ The handcrafted evaluation above is the fallback; the **NNUE** evaluator below i
 
 ### Search diagnostics
 
-[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, draw detection, parallel batch/cutoff/move counts, aspiration window failures, killer move beta cutoffs, and TT spinlock contention. Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect search behaviour. Counters accumulate across searches unless explicitly reset.
+[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, draw detection, aspiration window failures, and killer move beta cutoffs. Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect search behaviour. Counters accumulate across searches unless explicitly reset.

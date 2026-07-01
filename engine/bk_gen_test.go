@@ -31,7 +31,6 @@ func TestGenerateBratkoKopecNNUE(t *testing.T) {
 				if err := game.EnableNNUE(); err != nil {
 					t.Fatalf("enable NNUE: %v", err)
 				}
-				forceSerialSearch(game) // deterministic: bake exact serial best moves
 				game.newGameFromFen(tc.fen)
 				game.openingBook.clearOpeningBook()
 				game.timeControl.clockType = clockFixedDepth

@@ -35,31 +35,25 @@ func newTimeControl() timeControl {
 // table, opening book, chess clock, and a stack of positions for copy-make search.
 // Create one with NewGame and drive it via HandleCommand.
 type Game struct {
-	transpositionTable transpositionTable // shared across all search goroutines
-	historyTable       historyTable       // shared across all search goroutines
+	transpositionTable transpositionTable // search result cache (shared once Lazy SMP is reintroduced)
+	historyTable       historyTable       // move-ordering history heuristic
 	timeControl        timeControl        // clock configuration for the current search
-	evalTable          evalHashTable      // shared evaluation cache
+	evalTable          evalHashTable      // evaluation cache
 	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
 	nnue               *nnueNetwork       // NNUE evaluator; nil selects the handcrafted evaluation
-	nodeCount          int                // total nodes searched (main goroutine only)
+	nodeCount          int                // total nodes searched
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
-	parallelSlots      chan struct{}      // semaphore: capacity = maxNumGoRoutines, limits parallel workers
-	posStack           []position         // game history + current search path (main goroutine)
-	isCancelPending    atomic.Bool        // set true to signal all goroutines to stop
+	posStack           []position         // game history + current search path
+	isCancelPending    atomic.Bool        // set true to signal the search goroutine to stop
 }
 
 // NewGame creates an engine instance ready to accept UCI commands.
 func NewGame() *Game {
-	slots := make(chan struct{}, maxNumGoRoutines)
-	for range maxNumGoRoutines {
-		slots <- struct{}{}
-	}
 	game := &Game{
 		transpositionTable: newTranspositionTable(hashTableMB),
 		timeControl:        newTimeControl(),
 		openingBook:        newOpeningBookFromFile(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
-		parallelSlots:      slots,
 	}
 	game.newGameFromFen(startFen)
 	return game
