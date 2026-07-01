@@ -105,6 +105,7 @@ func (game *Game) handleUciSetOption(fields []string) {
 	case "usennue":
 		if strings.EqualFold(value, "false") {
 			game.nnue = nil
+			game.evalTable.clear() // switching evaluators invalidates cached scores
 			fmt.Println("info string NNUE disabled; using handcrafted eval")
 		} else if err := game.EnableNNUE(); err != nil {
 			fmt.Printf("info string %v\n", err)
