@@ -156,19 +156,9 @@ func (n *nnueNetwork) column(bucket, colorIdx int, pc piece, s square, blackPers
 	return n.featureWeights[start : start+nnueHiddenSize]
 }
 
-// addColumn adds a feature column into a perspective accumulator (wrapping int16, matching C++).
-func addColumn(side *[nnueHiddenSize]int16, col []int16) {
-	for i := 0; i < nnueHiddenSize; i++ {
-		side[i] += col[i]
-	}
-}
-
-// subColumn subtracts a feature column from a perspective accumulator (the inverse of addColumn).
-func subColumn(side *[nnueHiddenSize]int16, col []int16) {
-	for i := 0; i < nnueHiddenSize; i++ {
-		side[i] -= col[i]
-	}
-}
+// addColumn and subColumn (accumulator column add/sub) and outputDot (the SCReLU output dot) are the
+// hot kernels; they have SIMD (archsimd) and scalar implementations selected by build tag in
+// nnue_kernels_amd64.go / nnue_kernels_generic.go. All are bit-identical.
 
 // refreshSide rebuilds one perspective accumulator from scratch: seed the bias, then add the
 // feature column of every piece, oriented for that perspective's king bucket.
@@ -255,18 +245,6 @@ func (n *nnueNetwork) diffSide(side *[nnueHiddenSize]int16, from, to *position, 
 	}
 }
 
-// nnueSCReLU is the squared clipped ReLU activation: clamp to [0,QA] then square.
-func nnueSCReLU(x int16) int32 {
-	y := int32(x)
-	switch {
-	case y < 0:
-		y = 0
-	case y > nnueQA:
-		y = nnueQA
-	}
-	return y * y
-}
-
 // nnueDequant reduces the raw int64 dot (in QA*QA*QB units) to clamped centipawns.
 func nnueDequant(output int64, bias int16) int {
 	output /= nnueQA
@@ -289,12 +267,7 @@ func (n *nnueNetwork) evaluateExact(acc *nnueAccumulator, sideToMove color) int 
 	if sideToMove == black {
 		stm, ntm = &acc.black, &acc.white
 	}
-	var output int64
-	for i := 0; i < nnueHiddenSize; i++ {
-		output += int64(nnueSCReLU(stm[i])) * int64(n.outputWeights[i])
-		output += int64(nnueSCReLU(ntm[i])) * int64(n.outputWeights[nnueHiddenSize+i])
-	}
-	return nnueDequant(output, n.outputBias)
+	return nnueDequant(outputDot(stm, ntm, n.outputWeights), n.outputBias)
 }
 
 // evaluateExactPosition refreshes an accumulator for pos and returns the exact evaluation.
