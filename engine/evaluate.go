@@ -381,7 +381,7 @@ func evaluatePosition(ss *searchState, alpha, beta int) int {
 	// NNUE evaluator: neural-net eval from the incrementally-maintained accumulator (no handcrafted
 	// material early-exit, whose scale differs).
 	if ss.game.nnue != nil {
-		score := ss.game.nnue.searchEvalAcc(&ss.acc, pos.colorToMove)
+		score := ss.game.nnue.searchEvalAcc(ss.currentAccumulator(), pos.colorToMove)
 		ss.game.evalTable.record(pos.hash, score)
 		return score
 	}
