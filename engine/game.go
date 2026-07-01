@@ -178,56 +178,6 @@ func (game *Game) playMoveString(s string) move {
 	return moveNone()
 }
 
-// pieceVals maps piece type to centipawn value, used in move scoring (MVV-LVA).
-var pieceVals = [7]int{0, 100, 300, 300, 500, 900, 10000}
-
-// scoreAndSortMovesInner assigns sort scores and sorts moves.  It is shared by
-// searchState (with per-ply killers) and the root search (zero killers).
-// Captures and promotions are scored via SEE; quiet moves use an enemy-attack
-// penalty plus killer bonuses and history.
-func scoreAndSortMovesInner(pos *position, history *historyTable, killers [2]move, moves []move, ply int) {
-	occupied := pos.occupied()
-	color := pos.colorToMove
-	enemyColor := enemyOf(color)
-	enemyPieces := pos.colors[enemyColor]
-	enemyPawns := enemyPieces & pos.pieces[pawn]
-	var enemyAttacks bitboard
-	if color == white {
-		enemyAttacks = enemyPawns.shiftSouthwest() | enemyPawns.shiftSoutheast()
-	} else {
-		enemyAttacks = enemyPawns.shiftNorthwest() | enemyPawns.shiftNortheast()
-	}
-	nonPawnEnemy := enemyPieces &^ enemyPawns
-	for nonPawnEnemy != 0 {
-		sq := nonPawnEnemy.popLsb()
-		enemyAttacks |= pieceAttacks(pos.squares[sq], occupied, sq)
-	}
-	for i, m := range moves {
-		piece := m.piece()
-		var score int
-		if m.captured() != noPiece || m.promoted() != noPiece {
-			// SEE replaces MVV-LVA for captures and promotions.  Captures are scored by pure SEE
-			// (no history/PST) so the sign of the sort score is exactly the sign of the SEE value —
-			// which is what quiescence SEE pruning relies on to skip losing captures.
-			seeScore, _ := evaluateStaticExchange(pos, m)
-			score = seeScore * 1000
-		} else {
-			// Quiet move: penalise walking into an enemy attack; boost killers; add history + PST delta.
-			if (enemyAttacks & squareBB(m.to())).isNotEmpty() {
-				score -= pieceVals[piece] * 1000
-			}
-			if !killers[0].isNone() && killers[0].equal(m) {
-				score += killerScore0
-			} else if !killers[1].isNone() && killers[1].equal(m) {
-				score += killerScore1
-			}
-			score += int(history.getCount(ply, m))
-			score += pstValue(color, piece, m.to()) - pstValue(color, piece, m.from())
-		}
-		moves[i] = m.withScore(score)
-	}
-	sortMovesUnstable(moves)
-}
 
 // startThinking launches a search goroutine for the current position and time
 // control.  Any previously running search is stopped first.

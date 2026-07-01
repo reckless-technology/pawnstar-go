@@ -50,11 +50,17 @@ const (
 	// aspirationDelta is the initial aspiration window half-width in centipawns.
 	aspirationDelta = 50
 
-	// killerScore0 and killerScore1 are added to a quiet move's sort score when
-	// it matches the first or second killer at the current ply.  Values are chosen
-	// to sit above equal-exchange captures (SEE ≈ 0) and below winning captures.
-	killerScore0 = 90_000
-	killerScore1 = 80_000
+	// Move-ordering sort-score bands (mirrors the C++ ScoreAndSortMoves). Winning captures sit on top,
+	// then the two killers, then the countermove, then quiet moves by history + continuation history.
+	winningCaptureBase = 1 << 20 // winning captures/promotions score winningCaptureBase + SEE
+	killerScore0       = 1<<19 + 1 // first killer, just below winning captures
+	killerScore1       = 1 << 19 // second killer
+	countermoveScore   = 1<<19 - 1 // countermove: just below the killers
+	maxQuietScore      = 1<<19 - 2 // history + continuation history clamps just below the countermove
+
+	// contKeys is the size of the [piece, to] index space (7 piece types × 64 squares) used to key the
+	// countermove table and, squared, the continuation-history table.
+	contKeys = 7 * 64
 
 	// Pruning / reduction tuning (ported from C++ Pawnstar; centipawn margins carry over because the
 	// Go NNUE evaluation is bit-identical in scale to the C++ evaluator).

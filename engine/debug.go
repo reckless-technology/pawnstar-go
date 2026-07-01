@@ -42,6 +42,7 @@ type debugX struct {
 	lmrAttempts2             uint // times double-ply LMR was applied (deep node, late move)
 	lmrAttempts3             uint // times triple-ply LMR was applied (late move, zero history)
 	lmrFails                 uint // times LMR re-search was required (score > alpha at reduced depth)
+	checkExtensions          uint // times a check extension deepened the search by one ply
 	iirReductions            uint // times internal iterative reduction fired (no TT move)
 	rfpPrunes                uint // times reverse-futility pruning returned early
 	lmpPrunes                uint // times late-move (move-count) pruning skipped a quiet move

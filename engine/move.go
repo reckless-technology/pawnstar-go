@@ -132,6 +132,10 @@ func moveFromBits(b uint64) move   { return move(int64(b)) }
 // Move::IsQuiet). Pawn pushes and castling count as quiet. Used by late-move pruning.
 func (m move) isQuiet() bool { return m.captured() == noPiece && m.promoted() == noPiece }
 
+// pieceTo returns a (piece, to-square) index in [0, contKeys) used to key the countermove and
+// continuation-history tables. moveNone maps to 0 (a harmless slot). Mirrors the C++ Move::piece_to.
+func (m move) pieceTo() int { return int(m.piece())<<6 | int(m.to()) }
+
 // fromTo returns the combined from+to index (bits 0–11) used as a hash key in
 // the history table.
 func (m move) fromTo() int { return int(m) & moveFromToMask }
