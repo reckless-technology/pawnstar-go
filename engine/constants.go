@@ -48,9 +48,6 @@ const (
 	// this is ~8 MB, the size the C++ engine found optimal (larger regressed slightly).
 	evalHashTableSize = 1 << 20
 
-	// aspirationDelta is the initial aspiration window half-width in centipawns.
-	aspirationDelta = 50
-
 	// Move-ordering sort-score bands (mirrors the C++ ScoreAndSortMoves). Winning captures sit on top,
 	// then the two killers, then the countermove, then quiet moves by history + continuation history.
 	winningCaptureBase = 1 << 20   // winning captures/promotions score winningCaptureBase + SEE

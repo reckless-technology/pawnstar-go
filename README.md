@@ -143,16 +143,14 @@ searchState
 
 `hashStackEntry` stores only `hash` (8 bytes) and `halfMoveClock` (1 byte + padding = 16 bytes total), compared to 168 bytes for a full `position`, keeping the repetition scan cache-friendly. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. All shared state — TT, history table, eval cache, time control, cancel flag — is accessed only through the `game *Game` pointer.
 
-#### Iterative deepening and aspiration windows
+#### Iterative deepening
 
 `searchRootNode` drives iterative deepening from `startDepth` (3):
 
 1. Return the opening book move if available; return immediately for forced moves (single legal move).
 2. Run an initial pass at `startDepth` to score and order moves.
 3. For each depth from `startDepth+1` to `maxPly`:
-   - Open a ±50 cp aspiration window around the previous depth's score (`aspirationDelta = 50`).
-   - Search all root moves within `[alphaAspiration, betaAspiration]`. Break out of the move loop immediately on a fail-high (score ≥ betaAspiration) to avoid searching remaining moves with an inverted window.
-   - If the result falls outside the window (fail-low: no move exceeded alphaAspiration; fail-high: a move hit betaAspiration), widen to `[initialAlpha, initialBeta]` and retry once.
+   - Search all root moves in a single **full-window** pass `[initialAlpha, initialBeta]`: `alpha` starts at the minimum and is raised as moves improve, so PVS null-windows every move after the first. There is no aspiration window (the C++ engine tested and rejected aspiration; a fixed-depth cross-engine BK diff confirmed it was the sole meaningful Go↔C++ divergence, so Go dropped it — 20/23 BK positions then match C++ to the exact node count, the rest being benign TT noise).
    - Apply early-exit heuristics (Standard clock only): stop early if the best move is consistent and/or the score is stable across depths, as a fraction of the allocated time budget.
 
 **Time allocation (Standard clock):** `allocated = timeRemaining / movesRemaining`. Hard stop = `max(100ms, min(allocated × 2, timeRemaining − 1s))`. The clock is checked every 65 536 nodes (`nodeCount & 0xFFFF == 0`).
@@ -271,4 +269,4 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 
 ### Search diagnostics
 
-[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, draw detection, aspiration window failures, and killer move beta cutoffs. Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect search behaviour. Counters accumulate across searches unless explicitly reset.
+[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, draw detection, and killer move beta cutoffs. Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect search behaviour. Counters accumulate across searches unless explicitly reset.
