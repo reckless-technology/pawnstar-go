@@ -123,7 +123,7 @@ The result is a `pins` struct with a `pinned` bitboard and a `[64]bitboard` of a
 
 `Game` ([engine/game.go](engine/game.go)) owns all persistent search state: transposition table, history table, evaluation cache, opening book, chess clock, and the `posStack []position` game-history stack. `isCancelPending` is an `atomic.Bool` set by `stopThinking` or by the time-check logic inside the search.
 
-The search is **single-threaded**. It runs on one goroutine launched by `startThinking` so the UCI loop can still handle `stop`, but the search tree itself is walked sequentially. (Lazy SMP — independent whole-tree threads sharing the lockless transposition table, as in the C++ engine — is planned; the previous Young Brothers Wait parallel search was removed to simplify this baseline.)
+The search uses **Lazy SMP** (as in the C++ engine): `searchRootNode` runs `threadCount` threads, each an independent iterative-deepening search of the whole root sharing only the lockless transposition table and eval cache. The main thread (id 0) is authoritative — it prints `info`, manages time, and returns the move — while helper threads deepen the shared TT, desynchronised by a Stockfish-style iteration-skip schedule so they explore diverse lines. Thread count defaults to 1 (raised by `main()` from `PAWNSTAR_THREADS`/`NumCPU`, or the UCI `Threads` option). All per-thread state (history, killers, continuation history, countermoves, accumulator, diagnostics) lives on each thread's `searchState`, so nothing is shared except the two lockless tables — the concurrent search is data-race free with no locks.
 
 #### searchState
 
@@ -165,7 +165,7 @@ searchState
 | Check extension | In quiescence, an in-check position re-enters `searchAlphaBeta` at the same depth instead of standing pat |
 | Transposition table | Cut/All hits return early if score is conclusive; PV hits increment depth by 1 |
 
-The search walks the move list sequentially (single-threaded). Lazy SMP is planned; the transposition table is already lockless (see below) in preparation.
+Under Lazy SMP each thread walks the move list independently; parallelism comes from many whole-tree searches sharing the lockless transposition table, not from splitting a node.
 
 #### Move ordering
 
@@ -194,7 +194,7 @@ key   atomic.Uint64   hash ^ data
 
 `find` loads both words with relaxed atomics and accepts the cell only when `key ^ data == hash`. This one check does two jobs:
 
-- **Torn-pair detection.** If two threads store to the same cell concurrently and a reader catches `key` from one store and `data` from the other, `key ^ data` no longer equals any real hash, so the read is rejected as a **miss** — never returned as a wrong entry. A data race on the pair is therefore harmless *by construction*: the worst outcome is a spurious miss and a re-search, never a bad move or a corrupt score. No per-entry lock is needed. (The search is single-threaded today, but the table is kept lockless in preparation for Lazy SMP.)
+- **Torn-pair detection.** If two threads store to the same cell concurrently and a reader catches `key` from one store and `data` from the other, `key ^ data` no longer equals any real hash, so the read is rejected as a **miss** — never returned as a wrong entry. A data race on the pair is therefore harmless *by construction*: the worst outcome is a spurious miss and a re-search, never a bad move or a corrupt score. No per-entry lock is needed — this is what lets the Lazy SMP threads share the table.
 - **Collision guard.** Reconstructing the full 64-bit hash also rejects entries stored for a different position that happens to index to the same slot.
 
 Each individual word is an `atomic.Uint64` (relaxed load/store), so no *single* word is ever torn and Go's race detector stays quiet; the XOR key supplies the cross-word consistency that per-word atomicity alone cannot. Racing writers resolve to a benign last-writer-wins.
