@@ -99,3 +99,33 @@ func (tt *transpositionTable) record(hash zobrist, m move, depth int16, nt nodeT
 func (tt *transpositionTable) age() {
 	tt.currentAge++
 }
+
+// clear zeroes every entry and resets the generation (backs the UCI `Clear Hash` button). Not safe to
+// call during a search.
+func (tt *transpositionTable) clear() {
+	for i := range tt.table {
+		tt.table[i].key.Store(0)
+		tt.table[i].data.Store(0)
+	}
+	tt.currentAge = 0
+}
+
+// hashfull returns the approximate fill level in per mille (0..1000) for the UCI `info hashfull` field.
+// It samples the first min(len, 1000) cells — positions hash uniformly, so the prefix is representative
+// — rather than scanning the whole table, so it is cheap enough to call on every info line.
+func (tt *transpositionTable) hashfull() int {
+	sample := len(tt.table)
+	if sample > 1000 {
+		sample = 1000
+	}
+	if sample == 0 {
+		return 0
+	}
+	count := 0
+	for i := 0; i < sample; i++ {
+		if tt.table[i].data.Load() != 0 {
+			count++
+		}
+	}
+	return count * 1000 / sample
+}

@@ -34,6 +34,7 @@ type searchState struct {
 	killers   [maxPly][2]move  // per-ply quiet moves that recently caused beta cutoffs
 	history   historyTable     // per-thread history heuristic (per-thread to avoid Lazy-SMP contention)
 	nodeCount int              // nodes searched since the last root iteration reset
+	seldepth  int              // deepest ply reached this search (for UCI `info seldepth`)
 	game      *Game            // shared: time control, cancel flag, lockless TT + eval cache
 	dbg       *debugX          // diagnostic counters: the global dbgx for the main thread, a throwaway per helper
 
@@ -300,6 +301,11 @@ type variation struct {
 	moves []move
 }
 
+// clear empties the variation. Called before each searchSingleMove so a child that does not raise
+// alpha (a cutoff or all-node) leaves no stale tail behind — otherwise the parent's reconstructed PV
+// would splice on a move from a previously searched sibling, producing an "illegal PV move".
+func (v *variation) clear() { v.moves = v.moves[:0] }
+
 // copyVariation sets dst to best followed by all moves in src.
 func copyVariation(dst *variation, src variation, best move) {
 	dst.moves = dst.moves[:0]
@@ -357,10 +363,19 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 //     (and, for a quiet cutoff, killers + countermove). TT write with Cut/All/PV node type on exit.
 func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *variation, prevMove move) int {
 	ss.nodeCount++
-	if (ss.nodeCount&0xFFFF) == 0 && (ss.game.timeControl.clockType == clockStandard || ss.game.timeControl.clockType == clockFixedTime) &&
-		time.Now().After(ss.game.timeControl.stopTime) {
-		ss.game.isCancelPending.Store(true)
-		return searchCancelledScore
+	if ply > ss.seldepth {
+		ss.seldepth = ply
+	}
+	// Poll the hard deadline (and the `go nodes` limit) every 2048 nodes: between polls the search
+	// cannot stop, so a coarse interval (the former 64k) let a node-heavy batch overrun the deadline and
+	// forfeit on time. 2048 keeps the overrun sub-millisecond while the clock read stays negligible.
+	if (ss.nodeCount & 0x7FF) == 0 {
+		tc := &ss.game.timeControl
+		timedOut := (tc.clockType == clockStandard || tc.clockType == clockFixedTime) && time.Now().After(tc.stopTime)
+		if timedOut || (tc.maxNodes > 0 && ss.nodeCount >= tc.maxNodes) {
+			ss.game.isCancelPending.Store(true)
+			return searchCancelledScore
+		}
 	}
 
 	position := ss.currentPosition()
@@ -457,6 +472,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 	if isTransposition && !transpos.move.isNone() {
 		ss.dbg.tableMove++
+		pv.clear()
 		score := searchSingleMove(ss, depth, ply, alpha, beta, transpos.move, &pv, 0)
 		if ss.isCancelled() {
 			return searchCancelledScore
@@ -521,6 +537,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			}
 		}
 
+		pv.clear()
 		score := searchSingleMove(ss, childDepth, ply, alpha, beta, move, &pv, i)
 		if score > alpha && childDepth < depth {
 			ss.dbg.lmrFails++
@@ -565,6 +582,9 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 // same depth (no depth decrement) so that all evasions are considered.
 func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 	ss.dbg.quiescentCalls++
+	if ply > ss.seldepth {
+		ss.seldepth = ply
+	}
 	if ply >= maxPly {
 		return evaluatePosition(ss, alpha, beta)
 	}
@@ -630,17 +650,35 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 //   - Either condition alone: exit if elapsed > ½ of budget.
 //   - Hard stop if elapsed > budget.
 func searchRootNode(game *Game) move {
-	// Check opening book.
-	bookMove := game.openingBook.getMove(game.currentPosition().hash)
-	if bookMove != moveNone() {
-		return bookMove
+	searchMoves := game.timeControl.searchMoves
+	// Opening book — skipped when `go searchmoves` restricts the root (the caller wants those searched).
+	if len(searchMoves) == 0 {
+		if bookMove := game.openingBook.getMove(game.currentPosition().hash); bookMove != moveNone() {
+			return bookMove
+		}
 	}
 
 	moves := game.currentPosition().generateLegalMoves()
+	// `go searchmoves`: restrict the root move list to the requested moves (ignored if none are legal
+	// here, so a malformed list cannot wedge the search).
+	if len(searchMoves) > 0 {
+		var filtered []move
+		for _, m := range moves {
+			for _, s := range searchMoves {
+				if m.String() == s {
+					filtered = append(filtered, m)
+					break
+				}
+			}
+		}
+		if len(filtered) > 0 {
+			moves = filtered
+		}
+	}
 	if len(moves) == 0 {
 		return moveNone()
 	}
-	if len(moves) == 1 {
+	if len(moves) == 1 && len(searchMoves) == 0 {
 		return moves[0]
 	}
 
@@ -656,10 +694,11 @@ func searchRootNode(game *Game) move {
 			allocatedTime = tc.timeRemaining
 		}
 		hardStopDuration := max(100*time.Millisecond, min(allocatedTime*2, tc.timeRemaining-time.Second))
-		tc.stopTime = time.Now().Add(hardStopDuration)
+		// Reserve the move overhead (GUI/network lag) so we don't overshoot the clock and forfeit.
+		tc.stopTime = time.Now().Add(max(time.Millisecond, hardStopDuration-game.moveOverhead))
 
 	case clockFixedTime:
-		tc.stopTime = time.Now().Add(tc.timeRemaining)
+		tc.stopTime = time.Now().Add(max(time.Millisecond, tc.timeRemaining-game.moveOverhead))
 	}
 
 	startTime := time.Now()
@@ -743,7 +782,6 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime tim
 		}
 		sortMovesStable(moves)
 		bestMoves = append(bestMoves, bestMove)
-		ss.nodeCount = 0
 
 		alphaAspiration := max(initialAlpha, prevScore-aspirationDelta)
 		betaAspiration := min(initialBeta, prevScore+aspirationDelta)
@@ -756,6 +794,7 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime tim
 			hasRaisedAlpha := false
 
 			for i, move := range moves {
+				pv.clear()
 				score := searchSingleMove(ss, depth, 0, alpha, betaAspiration, move, &pv, i)
 				moves[i] = move.withScore(score)
 				if ss.isCancelled() {
@@ -767,9 +806,11 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime tim
 					bestMove = move
 					if isMain {
 						copyVariation(&principalVariation, pv, bestMove)
-						pvStr := pvString(principalVariation)
-						fmt.Printf("info depth %2d score cp %4d time %5d nodes %7d pv %s\n",
-							depth, alpha, time.Since(startTime).Milliseconds(), ss.nodeCount, pvStr)
+						elapsedMs := time.Since(startTime).Milliseconds()
+						nps := int64(ss.nodeCount) * 1000 / max(1, elapsedMs)
+						fmt.Printf("info depth %d seldepth %d score %s time %d nodes %d nps %d hashfull %d pv %s\n",
+							depth, ss.seldepth, formatScore(alpha), elapsedMs, ss.nodeCount, nps,
+							ss.game.transpositionTable.hashfull(), pvString(principalVariation))
 					}
 					if score >= betaAspiration {
 						hasFailedHigh = true
@@ -817,6 +858,21 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime tim
 		}
 	}
 	return bestMove
+}
+
+// formatScore renders a search score as a UCI `score` field: `mate N` inside the mate band (positive
+// = we deliver mate in N moves, negative = we are mated in N), otherwise `cp N`. Mate scores are
+// ±(mateValue − plies_to_mate), so plies_to_mate = mateValue − |score| and the move count rounds up.
+func formatScore(score int) string {
+	const mateValue = -checkmatedScore
+	switch {
+	case score >= winThreshold:
+		return fmt.Sprintf("mate %d", (mateValue-score+1)/2)
+	case score <= loseThreshold:
+		return fmt.Sprintf("mate %d", -((mateValue + score + 1) / 2))
+	default:
+		return fmt.Sprintf("cp %d", score)
+	}
 }
 
 // pvString formats a principal variation as a space-separated UCI move list.

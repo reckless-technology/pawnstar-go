@@ -19,6 +19,8 @@ type timeControl struct {
 	numMovesRemaining int           // moves until next time control (0 = sudden death)
 	depth             int           // target depth for clockFixedDepth mode
 	stopTime          time.Time     // hard deadline; search sets isCancelPending when exceeded
+	maxNodes          int           // node limit (`go nodes`); 0 = none. Checked per thread.
+	searchMoves       []string      // if non-empty (`go searchmoves`), restrict the root to these UCI moves
 }
 
 // newTimeControl returns a default timeControl (5-minute standard game, 40 moves).
@@ -41,6 +43,7 @@ type Game struct {
 	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
 	nnue               *nnueNetwork       // NNUE evaluator; nil selects the handcrafted evaluation
 	threadCount        int                // Lazy SMP search threads; 1 = single-threaded (default; tests rely on it)
+	moveOverhead       time.Duration      // reserved from every hard deadline for GUI/network lag (UCI Move Overhead)
 	nodeCount          int                // total nodes searched
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
 	posStack           []position         // game history + current search path
@@ -55,6 +58,7 @@ func NewGame() *Game {
 		openingBook:        newOpeningBookFromFile(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
 		threadCount:        1, // single-threaded by default; main() / UCI `Threads` raise it for play
+		moveOverhead:       30 * time.Millisecond,
 	}
 	game.newGameFromFen(startFen)
 	return game
@@ -76,6 +80,9 @@ func (game *Game) HandleCommand(line string) bool {
 		fmt.Println("option name UseNNUE type check default true")
 		fmt.Println("option name EvalFile type string default <embedded>")
 		fmt.Printf("option name Threads type spin default %d min 1 max %d\n", game.threadCount, maxSearchThreads)
+		fmt.Printf("option name Hash type spin default %d min 1 max 4096\n", hashTableMB)
+		fmt.Println("option name Clear Hash type button")
+		fmt.Printf("option name Move Overhead type spin default %d min 0 max 5000\n", game.moveOverhead.Milliseconds())
 		fmt.Println("uciok")
 	case "isready":
 		fmt.Println("readyok")
@@ -132,6 +139,18 @@ func (game *Game) handleUciSetOption(fields []string) {
 		if n, err := strconv.Atoi(value); err == nil {
 			game.threadCount = min(max(n, 1), maxSearchThreads)
 			fmt.Printf("info string Threads set to %d\n", game.threadCount)
+		}
+	case "hash":
+		if n, err := strconv.Atoi(value); err == nil {
+			game.transpositionTable = newTranspositionTable(min(max(n, 1), 4096))
+			fmt.Printf("info string Hash set to %d MB\n", min(max(n, 1), 4096))
+		}
+	case "clear hash":
+		game.transpositionTable.clear()
+		game.evalTable.clear()
+	case "move overhead":
+		if n, err := strconv.Atoi(value); err == nil {
+			game.moveOverhead = time.Duration(min(max(n, 0), 5000)) * time.Millisecond
 		}
 	}
 }
@@ -261,6 +280,8 @@ func (game *Game) handleUciPosition(args []string) {
 // handleUciGo handles the "go" command, parsing the clock parameters and starting the search.
 func (game *Game) handleUciGo(args []string) {
 	tc := &game.timeControl
+	tc.maxNodes = 0        // reset per-search limits (a bare `go` clears a previous nodes/searchmoves)
+	tc.searchMoves = nil
 	color := game.currentPosition().colorToMove
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -299,6 +320,16 @@ func (game *Game) handleUciGo(args []string) {
 			i++
 		case "infinite":
 			tc.clockType = clockInfinite
+		case "nodes":
+			tc.clockType = clockInfinite // node-limited; the periodic check ends it at maxNodes
+			if v, err := strconv.Atoi(args[i+1]); err == nil {
+				tc.maxNodes = v
+			}
+			i++
+		case "searchmoves":
+			// The rest of the args are UCI moves to restrict the root search to.
+			tc.searchMoves = append(tc.searchMoves, args[i+1:]...)
+			i = len(args)
 		}
 	}
 	game.startThinking()
