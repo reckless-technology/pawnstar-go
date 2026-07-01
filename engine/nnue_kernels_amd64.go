@@ -64,3 +64,50 @@ func outputDot(stm, ntm *[nnueHiddenSize]int16, weights []int16) int64 {
 	acc.StoreSlice(lanes[:])
 	return lanes[0] + lanes[1] + lanes[2] + lanes[3]
 }
+
+// nnueInt8Round is the SCReLU rounding addend for the int8 activation (1 << (nnueInt8Shift-1)).
+const nnueInt8Round = 1 << (nnueInt8Shift - 1)
+
+// outputDotInt8 is the int8 output dot: sum(screlu_u8(a) * w8) over both perspectives, with w8 the
+// int8-range weights (stored int16). Per 16 lanes: clamp to [0,QA], widen to int32, square, add the
+// rounding term and shift right by nnueInt8Shift to the uint8-range activation ([0,127]), multiply by
+// the sign-extended int8 weight (product fits int32), then widen to int64 and accumulate. Bit-identical
+// to the scalar fallback in nnue_kernels_generic.go.
+func outputDotInt8(stm, ntm *[nnueHiddenSize]int16, w8 []int16) int64 {
+	zero := archsimd.BroadcastInt16x16(0)
+	qa := archsimd.BroadcastInt16x16(nnueQA)
+	round := archsimd.BroadcastInt32x8(nnueInt8Round)
+	acc := archsimd.BroadcastInt64x4(0)
+
+	sides := [2]*[nnueHiddenSize]int16{stm, ntm}
+	for s := 0; s < 2; s++ {
+		a := sides[s]
+		w := w8[s*nnueHiddenSize:]
+		for i := 0; i < nnueHiddenSize; i += 16 {
+			x := archsimd.LoadInt16x16Slice(a[i:])
+			wv := archsimd.LoadInt16x16Slice(w[i:])
+			c := x.Max(zero).Min(qa) // clamp to [0, QA]
+
+			clo := c.GetLo().ExtendToInt32()
+			chi := c.GetHi().ExtendToInt32()
+			// activation u8 = (c*c + round) >> shift, in [0, 127]
+			ulo := clo.Mul(clo).Add(round).ShiftAllRight(nnueInt8Shift)
+			uhi := chi.Mul(chi).Add(round).ShiftAllRight(nnueInt8Shift)
+
+			wlo := wv.GetLo().ExtendToInt32()
+			whi := wv.GetHi().ExtendToInt32()
+
+			plo := ulo.Mul(wlo) // u8 * w8 (fits int32)
+			phi := uhi.Mul(whi)
+
+			acc = acc.Add(plo.GetLo().ExtendToInt64())
+			acc = acc.Add(plo.GetHi().ExtendToInt64())
+			acc = acc.Add(phi.GetLo().ExtendToInt64())
+			acc = acc.Add(phi.GetHi().ExtendToInt64())
+		}
+	}
+
+	var lanes [4]int64
+	acc.StoreSlice(lanes[:])
+	return lanes[0] + lanes[1] + lanes[2] + lanes[3]
+}

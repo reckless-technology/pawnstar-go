@@ -42,3 +42,27 @@ func outputDot(stm, ntm *[nnueHiddenSize]int16, weights []int16) int64 {
 	}
 	return output
 }
+
+// nnueSCReLUu8 is the int8-path activation: clamp to [0,QA], square, round, and shift right by
+// nnueInt8Shift, yielding a uint8-range value in [0,127]. Mirrors the C++ ScReluU8 scalar path.
+func nnueSCReLUu8(x int16) int64 {
+	c := int(x)
+	if c < 0 {
+		c = 0
+	} else if c > nnueQA {
+		c = nnueQA
+	}
+	return int64((c*c + (1 << (nnueInt8Shift - 1))) >> nnueInt8Shift)
+}
+
+// outputDotInt8 is the int8 output dot: sum(screlu_u8(a) * w8) over both perspectives, where w8 are the
+// int8-range weights (stored int16). The activations lie in [0,127] and the weights in [-127,127], so
+// every product fits well within int32 and the exact integer sum matches the SIMD kernel bit-for-bit.
+func outputDotInt8(stm, ntm *[nnueHiddenSize]int16, w8 []int16) int64 {
+	var output int64
+	for i := 0; i < nnueHiddenSize; i++ {
+		output += nnueSCReLUu8(stm[i]) * int64(w8[i])
+		output += nnueSCReLUu8(ntm[i]) * int64(w8[nnueHiddenSize+i])
+	}
+	return output
+}

@@ -65,6 +65,59 @@ func TestNNUEReference(t *testing.T) {
 	t.Logf("NNUE reference: %d positions, max |diff| = %d cp (tolerance %d)", checked, maxDiff, tolerance)
 }
 
+// TestNNUEInt8 checks the search's int8 output dot (evaluateInt8) stays within a bounded deviation of the
+// exact int16 evaluator (evaluateExact) over the 250 reference positions — mirroring the C++ test's int8
+// bound (kInt8Bound = 40). Because evaluateInt8 is deterministic, running this under both the SIMD and the
+// scalar build also confirms the two int8 kernels agree (identical deviations => identical int8 values),
+// the way TestNNUEReference guards the int16 kernels.
+func TestNNUEInt8(t *testing.T) {
+	const int8Bound = 40 // matches C++ kInt8Bound; the measured max is far smaller
+
+	net, err := loadNNUENetworkFile("nnue/pawnstar-v12.bin")
+	if err != nil {
+		t.Fatalf("load net: %v", err)
+	}
+	f, err := os.Open("testdata/nnue_reference.txt")
+	if err != nil {
+		t.Fatalf("open reference: %v", err)
+	}
+	defer f.Close()
+
+	checked, maxDev := 0, 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		bar := strings.LastIndex(line, "|")
+		if bar < 0 {
+			continue
+		}
+		fen := strings.TrimSpace(line[:bar])
+		pos := positionFromFen(fen)
+		var acc nnueAccumulator
+		net.refresh(&acc, &pos)
+		i8 := net.evaluateInt8(&acc, pos.colorToMove)
+		ref := net.evaluateExact(&acc, pos.colorToMove)
+		dev := i8 - ref
+		if dev < 0 {
+			dev = -dev
+		}
+		if dev > maxDev {
+			maxDev = dev
+		}
+		checked++
+		if dev > int8Bound {
+			t.Errorf("fen %q: int8 %d cp deviates %d from int16 ref %d (> %d)", fen, i8, dev, ref, int8Bound)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan reference: %v", err)
+	}
+	if checked != 250 {
+		t.Fatalf("checked %d positions, expected 250", checked)
+	}
+	t.Logf("NNUE int8: %d positions, max |int8-int16| = %d cp (bound %d)", checked, maxDev, int8Bound)
+}
+
 // TestNNUEIncremental verifies the lazy search accumulator stays bit-identical to a full refresh at
 // every node of a legal-move walk, and after every undo. It exercises two paths: findAccMismatch
 // forces currentAccumulator at every node (single-ply catch-ups over all move types), and

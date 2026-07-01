@@ -317,6 +317,14 @@ func copyVariation(dst *variation, src variation, best move) {
 func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *variation, moveIdx int) int {
 	wasInCheck := ss.currentPosition().isInCheck()
 	childDepth := depth - 1
+	// Search extensions: search a promotion or en-passant capture one ply deeper (the per-node check
+	// extension is applied in searchAlphaBeta). Mirrors the C++ SearchSingleMove. Like C++, this is
+	// unguarded — on promotion-dense positions it can drive the search to maxPly (the clock bounds it in
+	// real play; TestSearch caps nodes so its fixed-depth runs stay bounded).
+	switch m.kind() {
+	case promotionKnight, promotionBishop, promotionRook, promotionQueen, epCapture:
+		childDepth++
+	}
 	ss.playMove(m)
 	isChecking := ss.currentPosition().isInCheck()
 	var score int
