@@ -252,6 +252,8 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 | `go infinite` | Search until `stop` |
 | `go nodes <n>` | Search until the node limit (checked per thread) |
 | `go searchmoves <m…>` | Restrict the root search to the given moves |
+| `go ... ponder` | Search on the opponent's time; no `bestmove` until `ponderhit`/`stop` |
+| `ponderhit` | Predicted move was played — convert the ponder search to a timed one (budget from now) |
 | `bench` | Fixed-position node-count benchmark (deterministic; single-threaded, book off) |
 | `stop` | Signals search goroutines to halt |
 | `quit` | Stops search and exits |
@@ -261,8 +263,11 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 | `setoption name Hash value <mb>` | Resize the transposition table |
 | `setoption name Clear Hash` | Clear the TT and eval cache |
 | `setoption name Move Overhead value <ms>` | Time reserved from every deadline for GUI/network lag |
+| `setoption name Ponder value <true\|false>` | Advertises pondering support (the GUI drives it via `go ponder`/`ponderhit`) |
 
-`info` lines carry `depth`, `seldepth`, `score cp`/`score mate N`, `time`, `nodes`, `nps`, `hashfull`, and `pv`. [main.go](main.go) reads stdin line-by-line and calls `game.HandleCommand` and sets the thread count from `PAWNSTAR_THREADS`/`NumCPU` (NNUE is installed by `NewGame`). (Pondering is the one UCI feature not implemented.)
+`info` lines carry `depth`, `seldepth`, `score cp`/`score mate N`, `time`, `nodes`, `nps`, `hashfull`, and `pv`. [main.go](main.go) reads stdin line-by-line and calls `game.HandleCommand` and sets the thread count from `PAWNSTAR_THREADS`/`NumCPU` (NNUE is installed by `NewGame`).
+
+**Pondering** (`go ponder` / `ponderhit` / `Ponder` option) searches on the opponent's time until the predicted move is played (`ponderhit`, which converts it to a timed search budgeted from that moment) or `stop`. The live clock is two `atomic.Int64`s on `Game` — armed on the UCI goroutine before the search starts, mutated only by `ponderhit` — so the concurrent read/write is data-race free (verified under `-race` by `TestPonderRace`). `bestmove` is deferred while pondering and emitted as `bestmove <m> ponder <reply>`.
 
 ### Search diagnostics
 
