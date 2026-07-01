@@ -651,8 +651,8 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 //   - Hard stop if elapsed > budget.
 func searchRootNode(game *Game) move {
 	searchMoves := game.timeControl.searchMoves
-	// Opening book — skipped when `go searchmoves` restricts the root (the caller wants those searched).
-	if len(searchMoves) == 0 {
+	// Opening book — skipped when OwnBook is off, or when `go searchmoves` restricts the root.
+	if game.useOwnBook && len(searchMoves) == 0 {
 		if bookMove := game.openingBook.getMove(game.currentPosition().hash); bookMove != moveNone() {
 			return bookMove
 		}
@@ -727,6 +727,7 @@ func searchRootNode(game *Game) move {
 	}
 
 	bestMove = iterativeDeepen(ss, moves, bestMove, startTime, allocatedTime, 0)
+	game.nodeCount = ss.nodeCount // main-thread node total (used by `bench`)
 
 	game.isCancelPending.Store(true) // main thread is done; signal helpers to stop
 	helpers.Wait()
@@ -778,6 +779,11 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, startTime tim
 			hasRaisedAlpha := false
 
 			for i, move := range moves {
+				// Report the move currently being searched at the root, but only once a search is slow
+				// enough that a GUI benefits — avoids flooding info lines on the fast shallow iterations.
+				if isMain && time.Since(startTime) > 3*time.Second {
+					fmt.Printf("info depth %d currmove %s currmovenumber %d\n", depth, move.String(), i+1)
+				}
 				pv.clear()
 				score := searchSingleMove(ss, depth, 0, alpha, betaAspiration, move, &pv, i)
 				moves[i] = move.withScore(score)

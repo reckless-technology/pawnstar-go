@@ -65,6 +65,7 @@ type Game struct {
 	nnue               *nnueNetwork       // NNUE evaluator; nil selects the handcrafted evaluation
 	threadCount        int                // Lazy SMP search threads; 1 = single-threaded (default; tests rely on it)
 	moveOverhead       time.Duration      // reserved from every hard deadline for GUI/network lag (UCI Move Overhead)
+	useOwnBook         bool               // consult the opening book (UCI OwnBook); false forces a real search
 	nodeCount          int                // total nodes searched
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
 	posStack           []position         // game history + current search path
@@ -80,6 +81,7 @@ func NewGame() *Game {
 		evalTable:          newEvalHashTable(evalHashTableSize),
 		threadCount:        1, // single-threaded by default; main() / UCI `Threads` raise it for play
 		moveOverhead:       30 * time.Millisecond,
+		useOwnBook:         true,
 	}
 	game.newGameFromFen(startFen)
 	return game
@@ -99,6 +101,7 @@ func (game *Game) HandleCommand(line string) bool {
 		fmt.Println("id name Pawnstar-Go")
 		fmt.Println("id author Jonny Reckless")
 		fmt.Println("option name UseNNUE type check default true")
+		fmt.Println("option name OwnBook type check default true")
 		fmt.Println("option name EvalFile type string default <embedded>")
 		fmt.Printf("option name Threads type spin default %d min 1 max %d\n", game.threadCount, maxSearchThreads)
 		fmt.Printf("option name Hash type spin default %d min 1 max 4096\n", hashTableMB)
@@ -116,6 +119,9 @@ func (game *Game) HandleCommand(line string) bool {
 		game.handleUciPosition(fields[1:])
 	case "go":
 		game.handleUciGo(fields[1:])
+	case "bench":
+		game.stopThinking()
+		game.runBench()
 	case "stop":
 		game.stopThinking()
 	case "quit":
@@ -173,6 +179,8 @@ func (game *Game) handleUciSetOption(fields []string) {
 		if n, err := strconv.Atoi(value); err == nil {
 			game.moveOverhead = time.Duration(min(max(n, 0), 5000)) * time.Millisecond
 		}
+	case "ownbook":
+		game.useOwnBook = !strings.EqualFold(value, "false")
 	}
 }
 
