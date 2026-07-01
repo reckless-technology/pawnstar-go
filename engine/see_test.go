@@ -231,6 +231,55 @@ func TestSEE(t *testing.T) {
 			move:      moveCapture(d4, e5, pawn, rook),
 			wantScore: 400,
 		},
+
+		// ── En passant captures ───────────────────────────────────────────────
+		{
+			name:      "en passant: wins an undefended pawn",
+			fen:       "7k/8/8/3Pp3/8/8/8/K7 w - e6 0 1",
+			move:      moveEpCapture(d5, e6),
+			wantScore: 100,
+		},
+		{
+			name:      "en passant: equal, recaptured by an adjacent pawn",
+			fen:       "7k/5p2/8/3Pp3/8/8/8/K7 w - e6 0 1",
+			move:      moveEpCapture(d5, e6),
+			wantScore: 0,
+		},
+
+		// ── Battery / revealed attacker ───────────────────────────────────────
+		{
+			// Rook in front of the queen: after the rook trade the queen recaptures.
+			name:      "battery: rook in front of queen wins the pawn after the trade",
+			fen:       "4r2k/8/8/4p3/8/8/4R3/K3Q3 w - - 0 1",
+			move:      moveCapture(e2, e5, rook, pawn),
+			wantScore: 100,
+		},
+		{
+			// Bishop fronts a rook on the d-file; after Bxd5 nxd5, Rxd5 collects the pawn.
+			name:      "bishop+rook battery beats a pawn-defended knight",
+			fen:       "7k/8/4p3/3n4/8/8/6B1/K2R4 w - - 0 1",
+			move:      moveCapture(g2, d5, bishop, knight),
+			wantScore: 100,
+		},
+
+		// ── Losing capture that gives check ───────────────────────────────────
+		{
+			name:         "queen grabs a king-defended pawn, loses the queen but gives check",
+			fen:          "k7/p7/8/8/8/8/8/Q6K w - - 0 1",
+			move:         moveCapture(a1, a7, queen, pawn),
+			wantScore:    -800,
+			wantChecking: true,
+		},
+
+		// ── Cross-color pawn recapture: two attackers vs one defender ─────────
+		{
+			// White answers black's e6xd5 recapture with c4xd5 — the recapturing
+			// pawns are different colors, which the swap-off must follow across plies.
+			name:      "two pawn attackers vs one defender wins a pawn",
+			fen:       "7k/8/4p3/3p4/2P1P3/8/8/K7 w - - 0 1",
+			move:      moveCapture(e4, d5, pawn, pawn),
+			wantScore: 100,
+		},
 	}
 
 	for _, tt := range tests {
@@ -245,4 +294,121 @@ func TestSEE(t *testing.T) {
 			}
 		})
 	}
+}
+
+// seeRefBoardLVA finds the least-valuable attacker of sq by color on a seeBoard, re-derived from the
+// current occupancy each call. Returns its from-square and piece type. Independent of evaluateSwapOff's
+// incremental bookkeeping (and it selects the pawn source per call, so it catches the per-ply bug).
+func seeRefBoardLVA(bb *seeBoard, sq square, color color) (square, piece, bool) {
+	occ := bb.colors[white] | bb.colors[black]
+	friendly := bb.colors[color]
+	pawnSrc := pawnAttacksWhite[sq]
+	if color == white {
+		pawnSrc = pawnAttacksBlack[sq]
+	}
+	for _, o := range [...]struct {
+		pc piece
+		t  bitboard
+	}{
+		{pawn, pawnSrc}, {knight, knightAttacks[sq]},
+		{bishop, bishopAttacks(occ, sq)}, {rook, rookAttacks(occ, sq)},
+		{queen, bishopAttacks(occ, sq) | rookAttacks(occ, sq)}, {king, kingAttacks[sq]},
+	} {
+		if atk := o.t & friendly & bb.pieces[o.pc]; atk.isNotEmpty() {
+			return atk.lsb(), o.pc, true
+		}
+	}
+	return 0, noPiece, false
+}
+
+// seeReferenceSwapOff is a recursive negamax swap-off over a seeBoard (bb is taken by value, so each
+// recursion gets its own copy — no undo). It is the independent cross-check for evaluateSwapOff, whose
+// forward-pass-then-unwind it must match exactly.
+func seeReferenceSwapOff(bb seeBoard, sq square, color color, onSquare piece) int {
+	from, attacker, ok := seeRefBoardLVA(&bb, sq, color)
+	if !ok {
+		return 0 // no attacker: the side to move declines, gaining nothing
+	}
+	landed := attacker
+	sqBB := squareBB(sq)
+	if attacker == pawn && (sqBB&(rank1|rank8)).isNotEmpty() {
+		landed = queen // pawn reaching the back rank promotes
+	}
+	fromBB := squareBB(from)
+	bb.pieces[onSquare] ^= sqBB            // remove the captured piece
+	bb.colors[enemyOf(color)] ^= sqBB      //
+	bb.pieces[attacker] ^= fromBB          // lift the attacker off its square
+	bb.colors[color] ^= fromBB | sqBB      // and land it on sq
+	bb.pieces[landed] ^= sqBB              //
+	net := seeValues[onSquare] - seeReferenceSwapOff(bb, sq, enemyOf(color), landed)
+	if net < 0 {
+		return 0 // stand pat rather than recapture into a loss
+	}
+	return net
+}
+
+// seeReference computes SEE independently of evaluateStaticExchange (recursive negamax swap-off) and is
+// used only to cross-check it.
+func seeReference(pos *position, m move) (int, bool) {
+	child := *pos
+	child.makeMove(m)
+	isChecking := child.isInCheck()
+	captured := seeValues[m.captured()]
+	if m.kind() == epCapture {
+		captured = seeValues[pawn]
+	}
+	landed := m.piece()
+	gain := captured
+	if p := m.promoted(); p != noPiece {
+		gain += seeValues[p] - seeValues[pawn]
+		landed = p
+	}
+	return gain - seeReferenceSwapOff(newSeeBoard(&child), m.to(), child.colorToMove, landed), isChecking
+}
+
+// crossCheckSee walks every capture/promotion in the depth-bounded move tree from pos and asserts the
+// fast evaluateStaticExchange matches the recursive seeReference — score AND give-check flag. Ports the
+// C++ CrossCheckSee: exercises en passant, promotion captures, and discovered/promotion/ep checks.
+func crossCheckSee(t *testing.T, pos *position, depth int) int {
+	checks := 0
+	for _, m := range pos.generateLegalMoves() {
+		if m.captured() != noPiece || m.promoted() != noPiece {
+			checks++
+			fastScore, fastChk := evaluateStaticExchange(pos, m)
+			refScore, refChk := seeReference(pos, m)
+			if fastScore != refScore || fastChk != refChk {
+				t.Errorf("SEE mismatch on %s (fen %s): fast {%d,%v} ref {%d,%v}",
+					m.String(), pos.toFenString(), fastScore, fastChk, refScore, refChk)
+			}
+		}
+		if depth > 0 {
+			child := *pos
+			child.makeMove(m)
+			checks += crossCheckSee(t, &child, depth-1)
+		}
+	}
+	return checks
+}
+
+// TestSEECrossCheck verifies the fast SEE against the independent recursive reference over the capture/
+// promotion/en-passant-rich standard positions used by the C++ test (startpos, Kiwipete, a perft ep
+// position, perft pos4, and a promotion-rich position), to depth 3.
+func TestSEECrossCheck(t *testing.T) {
+	fens := []string{
+		"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+		"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+		"8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+		"r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+		"n1n5/PPPk4/8/8/8/8/4Kppp/5N1N b - - 0 1",
+	}
+	depth := 3
+	if testing.Short() {
+		depth = 2
+	}
+	total := 0
+	for _, fen := range fens {
+		pos := positionFromFen(fen)
+		total += crossCheckSee(t, &pos, depth)
+	}
+	t.Logf("cross-checked fast SEE == reference over %d captures/promotions", total)
 }

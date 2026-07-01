@@ -18,25 +18,70 @@ func newSeeBoard(pos *position) seeBoard {
 	return seeBoard{pieces: pos.pieces, colors: pos.colors}
 }
 
-// evaluateStaticExchange returns the SEE score for m (positive = winning capture)
-// and whether m gives check.  The score accounts for all recaptures on the target
-// square by the least-valuable available attacker on each side in turn.
-func evaluateStaticExchange(pos *position, move move) (int, bool) {
-	child := *pos
-	child.makeMove(move)
-	isChecking := child.isInCheck()
-	nextColor := child.colorToMove
-	bb := newSeeBoard(&child)
-	piece := move.piece()
-	promoted := move.promoted()
-	captured := move.captured()
-	if promoted != noPiece {
-		s := seeValues[captured] + seeValues[promoted] - seeValues[pawn] -
-			evaluateSwapOff(&bb, move.to(), nextColor, promoted)
-		return s, isChecking
+// evaluateStaticExchange returns the SEE score for m (positive = winning capture) and whether m gives
+// check. It applies only the capturing move to a lightweight bitboard board — no makeMove, so no
+// Zobrist/castling/squares[] bookkeeping — detects check by testing whether the moving side now attacks
+// the enemy king (seeAttackersTo, which catches discovered, promotion and en-passant-discovered checks),
+// and scores the recapture sequence with evaluateSwapOff. Mirrors the C++ EvaluateStaticExchange.
+func evaluateStaticExchange(pos *position, m move) (int, bool) {
+	color := pos.colorToMove
+	enemy := enemyOf(color)
+	from := m.from()
+	to := m.to()
+	mover := m.piece()
+	promoted := m.promoted()
+
+	// En passant captures the pawn on to's file at from's rank; otherwise the captured piece sits on
+	// `to` (noPiece for a non-capturing promotion). The piece that lands on `to` is the promoted type.
+	capturedSquare := to
+	captured := m.captured()
+	if m.kind() == epCapture {
+		capturedSquare = (from & 0x38) | (to & 0x07)
+		captured = pawn
 	}
-	s := seeValues[captured] - evaluateSwapOff(&bb, move.to(), nextColor, piece)
-	return s, isChecking
+	pieceOnTo := mover
+	if promoted != noPiece {
+		pieceOnTo = promoted
+	}
+
+	// Apply the capturing move to a working board via bitboard XORs.
+	bb := newSeeBoard(pos)
+	fromBB := squareBB(from)
+	toBB := squareBB(to)
+	if captured != noPiece { // a non-capturing promotion leaves `to` empty
+		capturedBB := squareBB(capturedSquare)
+		bb.pieces[captured] ^= capturedBB
+		bb.colors[enemy] ^= capturedBB
+	}
+	bb.pieces[mover] ^= fromBB
+	bb.colors[color] ^= fromBB
+	bb.pieces[pieceOnTo] ^= toBB
+	bb.colors[color] ^= toBB
+
+	// Check = the side that just moved now attacks the opposing king.
+	enemyKing := (bb.pieces[king] & bb.colors[enemy]).lsb()
+	isChecking := seeAttackersTo(&bb, enemyKing, color).isNotEmpty()
+
+	if promoted != noPiece {
+		return seeValues[captured] + seeValues[promoted] - seeValues[pawn] -
+			evaluateSwapOff(&bb, to, enemy, promoted), isChecking
+	}
+	return seeValues[captured] - evaluateSwapOff(&bb, to, enemy, mover), isChecking
+}
+
+// seeAttackersTo returns the set of `color` pieces attacking `location` on the working board (using its
+// colour bitboards for occupancy). Used by evaluateStaticExchange for MakeMove-free check detection.
+func seeAttackersTo(bb *seeBoard, location square, color color) bitboard {
+	occupied := bb.colors[white] | bb.colors[black]
+	pawnSrc := pawnAttacksWhite[location]
+	if color == white {
+		pawnSrc = pawnAttacksBlack[location]
+	}
+	result := pawnSrc & bb.pieces[pawn]
+	result |= (knightAttacks[location] & bb.pieces[knight]) | (kingAttacks[location] & bb.pieces[king])
+	result |= rookAttacks(occupied, location) & (bb.pieces[rook] | bb.pieces[queen])
+	result |= bishopAttacks(occupied, location) & (bb.pieces[bishop] | bb.pieces[queen])
+	return result & bb.colors[color]
 }
 
 // evaluateSwapOff simulates the full exchange sequence on location, starting with
@@ -52,12 +97,11 @@ func evaluateStaticExchange(pos *position, move move) (int, bool) {
 //
 // which lets each side "stand pat" rather than recapture into a loss.
 func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare piece) int {
-	var pawnTargets bitboard
-	if color == white {
-		pawnTargets = pawnAttacksBlack[location]
-	} else {
-		pawnTargets = pawnAttacksWhite[location]
-	}
+	// Source squares of the pawn attackers of `location`, by attacking colour. `location` is fixed for
+	// the whole swap-off, but the side to move flips every ply, so the correct set must be selected per
+	// ply below. (Computing it once for the initial colour missed the opposite colour's pawn recaptures
+	// — e.g. a white c4 pawn recapturing after a black e6xd5, which the swap-off must follow.)
+	pawnSrc := [2]bitboard{white: pawnAttacksBlack[location], black: pawnAttacksWhite[location]}
 	knightTargets := knightAttacks[location]
 	kingTargets := kingAttacks[location]
 	sqBB := squareBB(location)
@@ -69,7 +113,7 @@ func evaluateSwapOff(bb *seeBoard, location square, color color, pieceOnSquare p
 		var capturingPiece piece
 		var attackers, bishopTargets, rookTargets bitboard
 
-		attackers = pawnTargets & attackingPieces & bb.pieces[pawn]
+		attackers = pawnSrc[color] & attackingPieces & bb.pieces[pawn]
 		if attackers.isNotEmpty() {
 			capturingPiece = pawn
 			goto AttackFound
