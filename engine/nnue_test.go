@@ -134,7 +134,7 @@ func TestNNUEIncremental(t *testing.T) {
 		startFen,
 		"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", // Kiwipete: castling + captures
 		"8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",                            // en passant, king near bucket edges
-		"n1n5/PPPk4/8/8/8/8/4Kppp/5N1N b - - 0 1",                             // promotions (incl. under-promotion)
+		"n1n5/PPPk4/8/8/8/8/4Kppp/5N1N b - - 0 1",                              // promotions (incl. under-promotion)
 	}
 	depth := 3
 	if testing.Short() {

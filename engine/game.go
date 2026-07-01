@@ -302,7 +302,6 @@ func (game *Game) playMoveString(s string) move {
 	return moveNone()
 }
 
-
 // startThinking launches a search goroutine for the current position and time
 // control.  Any previously running search is stopped first.  The clock is armed here — on the calling
 // (UCI) goroutine, before the search goroutine starts — so the budgets are set with a happens-before to

@@ -14,7 +14,7 @@ import (
 // The Zobrist hash is maintained incrementally by addPiece, removePiece, and
 // movePiece so hashing is O(1) at every node.
 type position struct {
-	pieces      [7]bitboard    // per-piece-type occupancy; index = piece constant (pawn=1..king=6, 0 unused)
+	pieces      [7]bitboard    // per-piece-type occupancy; index = piece constant (pawn=1..king=6); index 0 (noPiece) holds all occupied squares
 	colors      [2]bitboard    // per-color occupancy; colors[white]|colors[black] == occupied()
 	squares     [64]piece      // reverse lookup: squares[sq] gives the piece type on sq, or noPiece
 	checkers    bitboard       // pieces currently giving check to the side to move; refreshed by makeMove
@@ -37,8 +37,10 @@ func (position *position) isNullMove() bool { return (position.flags & flagNullM
 // isInCheck reports whether the side to move is in check.
 func (position *position) isInCheck() bool { return position.checkers.isNotEmpty() }
 
-// occupied returns a bitboard of all squares containing any piece.
-func (position *position) occupied() bitboard { return position.colors[white] | position.colors[black] }
+// occupied returns a bitboard of all squares containing any piece. pieces[noPiece] holds the occupancy,
+// maintained incrementally by addPiece/removePiece/movePiece, so this is a plain load (mirrors the C++
+// Position::OccupiedSquares reading pieces_[kNone]).
+func (position *position) occupied() bitboard { return position.pieces[noPiece] }
 
 // kingSquare returns the square occupied by the king of color c.
 func (position *position) kingSquare(c color) square {
@@ -51,6 +53,7 @@ func (position *position) addPiece(c color, p piece, sq square) {
 	bb := squareBB(sq)
 	position.pieces[p] ^= bb
 	position.colors[c] ^= bb
+	position.pieces[noPiece] ^= bb // occupied-squares bitboard
 	position.hash ^= pieceSquareHashes[c][p-1][sq]
 	position.squares[sq] = p
 }
@@ -60,6 +63,7 @@ func (position *position) removePiece(c color, p piece, sq square) {
 	bb := squareBB(sq)
 	position.pieces[p] ^= bb
 	position.colors[c] ^= bb
+	position.pieces[noPiece] ^= bb // occupied-squares bitboard
 	position.hash ^= pieceSquareHashes[c][p-1][sq]
 	position.squares[sq] = noPiece
 }
@@ -69,6 +73,7 @@ func (position *position) movePiece(c color, p piece, from, to square) {
 	fromTo := squareBB(from) | squareBB(to)
 	position.pieces[p] ^= fromTo
 	position.colors[c] ^= fromTo
+	position.pieces[noPiece] ^= fromTo // occupied-squares bitboard (from cleared, to set)
 	position.hash ^= pieceSquareHashes[c][p-1][from] ^ pieceSquareHashes[c][p-1][to]
 	position.squares[from] = noPiece
 	position.squares[to] = p
