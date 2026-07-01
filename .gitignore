@@ -3,4 +3,5 @@ pawnstar-go-baseline
 .claude/worktrees/
 # fastchess SPRT artifacts
 config.json
-*.pgnpawnstar-go-nnue-*
+*.pgn
+pawnstar-go-nnue-*
