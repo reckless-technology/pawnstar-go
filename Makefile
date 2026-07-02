@@ -12,7 +12,7 @@ export GOEXPERIMENT := simd
 BINARY := pawnstar-go
 PKG    := ./engine/
 
-.PHONY: all build test test-short perft search bk see test-uci bench baseline vet fmt clean
+.PHONY: all build test test-short check perft search bk see nnue timing test-uci bench baseline vet fmt clean
 
 all: build
 
@@ -27,6 +27,11 @@ test:
 test-short:
 	$(GO) test -short $(PKG)
 
+# Focused correctness gate: movegen (perft), SEE, Bratko-Kopec, NNUE, chess-clock timing,
+# and the UCI protocol regression (drives the built binary). `perft` here is the full
+# depth-6 sweep, so this is thorough rather than quick — use `make test-short` for a fast pass.
+check: perft see bk nnue timing test-uci
+
 perft:
 	$(GO) test $(PKG) -run TestPerft -v
 
@@ -39,10 +44,20 @@ bk:
 see:
 	$(GO) test $(PKG) -run TestSEE -v
 
+# NNUE gates: int16 reference (0 cp vs C++), int8 search eval (<=40 cp, scalar==SIMD), lazy accumulator.
+nnue:
+	$(GO) test $(PKG) -run TestNNUE -v
+
+# Chess-clock / time-management tests (budget, deadline firing, defaults, ponder race).
+timing:
+	$(GO) test $(PKG) -run 'TestTimeControlDefaults|TestComputeBudget|TestPonderRace|TestFixedTimeDeadlineFires' -v
+
 # UCI protocol regression test — drives the built binary as a UCI process (handshake, seldepth,
 # searchmoves, currmove, bench determinism).
+# The script execs the engine via "$ENGINE"; pass ./$(BINARY) so bash runs the local
+# binary rather than doing a PATH lookup (cwd is not on PATH) — a bare name fails the coproc.
 test-uci: build
-	./test/uci_test.sh $(BINARY)
+	./test/uci_test.sh ./$(BINARY)
 
 bench:
 	$(GO) test $(PKG) -bench BenchmarkPerft7 -benchtime=10s -run '^$$'
