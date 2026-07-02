@@ -286,11 +286,14 @@ func enumerateOccupancies(mask bitboard, occupancies, targets []bitboard, getAtt
 	return count
 }
 
-// lsbX and msbX are sentinel-safe wrappers around lsb/msb for use in
-// rookAttacksClassic and bishopAttacksClassic.  When the input bitboard is empty
-// (no blocker in a direction) they return a fixed boundary square so that the
+// lsbX is a sentinel-safe lsb for the positive-direction ray scans in
+// rookAttacksClassic and bishopAttacksClassic: when the input bitboard is empty
+// (no blocker in that direction) it returns the top boundary square (h8) so the
 // XOR trick still produces the correct full ray.
 func lsbX(b bitboard) square { return (b | 0x8000000000000000).lsb() }
+
+// msbX is the negative-direction counterpart of lsbX: an empty bitboard returns
+// the bottom boundary square (a1).
 func msbX(b bitboard) square { return (b | 1).msb() }
 
 // rookAttacksClassic computes rook attacks from sq on occ using classical ray
