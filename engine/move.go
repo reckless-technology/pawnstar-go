@@ -108,22 +108,39 @@ func moveSinglePush(from, to square) move {
 // moveNone is the null sentinel (all identity bits zero, which is not a legal move).
 func moveNone() move { return move(0) }
 
-func (m move) to() square      { return square(int64(m) & moveSquareMask) }                      // destination square
-func (m move) from() square    { return square((int64(m) >> moveFromShift) & moveSquareMask) }   // origin square
-func (m move) piece() piece    { return piece((int64(m) >> movePieceShift) & movePieceMask) }    // moving piece type
-func (m move) captured() piece { return piece((int64(m) >> moveCapturedShift) & movePieceMask) } // captured piece (noPiece if none)
-func (m move) kind() moveType  { return moveType((int64(m) >> moveTypeShift) & moveTypeMask) }   // move classification
-func (m move) score() int      { return int(int64(m) >> moveScoreShift) }                        // score (bits 41–63, sign-extended)
+// to returns the destination square (bits 0–5).
+func (m move) to() square { return square(int64(m) & moveSquareMask) }
 
-// TT-metadata accessors: read the fields packed into a move stored in a transposition entry.
+// from returns the origin square (bits 6–11).
+func (m move) from() square { return square((int64(m) >> moveFromShift) & moveSquareMask) }
+
+// piece returns the moving piece type (bits 12–14).
+func (m move) piece() piece { return piece((int64(m) >> movePieceShift) & movePieceMask) }
+
+// captured returns the captured piece type (bits 15–17), noPiece for a non-capture.
+func (m move) captured() piece { return piece((int64(m) >> moveCapturedShift) & movePieceMask) }
+
+// kind returns the move classification (bits 18–21).
+func (m move) kind() moveType { return moveType((int64(m) >> moveTypeShift) & moveTypeMask) }
+
+// score returns the move-ordering sort score (bits 41–63, sign-extended).
+func (m move) score() int { return int(int64(m) >> moveScoreShift) }
+
+// ttNodeType returns the node type packed into a transposition-entry move (bits 23–24).
 func (m move) ttNodeType() nodeType {
 	return nodeType((int64(m) >> moveNodeTypeShift) & moveNodeTypeMask)
-}                           // bits 23–24
-func (m move) ttDepth() int { return int(int8((int64(m) >> moveDepthShift) & moveByteMask)) } // bits 25–32 (int8)
-func (m move) ttAge() uint8 { return uint8((int64(m) >> moveAgeShift) & moveByteMask) }       // bits 33–40
+}
 
-// bits / moveFromBits convert to and from the raw 64-bit representation used by the lockless TT.
-func (m move) bits() uint64      { return uint64(m) }
+// ttDepth returns the search depth packed into a transposition-entry move (bits 25–32, signed int8).
+func (m move) ttDepth() int { return int(int8((int64(m) >> moveDepthShift) & moveByteMask)) }
+
+// ttAge returns the generation stamp packed into a transposition-entry move (bits 33–40).
+func (m move) ttAge() uint8 { return uint8((int64(m) >> moveAgeShift) & moveByteMask) }
+
+// bits returns the raw 64-bit representation stored by the lockless transposition table.
+func (m move) bits() uint64 { return uint64(m) }
+
+// moveFromBits reconstructs a move from its raw 64-bit representation (inverse of bits).
 func moveFromBits(b uint64) move { return move(int64(b)) }
 
 // isQuiet reports whether the move is neither a capture nor a promotion (mirrors the C++

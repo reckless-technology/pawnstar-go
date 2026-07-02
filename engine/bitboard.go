@@ -49,14 +49,28 @@ func (b bitboard) lsb() square { return square(bits.TrailingZeros64(uint64(b))) 
 // msb returns the index of the most-significant set bit (highest square number).
 func (b bitboard) msb() square { return square(63 - bits.LeadingZeros64(uint64(b))) }
 
-// Directional shifts. East and west shifts mask off the wrapping file before shifting.
-func (b bitboard) shiftNorth() bitboard     { return b << 8 }
-func (b bitboard) shiftSouth() bitboard     { return b >> 8 }
-func (b bitboard) shiftEast() bitboard      { return (b & notFileH) << 1 }
-func (b bitboard) shiftWest() bitboard      { return (b & notFileA) >> 1 }
+// shiftNorth shifts every set square one rank up (toward rank 8).
+func (b bitboard) shiftNorth() bitboard { return b << 8 }
+
+// shiftSouth shifts every set square one rank down (toward rank 1).
+func (b bitboard) shiftSouth() bitboard { return b >> 8 }
+
+// shiftEast shifts every set square one file right, masking off the h-file first so squares never wrap.
+func (b bitboard) shiftEast() bitboard { return (b & notFileH) << 1 }
+
+// shiftWest shifts every set square one file left, masking off the a-file first so squares never wrap.
+func (b bitboard) shiftWest() bitboard { return (b & notFileA) >> 1 }
+
+// shiftNortheast shifts every set square one rank up and one file right (wrap-safe).
 func (b bitboard) shiftNortheast() bitboard { return (b & notFileH) << 9 }
+
+// shiftNorthwest shifts every set square one rank up and one file left (wrap-safe).
 func (b bitboard) shiftNorthwest() bitboard { return (b & notFileA) << 7 }
+
+// shiftSoutheast shifts every set square one rank down and one file right (wrap-safe).
 func (b bitboard) shiftSoutheast() bitboard { return (b & notFileH) >> 7 }
+
+// shiftSouthwest shifts every set square one rank down and one file left (wrap-safe).
 func (b bitboard) shiftSouthwest() bitboard { return (b & notFileA) >> 9 }
 
 // popLsb clears the least-significant set bit and returns its square index.

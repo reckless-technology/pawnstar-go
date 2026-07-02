@@ -117,6 +117,7 @@ const (
 	king    piece = iota
 )
 
+// toString returns the piece type's lowercase FEN letter (a space for noPiece).
 func (p piece) toString() string {
 	return string(" pnbrqk"[p])
 }
