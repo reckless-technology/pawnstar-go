@@ -12,12 +12,26 @@ export GOEXPERIMENT := simd
 BINARY := pawnstar-go
 PKG    := ./engine/
 
+# Version, mirroring the C++ engine: MAJOR.MINOR are edited by hand (keep in sync with engine/version.go),
+# BUILD is the git commit count (globally reproducible; 0 outside a git checkout). The build number is baked
+# into the binary via -ldflags so the UCI `id name` reports "Pawnstar-Go MAJOR.MINOR.BUILD", and the built
+# binary is named pawnstar-go_MAJOR_MINOR_BUILD with a `pawnstar-go` symlink to it (like C++'s pawnstar).
+MAJOR := 0
+MINOR := 1
+BUILD := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
+VERSION := $(MAJOR).$(MINOR).$(BUILD)
+VERSIONED := $(BINARY)_$(MAJOR)_$(MINOR)_$(BUILD)
+LDFLAGS := -X pawnstar-go/engine.versionBuild=$(BUILD)
+
 .PHONY: all build test test-short check perft search bk see nnue timing test-uci bench baseline vet fmt clean
 
 all: build
 
 build:
-	$(GO) build -o $(BINARY) .
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(VERSIONED) .
+	@rm -f $(BINARY) && ln -s $(VERSIONED) $(BINARY)
+	@for f in $(BINARY)_[0-9]*_[0-9]*_[0-9]*; do [ "$$f" = "$(VERSIONED)" ] || rm -f "$$f"; done
+	@echo "built $(VERSIONED)  (pawnstar-go -> $(VERSIONED), version $(VERSION))"
 
 # Full test suite (perft to depth 6, search to depth 9 — slow).
 test:
@@ -75,4 +89,4 @@ baseline: build
 
 clean:
 	$(GO) clean
-	rm -f $(BINARY) pawnstar-go-baseline
+	rm -f $(BINARY) $(BINARY)_[0-9]*_[0-9]*_[0-9]* pawnstar-go-baseline
