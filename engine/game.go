@@ -165,7 +165,7 @@ func (game *Game) HandleCommand(line string) bool {
 	fields := strings.Fields(line)
 	switch fields[0] {
 	case "uci":
-		fmt.Println("id name Pawnstar-Go")
+		fmt.Printf("id name Pawnstar-Go %s\n", versionString())
 		fmt.Println("id author Jonny Reckless")
 		fmt.Println("option name OwnBook type check default true")
 		fmt.Println("option name EvalFile type string default <embedded>")
