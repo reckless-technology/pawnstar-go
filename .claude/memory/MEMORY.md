@@ -1,3 +1,6 @@
 - [project-go-nnue-port](project-go-nnue-port.md) — plan to port C++ Pawnstar's NNUE eval (then search wins) into the Go engine; NNUE-first, SPRT-gated, archsimd kernels, direct .bin load
 - [reference-go-simd-archsimd](reference-go-simd-archsimd.md) — Go 1.26.4 already on PATH; simd/archsimd needs GOEXPERIMENT=simd at build time; keep a scalar fallback
 - [feedback-direct-push-main-pawnstar-go](feedback-direct-push-main-pawnstar-go.md) — OK to commit/push directly to main in pawnstar-go (no branch-first/ask); still run gates; does NOT apply to the C++ repo
+- [feedback-root-cause-not-benign](feedback-root-cause-not-benign.md) — don't excuse a deterministic-system divergence as "benign"; bisect empirically to the real cause and show evidence
+- [project-cross-engine-bit-parity](project-cross-engine-bit-parity.md) — Go and C++ pawnstar kept bit-identical at fixed depth; bench=7,007,401 is the gate; verify in both repos after search/movegen/eval/TT changes
+- [reference-pawnstar-perf-measurement](reference-pawnstar-perf-measurement.md) — perf-measurement pitfalls on this PC (thermal throttling, memprofile inflation, GOMAXPROCS for alloc-bound code); perft ~200 Mnps Go vs ~540 C++
