@@ -3,4 +3,7 @@
 - [feedback-direct-push-main-pawnstar-go](feedback-direct-push-main-pawnstar-go.md) — OK to commit/push directly to main in pawnstar-go (no branch-first/ask); still run gates; does NOT apply to the C++ repo
 - [feedback-root-cause-not-benign](feedback-root-cause-not-benign.md) — don't excuse a deterministic-system divergence as "benign"; bisect empirically to the real cause and show evidence
 - [project-cross-engine-bit-parity](project-cross-engine-bit-parity.md) — Go and C++ pawnstar kept bit-identical at fixed depth; bench=7,007,401 is the gate; verify in both repos after search/movegen/eval/TT changes
-- [reference-pawnstar-perf-measurement](reference-pawnstar-perf-measurement.md) — perf-measurement pitfalls on this PC (thermal throttling, memprofile inflation, GOMAXPROCS for alloc-bound code); perft ~200 Mnps Go vs ~540 C++
+- [reference-pawnstar-perf-measurement](reference-pawnstar-perf-measurement.md) — perf-measurement pitfalls (thermal/memprofile/GOMAXPROCS); eval now C++-parity via the hand-written AVX2 dot (+19% nps, SPRT ~−62→−32 Elo); macOS/arm64 still scalar
+- [project-go-nnue-arm64-neon](project-go-nnue-arm64-neon.md) — NEXT STEP: hand-write arm64/NEON NNUE kernels for macOS (Go doesn't auto-vectorize like C++'s -mcpu=apple-m1; archsimd is amd64-only); plan + gates
+- [reference-go-nnue-kernel-layout](reference-go-nnue-kernel-layout.md) — NNUE kernel files/build-tags/dispatch + the 3 output-weight representations; how to slot in a new-arch SIMD kernel
+- [project-go-state-2026-07](project-go-state-2026-07.md) — handoff snapshot: pawnstar-go HEAD 9f04267, this session's commits, and where the arm64 work picks up
