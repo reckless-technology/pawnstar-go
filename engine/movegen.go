@@ -1,13 +1,55 @@
 package engine
 
-// generateLegalMoves returns all legal moves from pos.
-func (position *position) generateLegalMoves() []move {
-	return position.generateMoves(position.colorToMove, true)
+// maxMoves bounds a moveList's fixed backing array. The maximum number of legal moves in any
+// legal chess position is 218; 256 gives headroom and keeps the array a power-of-two size
+// (mirrors the C++ engine's MoveList capacity).
+const maxMoves = 256
+
+// moveList is a fixed-capacity, stack-resident move buffer. Generating into a caller-owned
+// moveList (the *Into methods) keeps the whole list on the stack — no per-node heap slice
+// allocation, which was the dominant cost of move generation in perft/search. Mirrors the C++
+// MoveList value type.
+type moveList struct {
+	moves [maxMoves]move
+	count int
 }
 
-// generateLegalCaptures returns captures and promotions only.
+// add appends a move. Move generation is bounded by the 218-move legal maximum, so count never
+// reaches maxMoves.
+func (ml *moveList) add(m move) {
+	ml.moves[ml.count] = m
+	ml.count++
+}
+
+// slice returns the populated prefix as a []move for iteration/sorting. The backing array is ml's,
+// so the returned slice must not outlive ml (true for the local-var usage in the hot paths).
+func (ml *moveList) slice() []move {
+	return ml.moves[:ml.count]
+}
+
+// generateLegalMovesInto fills ml with all legal moves from pos (allocation-free hot path).
+func (position *position) generateLegalMovesInto(ml *moveList) {
+	position.generateMovesInto(ml, position.colorToMove, true)
+}
+
+// generateLegalCapturesInto fills ml with captures and promotions only (quiescence hot path).
+func (position *position) generateLegalCapturesInto(ml *moveList) {
+	position.generateMovesInto(ml, position.colorToMove, false)
+}
+
+// generateLegalMoves returns all legal moves as a freshly allocated slice — a convenience wrapper
+// for cold callers (UCI setup, opening book, tests). Hot paths use generateLegalMovesInto instead.
+func (position *position) generateLegalMoves() []move {
+	var ml moveList
+	position.generateMovesInto(&ml, position.colorToMove, true)
+	return append([]move(nil), ml.slice()...)
+}
+
+// generateLegalCaptures returns captures and promotions as a freshly allocated slice (cold callers).
 func (position *position) generateLegalCaptures() []move {
-	return position.generateMoves(position.colorToMove, false)
+	var ml moveList
+	position.generateMovesInto(&ml, position.colorToMove, false)
+	return append([]move(nil), ml.slice()...)
 }
 
 // Used for castling legality detection.
@@ -18,7 +60,7 @@ const (
 	b8c8d8bb bitboard = bitboard(1)<<b8 | bitboard(1)<<c8 | bitboard(1)<<d8
 )
 
-// generateMoves returns legal moves for color.  When doAllMoves is false only
+// generateMovesInto fills ml with legal moves for color.  When doAllMoves is false only
 // captures and promotions are generated (used for quiescence search).
 //
 // The algorithm:
@@ -33,8 +75,7 @@ const (
 //  6. Generate piece moves filtered by pin constraints.
 //  7. Generate castling if not in check and squares are clear and unattacked.
 //  8. Generate pawn moves, with en-passant horizontal-pin detection.
-func (position *position) generateMoves(color color, doAllMoves bool) []move {
-	moves := make([]move, 0, 64)
+func (position *position) generateMovesInto(ml *moveList, color color, doAllMoves bool) {
 	occupied := position.occupied()
 	friendlyPieces := position.colors[color]
 	enemyPieces := occupied ^ friendlyPieces
@@ -61,12 +102,12 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 	kingTargets := kingAttacks[kingLocation] & ^forbidden
 	for b := kingTargets & enemyPieces; b.isNotEmpty(); {
 		to := b.popLsb()
-		moves = append(moves, moveCapture(kingLocation, to, king, position.squares[to]))
+		ml.add(moveCapture(kingLocation, to, king, position.squares[to]))
 	}
 	if doAllMoves {
 		for b := kingTargets & ^occupied; b.isNotEmpty(); {
 			to := b.popLsb()
-			moves = append(moves, moveNonCapture(kingLocation, to, king))
+			ml.add(moveNonCapture(kingLocation, to, king))
 		}
 	}
 
@@ -76,7 +117,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 	// In check: restrict allowed targets.
 	if position.isInCheck() {
 		if position.checkers.popCount() > 1 {
-			return moves // Double check — only king moves are legal.
+			return // Double check — only king moves are legal.
 		}
 		checkerSq := position.checkers.lsb()
 		allowedCaptures = position.checkers
@@ -92,12 +133,12 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 			attacks := pieceAttacks(piece, occupied, from) & pinInfo.allowedSquares(from)
 			for captures := attacks & allowedCaptures; captures.isNotEmpty(); {
 				to := captures.popLsb()
-				moves = append(moves, moveCapture(from, to, piece, position.squares[to]))
+				ml.add(moveCapture(from, to, piece, position.squares[to]))
 			}
 			if doAllMoves {
 				for nonCaptures := attacks & allowedNonCaptures; nonCaptures.isNotEmpty(); {
 					to := nonCaptures.popLsb()
-					moves = append(moves, moveNonCapture(from, to, piece))
+					ml.add(moveNonCapture(from, to, piece))
 				}
 			}
 		}
@@ -110,23 +151,23 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 			if position.castling.mayWhiteCastleKingside() &&
 				(occupied & f1g1bb).isEmpty() &&
 				!position.isAttacked(f1, black) && !position.isAttacked(g1, black) {
-				moves = append(moves, moveCastling(e1, g1))
+				ml.add(moveCastling(e1, g1))
 			}
 			if position.castling.mayWhiteCastleQueenside() &&
 				(occupied & b1c1d1bb).isEmpty() &&
 				!position.isAttacked(d1, black) && !position.isAttacked(c1, black) {
-				moves = append(moves, moveCastling(e1, c1))
+				ml.add(moveCastling(e1, c1))
 			}
 		} else {
 			if position.castling.mayBlackCastleKingside() &&
 				(occupied & f8g8bb).isEmpty() &&
 				!position.isAttacked(f8, white) && !position.isAttacked(g8, white) {
-				moves = append(moves, moveCastling(e8, g8))
+				ml.add(moveCastling(e8, g8))
 			}
 			if position.castling.mayBlackCastleQueenside() &&
 				(occupied & b8c8d8bb).isEmpty() &&
 				!position.isAttacked(d8, white) && !position.isAttacked(c8, white) {
-				moves = append(moves, moveCastling(e8, c8))
+				ml.add(moveCastling(e8, c8))
 			}
 		}
 	}
@@ -193,10 +234,10 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 			from := square(int(to) - pair.delta)
 			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
 				captured := position.squares[to]
-				moves = append(moves, movePromotion(from, to, queen, captured))
-				moves = append(moves, movePromotion(from, to, rook, captured))
-				moves = append(moves, movePromotion(from, to, bishop, captured))
-				moves = append(moves, movePromotion(from, to, knight, captured))
+				ml.add(movePromotion(from, to, queen, captured))
+				ml.add(movePromotion(from, to, rook, captured))
+				ml.add(movePromotion(from, to, bishop, captured))
+				ml.add(movePromotion(from, to, knight, captured))
 			}
 		}
 	}
@@ -207,10 +248,10 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 			to := b.popLsb()
 			from := square(int(to) - pushDelta)
 			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
-				moves = append(moves, movePromotion(from, to, queen, noPiece))
-				moves = append(moves, movePromotion(from, to, rook, noPiece))
-				moves = append(moves, movePromotion(from, to, bishop, noPiece))
-				moves = append(moves, movePromotion(from, to, knight, noPiece))
+				ml.add(movePromotion(from, to, queen, noPiece))
+				ml.add(movePromotion(from, to, rook, noPiece))
+				ml.add(movePromotion(from, to, bishop, noPiece))
+				ml.add(movePromotion(from, to, knight, noPiece))
 			}
 		}
 	}
@@ -224,7 +265,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 			to := b.popLsb()
 			from := square(int(to) - pair.delta)
 			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
-				moves = append(moves, moveCapture(from, to, pawn, position.squares[to]))
+				ml.add(moveCapture(from, to, pawn, position.squares[to]))
 			}
 		}
 	}
@@ -235,7 +276,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 			to := b.popLsb()
 			from := square(int(to) - pushDelta)
 			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
-				moves = append(moves, moveSinglePush(from, to))
+				ml.add(moveSinglePush(from, to))
 			}
 		}
 		// Double pawn pushes.
@@ -243,7 +284,7 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 			to := b.popLsb()
 			from := square(int(to) - pushDelta*2)
 			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
-				moves = append(moves, moveDoublePush(from, to))
+				ml.add(moveDoublePush(from, to))
 			}
 		}
 	}
@@ -266,10 +307,9 @@ func (position *position) generateMoves(color color, doAllMoves bool) []move {
 					continue
 				}
 			}
-			moves = append(moves, moveEpCapture(from, to))
+			ml.add(moveEpCapture(from, to))
 		}
 	}
-	return moves
 }
 
 // pieceAttacks returns the attack set for piece type pt on sq given occupied squares.
