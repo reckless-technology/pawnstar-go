@@ -53,11 +53,10 @@ timing:
 	$(GO) test $(PKG) -run 'TestTimeControlDefaults|TestComputeBudget|TestPonderRace|TestFixedTimeDeadlineFires' -v
 
 # UCI protocol regression test — drives the built binary as a UCI process (handshake, seldepth,
-# searchmoves, currmove, bench determinism).
-# The script execs the engine via "$ENGINE"; pass ./$(BINARY) so bash runs the local
-# binary rather than doing a PATH lookup (cwd is not on PATH) — a bare name fails the coproc.
-test-uci: build
-	./test/uci_test.sh ./$(BINARY)
+# searchmoves, currmove, bench determinism, ponder protocol). This is the Go port of test/uci_test.sh
+# (kept in place for reference); TestMain builds the binary itself, so no `build` prerequisite is needed.
+test-uci:
+	$(GO) test -run 'TestUCIProtocol|TestUCIBenchDeterminism' -v .
 
 bench:
 	$(GO) test $(PKG) -bench BenchmarkPerft7 -benchtime=10s -run '^$$'
