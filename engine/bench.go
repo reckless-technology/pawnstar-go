@@ -30,18 +30,27 @@ var benchFens = []string{
 // benchDepth is the default `bench` search depth (matching the C++ kBenchDepth); overridable by `bench <depth>`.
 const benchDepth = 13
 
+// benchHashMB pins the transposition-table size for `bench` so the node total is a stable signature
+// independent of the `Hash` option — and directly comparable to the C++ engine, whose default hash is
+// also 64 MB (TT size changes node counts at fixed depth, so an unpinned bench would wobble with Hash).
+const benchHashMB = 64
+
 // runBench searches every benchFens position to a fixed depth, single-threaded and with the book off, so
 // the same build reports the same node count on every run (guarding the uninitialised-read class of bug
-// that makes counts wobble). Mirrors the C++ handle_bench: the hash is cleared once up front but persists
-// across positions within the run. It prints "<nodes> nodes <nps> nps".
+// that makes counts wobble). It pins a fresh benchHashMB TT (restored afterwards, so the caller's Hash is
+// untouched) and mirrors the C++ handle_bench otherwise: the hash starts empty but persists across the
+// positions within the run. It prints "<nodes> nodes <nps> nps".
 func (game *Game) runBench(depth int) {
-	savedThreads, savedBook := game.threadCount, game.useOwnBook
+	savedThreads, savedBook, savedTT := game.threadCount, game.useOwnBook, game.transpositionTable
 	game.threadCount = 1
 	game.useOwnBook = false
-	defer func() { game.threadCount, game.useOwnBook = savedThreads, savedBook }()
-
-	game.transpositionTable.clear() // fresh start so the count is independent of prior session state
+	// Swap in a fresh, fixed-size TT so the count is reproducible regardless of the Hash setting; restore
+	// the caller's table (size + contents) on return. bench is single-threaded, so no thread races the swap.
+	game.transpositionTable = newTranspositionTable(benchHashMB)
 	game.evalTable.clear()
+	defer func() {
+		game.threadCount, game.useOwnBook, game.transpositionTable = savedThreads, savedBook, savedTT
+	}()
 
 	var total int64
 	start := time.Now()
