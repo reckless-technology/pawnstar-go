@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -52,15 +53,26 @@ func (game *Game) runBench(depth int) {
 		game.threadCount, game.useOwnBook, game.transpositionTable = savedThreads, savedBook, savedTT
 	}()
 
+	// PAWNSTAR_BENCH_DEBUG dumps each position's bestmove and (single-threaded) diagnostic counters after
+	// its search, for cross-engine comparison against the C++ bench. Off by default, so normal bench output
+	// (the "<nodes> nodes <nps> nps" line) is unchanged.
+	debug := os.Getenv("PAWNSTAR_BENCH_DEBUG") != ""
 	var total int64
 	start := time.Now()
-	for _, fen := range benchFens {
+	for i, fen := range benchFens {
 		game.newGameFromFen(fen)
 		game.timeControl.clockType = clockFixedDepth
 		game.timeControl.depth = depth
 		game.isCancelPending.Store(false)
-		searchRootNode(game)
+		if debug {
+			dbgxClear()
+		}
+		m := searchRootNode(game)
 		total += int64(game.nodeCount)
+		if debug {
+			fmt.Printf("### pos %02d bm=%s nodes=%d\n", i+1, m.String(), game.nodeCount)
+			dbgxPrint()
+		}
 	}
 	ms := time.Since(start).Milliseconds()
 	fmt.Printf("%d nodes %d nps\n", total, total*1000/max(int64(1), ms))

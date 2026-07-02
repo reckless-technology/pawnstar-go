@@ -246,6 +246,7 @@ func (ss *searchState) scoreAndSortMoves(moves []move, ply int, prevMove move) {
 // shifting the existing primary into the secondary slot; duplicates are not re-recorded.
 func (ss *searchState) updateKillers(ply int, m move) {
 	if !ss.killers[ply][0].equal(m) {
+		ss.dbg.killerBetaCutoffs++ // count a newly recorded killer (matches C++ RecordKiller placement)
 		ss.killers[ply][1] = ss.killers[ply][0]
 		ss.killers[ply][0] = m
 	}
@@ -289,7 +290,6 @@ func (ss *searchState) recordGood(ply int, prevMove, m move, isCutoff bool) {
 	if isCutoff && m.isQuiet() {
 		ss.updateKillers(ply, m)
 		ss.recordCountermove(prevMove, m)
-		ss.dbg.killerBetaCutoffs++
 	}
 }
 
