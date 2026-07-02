@@ -1,2 +1,3 @@
 - [project-go-nnue-port](project-go-nnue-port.md) — plan to port C++ Pawnstar's NNUE eval (then search wins) into the Go engine; NNUE-first, SPRT-gated, archsimd kernels, direct .bin load
 - [reference-go-simd-archsimd](reference-go-simd-archsimd.md) — Go 1.26.4 already on PATH; simd/archsimd needs GOEXPERIMENT=simd at build time; keep a scalar fallback
+- [feedback-direct-push-main-pawnstar-go](feedback-direct-push-main-pawnstar-go.md) — OK to commit/push directly to main in pawnstar-go (no branch-first/ask); still run gates; does NOT apply to the C++ repo
