@@ -322,8 +322,12 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 	// unguarded — on promotion-dense positions it can drive the search to maxPly (the clock bounds it in
 	// real play; TestSearch caps nodes so its fixed-depth runs stay bounded).
 	switch m.kind() {
-	case promotionKnight, promotionBishop, promotionRook, promotionQueen, epCapture:
+	case promotionKnight, promotionBishop, promotionRook, promotionQueen:
 		childDepth++
+		ss.dbg.promotionExtensions++
+	case epCapture:
+		childDepth++
+		ss.dbg.epCaptureExtensions++
 	}
 	ss.playMove(m)
 	isChecking := ss.currentPosition().isInCheck()
@@ -335,6 +339,9 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 		if score > alpha {
 			// PVS failed high — re-search with full window.
 			ss.dbg.pvsFails++
+			if ply == 0 {
+				ss.dbg.pvsFailsRootPly++
+			}
 			score = -searchAlphaBeta(ss, childDepth, ply+1, -beta, -alpha, pv, m)
 		}
 	} else {
@@ -368,6 +375,7 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 //     (and, for a quiet cutoff, killers + countermove). TT write with Cut/All/PV node type on exit.
 func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *variation, prevMove move) int {
 	ss.nodeCount++
+	ss.dbg.alphaBetaCalls++
 	if ply > ss.seldepth {
 		ss.seldepth = ply
 	}
@@ -386,7 +394,11 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	}
 
 	position := ss.currentPosition()
-	if position.isDrawByMaterial() || ss.isDrawByFiftyMoves() || ss.isDrawByRepetition() {
+	if cat := position.materialDrawCategory(); cat != 0 {
+		ss.recordMaterialDraw(cat)
+		return drawScore
+	}
+	if ss.isDrawByFiftyMoves() || ss.isDrawByRepetition() {
 		return drawScore
 	}
 
@@ -398,6 +410,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	}
 
 	if ply >= maxPly {
+		ss.dbg.maxPlyReached++
 		return evaluatePosition(ss)
 	}
 
@@ -406,18 +419,20 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	if isTransposition && transpos.depth() >= depth {
 		switch transpos.nodeType() {
 		case nodeCut:
+			ss.dbg.tableHitCutNode++
 			if transpos.move.score() >= beta {
-				ss.dbg.tableHitBeta++
+				ss.dbg.tableHitCutNodeCutoffs++
 				return transpos.move.score()
 			}
 		case nodeAll:
+			ss.dbg.tableHitAllNode++
 			if transpos.move.score() <= alpha {
-				ss.dbg.tableHitAlpha++
+				ss.dbg.tableHitAllNodeCutoffs++
 				return transpos.move.score()
 			}
 		case nodePV:
 			// PV hit: search deeper so the PV is fully verified.
-			ss.dbg.tableHitPv++
+			ss.dbg.tableHitPvNode++
 			depth++
 		}
 	}
@@ -426,7 +441,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	// so rather than spend the full depth with a poor first move, reduce by one ply. The shallower
 	// search still fills the TT with a best move, recouping the cost via better ordering on revisit.
 	if depth >= noTTReduceMinDepth && (!isTransposition || transpos.move.isNone()) {
-		ss.dbg.iirReductions++
+		ss.dbg.internalIterativeReductions++
 		depth--
 	}
 
@@ -446,7 +461,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		// beta that even conceding rfpMargin per ply still leaves us at/above beta, assume a quiet
 		// move holds the advantage and cut. Disabled in the mate zone so it cannot mask a forced mate.
 		if depth <= rfpMaxDepth && absInt(beta) < winThreshold && evalScore-rfpMargin*depth >= beta {
-			ss.dbg.rfpPrunes++
+			ss.dbg.reverseFutilityPrunes++
 			return evalScore
 		}
 
@@ -485,7 +500,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			return searchCancelledScore
 		}
 		if score >= beta {
-			ss.dbg.tableMoveBetaCutoff++
+			ss.dbg.tableMoveBetaCutoffs++
 			ss.game.transpositionTable.record(position.hash, transpos.move.withScore(score), int16(depth), nodeCut)
 			ss.recordGood(ply, prevMove, transpos.move, true)
 			return score
@@ -493,7 +508,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		bestScore = score
 		bestMove = transpos.move
 		if score > alpha {
-			ss.dbg.tableMoveRaiseAlpha++
+			ss.dbg.tableMoveRaisedAlpha++
 			alpha = score
 			hasRaisedAlpha = true
 			copyVariation(parentPV, pv, transpos.move) // capture the PV now, while pv holds THIS move's line
@@ -530,7 +545,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		// once we are deep into the (SEE/history-sorted) move list, skip the remaining quiet moves —
 		// they almost never raise alpha. Captures, promotions and checking moves are never pruned.
 		if nullWindow && !inCheck && depth <= lmpMaxDepth && move.isQuiet() && !move.isChecking() && i >= lmpBase+depth*depth {
-			ss.dbg.lmpPrunes++
+			ss.dbg.lateMovePrunes++
 			continue
 		}
 
@@ -538,13 +553,13 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		// the SEE/history sort has already pushed the unpromising moves here).
 		childDepth := depth
 		if nullWindow && i > 3 && !inCheck && depth > 2 {
-			ss.dbg.lmrAttempts1++
+			ss.dbg.lateMoveReduction1++
 			childDepth--
 			if depth > 3 && i > 6 {
-				ss.dbg.lmrAttempts2++
+				ss.dbg.lateMoveReduction2++
 				childDepth--
 				if ss.history.getCount(ply, move) == 0 {
-					ss.dbg.lmrAttempts3++
+					ss.dbg.lateMoveReduction3++
 					childDepth--
 				}
 			}
@@ -553,7 +568,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		pv.clear()
 		score := searchSingleMove(ss, childDepth, ply, alpha, beta, move, &pv, i)
 		if score > alpha && childDepth < depth {
-			ss.dbg.lmrFails++
+			ss.dbg.lateMoveReductionFails++
 			score = searchSingleMove(ss, depth, ply, alpha, beta, move, &pv, i)
 		}
 		if ss.isCancelled() {
@@ -562,14 +577,15 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		if score >= beta {
 			ss.game.transpositionTable.record(position.hash, move.withScore(score), int16(depth), nodeCut)
 			ss.recordGood(ply, prevMove, move, true)
-			ss.dbg.nodesCut++
+			ss.dbg.betaCutoffs++
 			return score
 		}
 		if score > bestScore {
+			ss.dbg.bestScoreChanged++
 			bestScore = score
 			bestMove = move
 			if score > alpha {
-				ss.dbg.nodesPvChanged++
+				ss.dbg.pvChanged++
 				alpha = score
 				hasRaisedAlpha = true
 				ss.recordGood(ply, prevMove, move, false)
@@ -579,13 +595,13 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	}
 
 	if hasRaisedAlpha {
-		ss.dbg.nodesPv++
+		ss.dbg.pvNodes++
 		ss.game.transpositionTable.record(position.hash, bestMove.withScore(alpha), int16(depth), nodePV)
 		ss.recordGood(ply, prevMove, bestMove, false)
 		// parentPV was already set, with the correct line, at the alpha-raise above (in the TT-move block
 		// or the move loop) — re-copying here with the now-stale pv would truncate the PV. Matches C++.
 	} else {
-		ss.dbg.nodesAll++
+		ss.dbg.allNodes++
 		ss.game.transpositionTable.record(position.hash, bestMove.withScore(bestScore), int16(depth), nodeAll)
 	}
 	return bestScore
@@ -600,6 +616,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 		ss.seldepth = ply
 	}
 	if ply >= maxPly {
+		ss.dbg.quiescentMaxPly++
 		return evaluatePosition(ss)
 	}
 	pos := ss.currentPosition()
@@ -611,7 +628,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 	// Stand-pat: if the static eval already beats beta we can prune.
 	score := evaluatePosition(ss)
 	if score >= beta {
-		ss.dbg.quiescentEvalCutoffs++
+		ss.dbg.quiescentEvalBetaCutoffs++
 		return score
 	}
 	if score > alpha {
@@ -626,7 +643,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 		// capture loses material. Once we reach the first losing capture every remaining move also
 		// loses, so stop searching them.
 		if m.score() < 0 {
-			ss.dbg.qsearchSeePrunes++
+			ss.dbg.quiescentSeePrunes++
 			return bestScore
 		}
 		ss.playMove(m)
@@ -644,6 +661,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 			bestScore = score
 			if score > alpha {
 				alpha = score
+				ss.dbg.quiescentPvChanged++
 				ss.history.recordGoodMove(ply, m)
 			}
 		}
