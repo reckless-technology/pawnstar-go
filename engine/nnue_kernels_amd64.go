@@ -77,7 +77,10 @@ func outputDotInt8(stm, ntm *[nnueHiddenSize]int16, w8 []int16) int64 {
 	zero := archsimd.BroadcastInt16x16(0)
 	qa := archsimd.BroadcastInt16x16(nnueQA)
 	round := archsimd.BroadcastInt32x8(nnueInt8Round)
-	acc := archsimd.BroadcastInt64x4(0)
+	// The u8*w8 products (|.| <= 127*127 = 16129) sum to at most ~33M over the 2048 terms, well within
+	// int32 — so accumulate in int32 and skip the per-block widening to int64 that the exact (int16) dot
+	// needs. The final sum is identical to the int64 accumulation (and to the scalar kernel).
+	acc := archsimd.BroadcastInt32x8(0)
 
 	sides := [2]*[nnueHiddenSize]int16{stm, ntm}
 	for s := 0; s < 2; s++ {
@@ -97,17 +100,15 @@ func outputDotInt8(stm, ntm *[nnueHiddenSize]int16, w8 []int16) int64 {
 			wlo := wv.GetLo().ExtendToInt32()
 			whi := wv.GetHi().ExtendToInt32()
 
-			plo := ulo.Mul(wlo) // u8 * w8 (fits int32)
-			phi := uhi.Mul(whi)
-
-			acc = acc.Add(plo.GetLo().ExtendToInt64())
-			acc = acc.Add(plo.GetHi().ExtendToInt64())
-			acc = acc.Add(phi.GetLo().ExtendToInt64())
-			acc = acc.Add(phi.GetHi().ExtendToInt64())
+			acc = acc.Add(ulo.Mul(wlo)).Add(uhi.Mul(whi)) // u8 * w8, accumulated in int32
 		}
 	}
 
-	var lanes [4]int64
+	var lanes [8]int32
 	acc.StoreSlice(lanes[:])
-	return lanes[0] + lanes[1] + lanes[2] + lanes[3]
+	var sum int64
+	for _, v := range lanes {
+		sum += int64(v)
+	}
+	return sum
 }
