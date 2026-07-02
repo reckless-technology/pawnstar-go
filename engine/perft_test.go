@@ -148,12 +148,13 @@ func perft(pos position, depth int) uint64 {
 	if depth == 0 {
 		return 1
 	}
-	moves := pos.generateLegalMoves()
+	var ml moveList
+	pos.generateLegalMovesInto(&ml)
 	if depth == 1 {
-		return uint64(len(moves))
+		return uint64(ml.count)
 	}
 	var nodes uint64
-	for _, move := range moves {
+	for _, move := range ml.slice() {
 		child := pos
 		child.makeMove(move)
 		nodes += perft(child, depth-1)
@@ -227,9 +228,10 @@ func TestPerft(t *testing.T) {
 // recomputed from scratch by computeHash.  Any mismatch is reported via t.Errorf.
 func perftHashCheck(t *testing.T, pos position, depth int) uint64 {
 	t.Helper()
-	moves := pos.generateLegalMoves()
+	var ml moveList
+	pos.generateLegalMovesInto(&ml)
 	var nodes uint64
-	for _, m := range moves {
+	for _, m := range ml.slice() {
 		child := pos
 		child.makeMove(m)
 		if want := child.computeHash(); child.hash != want {

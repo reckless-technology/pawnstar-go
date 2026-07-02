@@ -516,7 +516,9 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		}
 	}
 
-	moves := position.generateLegalMoves()
+	var ml moveList
+	position.generateLegalMovesInto(&ml)
+	moves := ml.slice()
 	if len(moves) == 0 {
 		if position.isInCheck() {
 			ss.dbg.checkmates++
@@ -636,7 +638,9 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 		ss.dbg.quiescentEvalRaisesAlpha++
 	}
 	bestScore := score
-	moves := pos.generateLegalCaptures()
+	var ml moveList
+	pos.generateLegalCapturesInto(&ml)
+	moves := ml.slice()
 	ss.scoreAndSortMoves(moves, ply, moveNone())
 	for _, m := range moves {
 		// SEE pruning: captures are sorted by SEE, and their sort score is negative exactly when the
