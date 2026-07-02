@@ -149,7 +149,7 @@ searchState
 └── game                *Game             pointer to shared state (TT + eval cache, clock, cancel)
 ```
 
-`hashStackEntry` stores only `hash` (8 bytes) and `halfMoveClock` (1 byte + padding = 16 bytes total), compared to 168 bytes for a full `position`, keeping the repetition scan cache-friendly. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. Only truly shared state — the lockless TT + eval cache, the read-only time control, and the atomic cancel flag — is reached through the `game *Game` pointer; the history/killers/countermove/continuation tables and the accumulator stack are all local to this `searchState`.
+`hashStackEntry` stores only `hash` (8 bytes) and `halfMoveClock` (1 byte + padding = 16 bytes total), compared to 160 bytes for a full `position`, keeping the repetition scan cache-friendly. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. Only truly shared state — the lockless TT + eval cache, the read-only time control, and the atomic cancel flag — is reached through the `game *Game` pointer; the history/killers/countermove/continuation tables and the accumulator stack are all local to this `searchState`.
 
 #### Iterative deepening
 
