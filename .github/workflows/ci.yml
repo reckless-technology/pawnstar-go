@@ -62,11 +62,12 @@ jobs:
         run: go vet ./...
 
   # ---------------------------------------------------------------------------------------------------------
-  # Build artifacts: a native engine binary per OS, uploaded only after that platform's build AND test pass
-  # (the upload is a later step, so a failed build/test ends the job first). Each job is self-contained — it
-  # builds the versioned binary (pawnstar-go_<major>_<minor>_<build>; the build number is the git commit
-  # count, hence the full-history checkout) and runs the tests on its own runner. Download them from the
-  # run's "Artifacts" section; the Release workflow promotes them into a GitHub Release.
+  # Build artifacts: a native engine binary per OS plus a docs bundle and source archive, all versioned from
+  # the git commit count (hence the full-history checkouts). Binaries upload only after that platform's build
+  # AND test pass (the upload is a later step, so a failed build/test ends the job first); each binary job is
+  # self-contained — it builds the versioned binary (pawnstar-go_<major>_<minor>_<build>) and runs the tests
+  # on its own runner. Download everything from the run's "Artifacts" section; the Release workflow promotes
+  # the artifacts of a fully green run into a GitHub Release without rebuilding anything.
   # ---------------------------------------------------------------------------------------------------------
 
   # Linux x86-64 (AVX2 SIMD kernels, via the make wrapper).
@@ -96,8 +97,8 @@ jobs:
           path: pawnstar-go_[0-9]*_[0-9]*_[0-9]* # the versioned binary, not the pawnstar-go symlink
           if-no-files-found: error
 
-  # macOS arm64 (Apple Silicon). amd64-only files (archsimd + the AVX2 asm) are build-tag-excluded here, so
-  # this builds the portable scalar NNUE kernels — no AVX2 check.
+  # macOS arm64 (Apple Silicon). amd64-only files (archsimd + the AVX2 asm) are build-tag-excluded here;
+  # arm64 builds the hand-written NEON NNUE kernels (nnue_kernels_arm64.s / nnue_dot_arm64.s) — no AVX2 check.
   artifact-macos:
     name: artifact (macos arm64)
     runs-on: macos-latest
@@ -147,4 +148,46 @@ jobs:
         with:
           name: pawnstar-go-windows-amd64
           path: pawnstar-go_*.exe
+          if-no-files-found: error
+
+  # Documentation bundle + source archive, versioned like the binaries. The docs zip holds the markdown
+  # docs plus `go doc -all` for the engine package twice: engine-api.txt (the exported API) and
+  # engine-internals.txt (-u, every documented internal function/type). The source tar.gz is a clean
+  # `git archive` of the built commit (no .git). These need no test gate of their own: the Release
+  # workflow only promotes runs whose overall conclusion is success, so bundles from a red run are
+  # never released. Keep MAJOR/MINOR in sync with engine/version.go + the Makefile.
+  artifact-docs:
+    name: artifact (docs + source)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # no go.sum / external deps to cache
+      - name: Generate docs bundle
+        run: |
+          ver="0.1.$(git rev-list --count HEAD)"
+          mkdir -p docs-bundle
+          cp README.md CLAUDE.md docs-bundle/
+          go doc -all ./engine > docs-bundle/engine-api.txt
+          go doc -all -u ./engine > docs-bundle/engine-internals.txt
+          ( cd docs-bundle && zip -rq "../pawnstar-go-$ver-docs.zip" . )
+      - name: Source archive
+        run: |
+          ver="0.1.$(git rev-list --count HEAD)"
+          git archive --format=tar.gz --prefix="pawnstar-go-$ver/" -o "pawnstar-go-$ver-source.tar.gz" HEAD
+      - name: Upload docs bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawnstar-go-docs
+          path: pawnstar-go-*-docs.zip
+          if-no-files-found: error
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawnstar-go-source
+          path: pawnstar-go-*-source.tar.gz
           if-no-files-found: error
