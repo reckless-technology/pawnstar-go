@@ -1,9 +1,10 @@
 name: Release
 
-# Manually promote a successful CI run into a GitHub Release. Reuses the per-OS engine binaries CI already
-# built and tested (downloaded from the chosen run — not rebuilt), and adds a docs bundle and a source
-# archive generated from that run's exact commit. Manual-only (workflow_dispatch); dispatch is restricted to
-# users with write access, so only maintainers can cut a release. Mirrors the C++ engine's release workflow.
+# Manually promote a successful CI run into a GitHub Release. Pure promotion: the per-OS engine binaries,
+# the docs bundle and the source archive are all downloaded from the chosen run's artifacts — nothing is
+# rebuilt or regenerated here (CI produces the docs + source bundles on every run, from that run's exact
+# commit). Manual-only (workflow_dispatch); dispatch is restricted to users with write access, so only
+# maintainers can cut a release. Mirrors the C++ engine's release workflow.
 on:
   workflow_dispatch:
     inputs:
@@ -21,9 +22,6 @@ on:
 permissions:
   contents: write
   actions: read
-
-env:
-  GOEXPERIMENT: simd
 
 jobs:
   release:
@@ -55,20 +53,15 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Promoting CI run $run_id at commit $sha"
 
-      # 2) Check out the promoted commit so docs and the source archive come from exactly that revision.
-      - name: Checkout promoted commit
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ steps.resolve.outputs.sha }}
-          fetch-depth: 0
-
-      # 3) Download the binary artifacts CI built and tested for that run.
+      # 2) Download the artifacts CI built and tested for that run (binaries, docs bundle, source archive).
       - name: Download CI artifacts
         run: gh run download "${{ steps.resolve.outputs.run_id }}" --dir ci-artifacts
 
-      # 4) Derive the version from the linux binary filename (pawnstar-go_0_1_141 -> 0.1.141) so the tag
-      #    always matches the built binary, and stage the binaries under version-suffixed names.
-      - name: Stage binaries
+      # 3) Derive the version from the linux binary filename (pawnstar-go_0_1_141 -> 0.1.141) so the tag
+      #    always matches the built binary, and stage all assets under version-suffixed names. The docs and
+      #    source bundles were version-stamped by CI from the same commit; copying them by that exact name
+      #    asserts the versions agree (the cp fails loudly if they ever drift).
+      - name: Stage release assets
         id: stage
         run: |
           set -euo pipefail
@@ -81,33 +74,11 @@ jobs:
           cp ci-artifacts/pawnstar-go-linux-amd64/pawnstar-go_[0-9]*_[0-9]*_[0-9]*      "assets/pawnstar-go-$ver-linux-amd64"
           cp ci-artifacts/pawnstar-go-macos-arm64/pawnstar-go_[0-9]*_[0-9]*_[0-9]*      "assets/pawnstar-go-$ver-macos-arm64"
           cp ci-artifacts/pawnstar-go-windows-amd64/pawnstar-go_*.exe                  "assets/pawnstar-go-$ver-windows-amd64.exe"
-          echo "Staged binaries for version $ver"
+          cp "ci-artifacts/pawnstar-go-docs/pawnstar-go-$ver-docs.zip"                 assets/
+          cp "ci-artifacts/pawnstar-go-source/pawnstar-go-$ver-source.tar.gz"          assets/
+          echo "Staged assets for version $ver"
 
-      # 5) Docs bundle from the promoted commit: the markdown docs plus `go doc -all` for the engine package
-      #    (the Go analogue of the C++ engine's Doxygen HTML).
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: false # no go.sum / external deps to cache
-      - name: Generate docs bundle
-        run: |
-          set -euo pipefail
-          ver="${{ steps.stage.outputs.version }}"
-          mkdir -p docs-bundle
-          cp README.md CLAUDE.md docs-bundle/
-          go doc -all ./engine > docs-bundle/engine-api.txt
-          ( cd docs-bundle && zip -rq "../assets/pawnstar-go-$ver-docs.zip" . )
-
-      # 6) Source archive at the promoted commit (clean tree, no .git). In addition to the "Source code
-      #    (zip/tar.gz)" archives GitHub auto-attaches to every release.
-      - name: Source archive
-        run: |
-          set -euo pipefail
-          ver="${{ steps.stage.outputs.version }}"
-          git archive --format=tar.gz --prefix="pawnstar-go-$ver/" -o "assets/pawnstar-go-$ver-source.tar.gz" HEAD
-
-      # 7) Create the release at the promoted commit with the staged assets. Notes = a provenance line (which
+      # 4) Create the release at the promoted commit with the staged assets. Notes = a provenance line (which
       #    CI run / commit) plus GitHub's auto-generated changelog. Fails if the tag already exists (no clobber).
       - name: Create release
         run: |
