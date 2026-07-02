@@ -38,22 +38,7 @@ var (
 	knightAttacks      [64]bitboard
 	bishopAttacksEmpty [64]bitboard
 	rookAttacksEmpty   [64]bitboard
-	queenAttacksEmpty  [64]bitboard
 	kingAttacks        [64]bitboard
-	kingAttacks2       [64]bitboard // squares two king-steps away (used for zone control)
-)
-
-// Pawn structure masks used in evaluation and move generation.
-var (
-	kingPawnShelterWhite   [64]bitboard // squares directly in front of the White king
-	kingPawnShelterBlack   [64]bitboard // squares directly in front of the Black king
-	passedPawnMaskWhite    [64]bitboard // squares ahead and on adjacent files (no enemy pawn = passed)
-	passedPawnMaskBlack    [64]bitboard
-	isolatedPawnMask       [64]bitboard // adjacent files at all ranks (no friendly pawn = isolated)
-	supportedPawnMaskWhite [64]bitboard // squares from which a White pawn on sq could be defended
-	supportedPawnMaskBlack [64]bitboard
-	doubledPawnMaskWhite   [64]bitboard // squares ahead on the same file (friendly pawn = doubled)
-	doubledPawnMaskBlack   [64]bitboard
 )
 
 // interveningSquares[from][to] is the set of squares strictly between from and to
@@ -74,7 +59,6 @@ func init() {
 	initRays()
 	initAttacks()
 	initMagics()
-	initPawnMasks()
 	initInterveningSquares()
 	initZobrist()
 	initCastleMasks()
@@ -144,43 +128,8 @@ func initAttacks() {
 
 		bishopAttacksEmpty[sq] = northeastOf[sq] | northwestOf[sq] | southeastOf[sq] | southwestOf[sq]
 		rookAttacksEmpty[sq] = northOf[sq] | southOf[sq] | eastOf[sq] | westOf[sq]
-		queenAttacksEmpty[sq] = bishopAttacksEmpty[sq] | rookAttacksEmpty[sq]
 
 		kingAttacks[sq] = kingFill(b)
-		kingAttacks2[sq] = kingFill(kingFill(b)) & ^b
-	}
-}
-
-// initPawnMasks populates all pawn-structure and king-shelter masks.
-func initPawnMasks() {
-	for sq := range square(64) {
-		b := squareBB(sq)
-		file := fileA << uint(sq.file())
-
-		// King pawn shelter: the three squares directly in front of the king.
-		// The e-file exclusions prevent the shelter mask from wrapping around
-		// to the other side of the board for corner kings.
-		if sq != e1 {
-			kingPawnShelterWhite[sq] = b.shiftNorthwest() | b.shiftNorth() | b.shiftNortheast()
-		}
-		if sq != e8 {
-			kingPawnShelterBlack[sq] = b.shiftSouthwest() | b.shiftSouth() | b.shiftSoutheast()
-		}
-
-		fwd := northOf[sq]
-		passedPawnMaskWhite[sq] = fwd | fwd.shiftWest() | fwd.shiftEast()
-		bwd := southOf[sq]
-		passedPawnMaskBlack[sq] = bwd | bwd.shiftWest() | bwd.shiftEast()
-
-		isolatedPawnMask[sq] = file.shiftWest() | file.shiftEast()
-
-		colW := (southOf[sq] | b).shiftWest() | (southOf[sq] | b).shiftEast()
-		supportedPawnMaskWhite[sq] = colW
-		colB := (northOf[sq] | b).shiftWest() | (northOf[sq] | b).shiftEast()
-		supportedPawnMaskBlack[sq] = colB
-
-		doubledPawnMaskWhite[sq] = northOf[sq]
-		doubledPawnMaskBlack[sq] = southOf[sq]
 	}
 }
 
