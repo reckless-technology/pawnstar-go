@@ -83,11 +83,9 @@ Move lists are plain `[]move` slices allocated with `make([]move, 0, 64)` — no
 
 - **Magic bitboard tables** for sliding pieces (`bishopAttacks`, `rookAttacks`) — magic numbers found offline with seed 1337
 - **Ray tables** in all eight compass directions, 64 squares × 8 directions
-- **Knight, king, pawn attack tables** indexed by square
-- **Pawn structure masks** — passed-pawn, isolated-pawn, adjacent-file masks per square
-- **King pawn shelter masks** — three rows in front of the king per square
+- **Knight, king, pawn attack tables** indexed by square, plus empty-board bishop/rook attack tables (`bishopAttacksEmpty`/`rookAttacksEmpty`, used by pin detection)
 - **Intervening-square tables** — squares strictly between any two squares on a shared ray
-- **Zobrist hashes** — seeded 1968; one per (color, piece, square) triple, plus castling, en-passant, and side-to-move
+- **Zobrist hashes** — filled from a fixed-seed `xorshift*` PRNG (seed `0xAA55AA55AA55AA55`, shared bit-for-bit with the C++ engine); one per (color, piece, square) triple, plus castling, en-passant, and side-to-move
 
 ### Move generation
 
