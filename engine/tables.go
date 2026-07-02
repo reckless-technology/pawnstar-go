@@ -1,7 +1,5 @@
 package engine
 
-import "math/rand"
-
 // zobrist is a 64-bit Zobrist hash of a position, maintained incrementally.
 type zobrist uint64
 
@@ -202,27 +200,37 @@ func initInterveningSquares() {
 	}
 }
 
-// initZobrist generates pseudo-random Zobrist hashes using a seeded RNG so that
-// the hashes are deterministic across runs.  Seed 1968 is arbitrary but fixed.
+// initZobrist fills the Zobrist tables from a 64-bit xorshift* PRNG seeded with a fixed value. This is
+// deliberately identical (algorithm, seed, and draw order) to the C++ engine's generator in
+// generated_data.h, so both engines produce bit-for-bit identical Zobrist hashes for the same position —
+// which is what lets their transposition tables behave identically at fixed depth. Draw order:
+// piece-square, then castling rights, then en-passant (ep-target squares only); the black-to-move hash is
+// a fixed constant shared with C++ (not drawn from the PRNG in either engine).
 func initZobrist() {
-	rng := rand.New(rand.NewSource(1968))
+	state := uint64(0xAA55AA55AA55AA55)
+	next := func() zobrist {
+		state ^= state >> 12
+		state ^= state << 25
+		state ^= state >> 27
+		return zobrist(state * 0x2545F4914F6CDD1D)
+	}
 	for c := range 2 {
 		for p := range 6 {
 			for sq := range 64 {
-				pieceSquareHashes[c][p][sq] = zobrist(rng.Uint64())
+				pieceSquareHashes[c][p][sq] = next()
 			}
 		}
 	}
 	for i := range castlingRightsHashes {
-		castlingRightsHashes[i] = zobrist(rng.Uint64())
+		castlingRightsHashes[i] = next()
 	}
 	// En-passant hashes are only needed for ranks 3 and 6 (the ep-target squares).
 	for i := range square(64) {
 		if i.rank() == 2 || i.rank() == 5 {
-			enPassantHashes[i] = zobrist(rng.Uint64())
+			enPassantHashes[i] = next()
 		}
 	}
-	blackMoveHash = zobrist(rng.Uint64())
+	blackMoveHash = zobrist(0x28AB74D640E50602)
 }
 
 var (

@@ -496,6 +496,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			ss.dbg.tableMoveRaiseAlpha++
 			alpha = score
 			hasRaisedAlpha = true
+			copyVariation(parentPV, pv, transpos.move) // capture the PV now, while pv holds THIS move's line
 			ss.recordGood(ply, prevMove, transpos.move, false)
 		}
 	}
@@ -513,12 +514,17 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	ss.scoreAndSortMoves(moves, ply, prevMove)
 
 	inCheck := position.isInCheck()
-	nullWindow := beta == alpha+1
 
 	for i, move := range moves {
 		if isTransposition && move.equal(transpos.move) {
 			continue
 		}
+
+		// nullWindow is re-evaluated per move against the CURRENT alpha (not precomputed): at a PV node,
+		// once an early move raises alpha to beta−1 the remaining moves are effectively a null-window
+		// search, and LMP/LMR must engage for them. The C++ engine checks `beta == alpha + 1` inline in
+		// the loop for exactly this reason; matching it is required for bit-identical search.
+		nullWindow := beta == alpha+1
 
 		// Late move pruning (move-count pruning): at shallow depth in a null-window node not in check,
 		// once we are deep into the (SEE/history-sorted) move list, skip the remaining quiet moves —
@@ -576,7 +582,8 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		ss.dbg.nodesPv++
 		ss.game.transpositionTable.record(position.hash, bestMove.withScore(alpha), int16(depth), nodePV)
 		ss.recordGood(ply, prevMove, bestMove, false)
-		copyVariation(parentPV, pv, bestMove)
+		// parentPV was already set, with the correct line, at the alpha-raise above (in the TT-move block
+		// or the move loop) — re-copying here with the now-stale pv would truncate the PV. Matches C++.
 	} else {
 		ss.dbg.nodesAll++
 		ss.game.transpositionTable.record(position.hash, bestMove.withScore(bestScore), int16(depth), nodeAll)

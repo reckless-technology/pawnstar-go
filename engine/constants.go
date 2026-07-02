@@ -5,15 +5,17 @@ package engine
 
 // Search and evaluation tuning constants.
 const (
-	// initialAlpha and initialBeta bracket every score that can arise during search.
-	initialAlpha = -11000
-	initialBeta  = 11000
+	// initialAlpha and initialBeta bracket every score that can arise during search. These match the C++
+	// engine's kAlpha/kBeta exactly so the two search identical windows (a prerequisite for bit-identical
+	// results): |eval| ≤ 30000 (nnueMaxEval) < 31000 (winThreshold) < |mate| ≤ 31900 < 32000.
+	initialAlpha = -32000
+	initialBeta  = 32000
 
-	// checkmatedScore is the base score for checkmate.  It is adjusted by ply so
-	// that shorter mates score higher than longer ones.
-	checkmatedScore = -10000
-	winThreshold    = 9000  // score above which the side to move has a forced win
-	loseThreshold   = -9000 // score below which the side to move has a forced loss
+	// checkmatedScore is the base score for checkmate. It is adjusted by ply so that shorter mates score
+	// higher than longer ones. Matches the C++ kCheckmatedScore.
+	checkmatedScore = -31900
+	winThreshold    = 31000  // score above which the side to move has a forced win (C++ kWinThreshold)
+	loseThreshold   = -31000 // score below which the side to move has a forced loss
 	drawScore       = 0
 
 	// maxPly caps search depth and is also the first dimension of the history table.
