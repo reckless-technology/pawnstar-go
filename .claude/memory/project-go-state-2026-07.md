@@ -1,13 +1,13 @@
 ---
 name: project-go-state-2026-07
-description: Snapshot (2026-07-02) of what landed in pawnstar-go/pawnstar and where the next step (arm64 NEON) picks up
+description: Snapshot (2026-07-02) of what landed in pawnstar-go/pawnstar; arm64 NEON now DONE (Go ~parity with C++)
 metadata: 
   node_type: memory
   type: project
   originSessionId: 6ae67a0a-eca5-4c78-b247-b3c77c1452d5
 ---
 
-Handoff snapshot as of 2026-07-02 (user switching machines to an Apple Silicon Mac for the arm64 work). Everything below is **committed and pushed**.
+**UPDATE 2026-07-02 (arm64 NEON session, on the Apple Silicon Mac):** the arm64 NEON work is **DONE** — pawnstar-go `main` HEAD is now **`e35035d`**. Landed (all committed+pushed, all bit-identical, bench still 7,007,401): `80067ac` NEON addColumn/subColumn (refresh 7.6×, update 7.2×), `bad4791` NEON int8 output dot, `e35035d` 4-accumulator ILP unroll (evaluateInt8 1242→125 ns, 9.9×). **Result: arm64 Go bench ~190k→~1.14M nps (6.0×), now ~0.98× C++ (parity)** — full details + how in [[project-go-nnue-arm64-neon]] and [[reference-pawnstar-perf-measurement]]. The rest of this snapshot is the prior (amd64) session's context.
 
 **pawnstar-go (Go) `main` HEAD = `9f04267`** (build number 144). This session's arc, in order:
 - C++ **fifty-move-clock fix** (in the C++ repo, `pawnstar` commit `452145e`, pushed) — closed the last cross-engine bench divergence; both engines now bench **7,007,401** (see [[project-cross-engine-bit-parity]]).
