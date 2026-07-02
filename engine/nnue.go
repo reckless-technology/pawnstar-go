@@ -71,8 +71,12 @@ type nnueNetwork struct {
 	// SIMD kernel): w8 = clamp(round(w / outputWScale), -127, 127). It drives the search's int8 output dot
 	// (evaluateInt8); the int16 outputWeights stay the reference path (evaluateExact). Mirrors the C++ engine.
 	outputWeightsI8 []int16
-	outputWScale    int // divisor mapping the int16 output weights into int8 range (>= 1); 1 when they already fit
-	loaded          bool
+	// outputWeightsI8Nat is the same int8 weights in NATURAL order as []int8, consumed by the hand-written
+	// AVX2 int8 dot (outputDotInt8Asm), which packs activations to uint8 and uses VPMADDUBSW against int8
+	// weights (so, unlike the archsimd path, no VPACKSSDW-order regroup — it permutes activations instead).
+	outputWeightsI8Nat []int8
+	outputWScale       int // divisor mapping the int16 output weights into int8 range (>= 1); 1 when they already fit
+	loaded             bool
 }
 
 // loadNNUENetworkFile reads a stamped net file from disk and loads it.
@@ -150,6 +154,7 @@ func (n *nnueNetwork) deriveInt8OutputWeights() {
 		n.outputWScale = 1
 	}
 	n.outputWeightsI8 = make([]int16, len(n.outputWeights))
+	n.outputWeightsI8Nat = make([]int8, len(n.outputWeights))
 	for i, v := range n.outputWeights {
 		q := divRoundHalfAway(int(v), n.outputWScale) // std::lround(w / scale): ties away from zero
 		if q > 127 {
@@ -158,6 +163,7 @@ func (n *nnueNetwork) deriveInt8OutputWeights() {
 			q = -127
 		}
 		n.outputWeightsI8[i] = int16(q)
+		n.outputWeightsI8Nat[i] = int8(q) // natural order for the asm kernel; regrouped below for archsimd
 	}
 	// Reorder the weights into the lane layout the SIMD output dot consumes (identity for the scalar
 	// kernel), so each activation pairs with its own weight without a per-eval permute. See the kernels.
@@ -336,7 +342,7 @@ func (n *nnueNetwork) evaluateInt8(acc *nnueAccumulator, sideToMove color) int {
 	if sideToMove == black {
 		stm, ntm = &acc.black, &acc.white
 	}
-	dot := outputDotInt8(stm, ntm, n.outputWeightsI8)
+	dot := n.int8OutputDot(stm, ntm)
 	output := dot * int64(n.outputWScale) * (1 << nnueInt8Shift)
 	return nnueDequant(output, n.outputBias)
 }
