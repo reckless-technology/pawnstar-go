@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,9 @@ func buildEngineBinary() {
 		return
 	}
 	bin := filepath.Join(uciBinDir, "pawnstar-go-uci-test")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // name the output explicitly so the built path and the exec path agree on Windows
+	}
 	build := exec.Command("go", "build", "-o", bin, "pawnstar-go") // the root main package (this test is in engine/)
 	build.Env = append(os.Environ(), "GOEXPERIMENT=simd")
 	if out, err := build.CombinedOutput(); err != nil {
