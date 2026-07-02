@@ -1,4 +1,4 @@
-package main
+package engine
 
 // UCI protocol regression test. Drives the actual engine binary over stdin/stdout with synchronized I/O
 // (read the engine's responses before sending the next command, so `quit` never cancels a running search)
@@ -23,34 +23,56 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-// enginePath is the path to the binary built once by TestMain.
-var enginePath string
+// The UCI tests drive the built engine binary as a subprocess. Because this test lives in the engine
+// package, the binary is built lazily (once, on first use) rather than eagerly in TestMain — so the many
+// other `go test ./engine/` invocations (e.g. make check's per-test sub-targets, quick dev runs) don't
+// pay for a binary build they never use, and `-short` skips it entirely. The build targets the root main
+// package ("pawnstar-go", CWD-independent) and requires GOEXPERIMENT=simd for the NNUE SIMD kernels.
+var (
+	uciBinOnce sync.Once
+	uciBinPath string
+	uciBinDir  string
+	uciBinErr  error
+)
 
-// TestMain builds the engine binary once (with GOEXPERIMENT=simd) into a temp dir, then runs the tests.
-func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "pawnstar-uci")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "TestMain: MkdirTemp: %v\n", err)
-		os.Exit(1)
+func buildEngineBinary() {
+	uciBinDir, uciBinErr = os.MkdirTemp("", "pawnstar-uci")
+	if uciBinErr != nil {
+		return
 	}
-	defer os.RemoveAll(dir)
-
-	bin := filepath.Join(dir, "pawnstar-go-uci-test")
-
-	build := exec.Command("go", "build", "-o", bin, ".")
-	// The NNUE kernels use simd/archsimd, gated behind GOEXPERIMENT=simd. Every build MUST set it.
+	bin := filepath.Join(uciBinDir, "pawnstar-go-uci-test")
+	build := exec.Command("go", "build", "-o", bin, "pawnstar-go") // the root main package (this test is in engine/)
 	build.Env = append(os.Environ(), "GOEXPERIMENT=simd")
 	if out, err := build.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "TestMain: go build failed: %v\n%s\n", err, out)
-		os.Exit(1)
+		uciBinErr = fmt.Errorf("go build failed: %v\n%s", err, out)
+		return
 	}
-	enginePath = bin
+	uciBinPath = bin
+}
 
-	os.Exit(m.Run())
+// engineBinary returns the path to the engine binary, building it once (lazily) on first call.
+func engineBinary(t *testing.T) string {
+	t.Helper()
+	uciBinOnce.Do(buildEngineBinary)
+	if uciBinErr != nil {
+		t.Fatalf("build engine binary: %v", uciBinErr)
+	}
+	return uciBinPath
+}
+
+// TestMain removes the lazily-built binary's temp dir after the package's tests finish (a no-op when no
+// UCI test ran and the binary was never built).
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if uciBinDir != "" {
+		os.RemoveAll(uciBinDir)
+	}
+	os.Exit(code)
 }
 
 // uciEngine is a running engine subprocess we can send commands to and read responses from synchronously.
@@ -65,7 +87,7 @@ type uciEngine struct {
 // and cheap), mirroring the bash coproc's `GOMAXPROCS=1 PAWNSTAR_THREADS=1`.
 func startEngine(t *testing.T) *uciEngine {
 	t.Helper()
-	cmd := exec.Command(enginePath)
+	cmd := exec.Command(engineBinary(t))
 	cmd.Env = append(os.Environ(), "GOMAXPROCS=1", "PAWNSTAR_THREADS=1")
 	cmd.Stderr = nil // discard stderr, like the script's 2>/dev/null
 
@@ -164,6 +186,9 @@ var (
 // the former test/uci_test.sh check-for-check. The sub-tests run against one shared engine process (the
 // original script used a single coproc for checks 1–6) except bench determinism, which spawns fresh processes.
 func TestUCIProtocol(t *testing.T) {
+	if testing.Short() {
+		t.Skip("UCI subprocess test skipped in -short mode")
+	}
 	e := startEngine(t)
 	defer e.close()
 
@@ -303,9 +328,12 @@ func TestUCIProtocol(t *testing.T) {
 // uninitialised-read class of bug that made node counts wobble). Each run is a fresh `bench\nquit` piped
 // into a new process, exactly like the bash script.
 func TestUCIBenchDeterminism(t *testing.T) {
+	if testing.Short() {
+		t.Skip("UCI subprocess test skipped in -short mode")
+	}
 	run := func() string {
 		t.Helper()
-		cmd := exec.Command(enginePath)
+		cmd := exec.Command(engineBinary(t))
 		cmd.Env = append(os.Environ(), "GOMAXPROCS=1")
 		cmd.Stdin = strings.NewReader("bench\nquit\n")
 		out, err := cmd.Output()
