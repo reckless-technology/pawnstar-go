@@ -5,3 +5,6 @@ pawnstar-go-baseline
 config.json
 *.pgn
 pawnstar-go-*
+
+# Go test binaries left behind by `go test -cpuprofile`
+*.test
