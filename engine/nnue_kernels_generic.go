@@ -66,3 +66,7 @@ func outputDotInt8(stm, ntm *[nnueHiddenSize]int16, w8 []int16) int64 {
 	}
 	return output
 }
+
+// regroupWeightsForDot is the identity for the scalar kernel — outputDotInt8 above indexes the weights in
+// natural order. (The SIMD kernel reorders them once at load to match its packed-activation lane layout.)
+func regroupWeightsForDot(w []int16) []int16 { return w }

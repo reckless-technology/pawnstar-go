@@ -159,6 +159,9 @@ func (n *nnueNetwork) deriveInt8OutputWeights() {
 		}
 		n.outputWeightsI8[i] = int16(q)
 	}
+	// Reorder the weights into the lane layout the SIMD output dot consumes (identity for the scalar
+	// kernel), so each activation pairs with its own weight without a per-eval permute. See the kernels.
+	n.outputWeightsI8 = regroupWeightsForDot(n.outputWeightsI8)
 }
 
 // divRoundHalfAway returns round(num/den) with ties rounded away from zero, matching C++ std::lround on
