@@ -93,8 +93,13 @@ func outputDotInt8(stm, ntm *[nnueHiddenSize]int16, w8 []int16) int64 {
 			clo := c.GetLo().ExtendToInt32()
 			chi := c.GetHi().ExtendToInt32()
 			// activation u8 = (c*c + round) >> shift, in [0, 127] — never saturates the int16 pack.
-			ulo := clo.Mul(clo).Add(round).ShiftAllRight(nnueInt8Shift)
-			uhi := chi.Mul(chi).Add(round).ShiftAllRight(nnueInt8Shift)
+			// Square via VPMADDWD (DotProductPairs) rather than VPMULLD: c ∈ [0, QA] so each sign-extended
+			// int32 lane is the int16 pair [v, 0], and madd(x, x) sums v·v + 0·0 = v² per lane. VPMADDWD is
+			// ~2× the throughput of VPMULLD on this µarch, and the square is the kernel's hot op. Bit-identical.
+			cloI := clo.AsInt16x16()
+			chiI := chi.AsInt16x16()
+			ulo := cloI.DotProductPairs(cloI).Add(round).ShiftAllRight(nnueInt8Shift)
+			uhi := chiI.DotProductPairs(chiI).Add(round).ShiftAllRight(nnueInt8Shift)
 			u := ulo.SaturateToInt16ConcatGrouped(uhi) // pack to int16 (VPACKSSDW group order)
 
 			// The weights are pre-regrouped (regroupWeightsForDot) into that same group order, so
