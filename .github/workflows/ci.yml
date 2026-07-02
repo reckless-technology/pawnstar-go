@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel a previous in-flight run on the same ref when a new commit arrives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# The NNUE archsimd package + the hand-written AVX2 kernel are gated behind GOEXPERIMENT=simd (Go 1.26+).
+# The Makefile exports it too, but set it here so the direct `go`/`gofmt` steps agree.
+env:
+  GOEXPERIMENT: simd
+
+jobs:
+  # Primary build + test gate on Linux via the `make` wrapper (which sets GOEXPERIMENT=simd). `make check`
+  # runs perft, SEE, Bratko-Kopec, the NNUE gates, chess-clock timing, and the UCI-protocol test — including
+  # the bench determinism signature.
+  build-test:
+    name: build + test (make check)
+    runs-on: ubuntu-latest
+    steps:
+      # Full history (not a shallow clone) so `git rev-list --count HEAD` yields the true build number.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check runner has AVX2
+        # The engine emits 256-bit AVX2 (NNUE SIMD kernels), so the test binaries need an AVX2 CPU.
+        # GitHub-hosted x86-64 runners do; fail fast with a clear message if one ever doesn't.
+        run: |
+          grep -q avx2 /proc/cpuinfo \
+            || { echo "::error::runner CPU lacks AVX2 — cannot run the SIMD engine"; exit 1; }
+      - name: Build + test
+        run: make -j"$(nproc)" check
+
+  # Style gate: the tree must be gofmt-clean and vet-clean.
+  format:
+    name: gofmt + vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+
+  # ---------------------------------------------------------------------------------------------------------
+  # Build artifacts: a native engine binary per OS, uploaded only after that platform's build AND test pass
+  # (the upload is a later step, so a failed build/test ends the job first). Each job is self-contained — it
+  # builds the versioned binary (pawnstar-go_<major>_<minor>_<build>; the build number is the git commit
+  # count, hence the full-history checkout) and runs the tests on its own runner. Download them from the
+  # run's "Artifacts" section; the Release workflow promotes them into a GitHub Release.
+  # ---------------------------------------------------------------------------------------------------------
+
+  # Linux x86-64 (AVX2 SIMD kernels, via the make wrapper).
+  artifact-linux:
+    name: artifact (linux amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check runner has AVX2
+        run: |
+          grep -q avx2 /proc/cpuinfo \
+            || { echo "::error::runner CPU lacks AVX2 — cannot run the SIMD engine"; exit 1; }
+      - name: Build versioned binary
+        run: make build
+      - name: Test
+        run: make -j"$(nproc)" check
+      - name: Upload engine binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawnstar-go-linux-amd64
+          path: pawnstar-go_[0-9]*_[0-9]*_[0-9]* # the versioned binary, not the pawnstar-go symlink
+          if-no-files-found: error
+
+  # macOS arm64 (Apple Silicon). amd64-only files (archsimd + the AVX2 asm) are build-tag-excluded here, so
+  # this builds the portable scalar NNUE kernels — no AVX2 check.
+  artifact-macos:
+    name: artifact (macos arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build versioned binary
+        run: make build
+      - name: Test
+        run: make -j"$(sysctl -n hw.logicalcpu)" check
+      - name: Upload engine binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawnstar-go-macos-arm64
+          path: pawnstar-go_[0-9]*_[0-9]*_[0-9]*
+          if-no-files-found: error
+
+  # Windows x86-64 (AVX2 SIMD kernels). No `make` on the runner, so build/test with go directly (bash shell
+  # for the git build-number + ldflags). Keep MAJOR/MINOR here in sync with engine/version.go + the Makefile.
+  artifact-windows:
+    name: artifact (windows amd64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build versioned binary
+        run: |
+          build=$(git rev-list --count HEAD)
+          go build -ldflags "-X pawnstar-go/engine.versionBuild=$build" -o "pawnstar-go_0_1_${build}.exe" .
+      - name: Test
+        run: go test ./...
+      - name: Upload engine binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawnstar-go-windows-amd64
+          path: pawnstar-go_*.exe
+          if-no-files-found: error
