@@ -24,6 +24,19 @@ func BenchmarkNNUEEvaluateExact(b *testing.B) {
 	}
 }
 
+// BenchmarkNNUEEvaluateInt8 exercises the search's int8 hot-path evaluator (the int8 output dot), the
+// kernel the NEON/AVX2 asm accelerates.
+func BenchmarkNNUEEvaluateInt8(b *testing.B) {
+	net := benchNet(b)
+	pos := positionFromFen(midgameFen)
+	var acc nnueAccumulator
+	net.refresh(&acc, &pos)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sink = net.evaluateInt8(&acc, pos.colorToMove)
+	}
+}
+
 func BenchmarkNNUERefresh(b *testing.B) {
 	net := benchNet(b)
 	pos := positionFromFen(midgameFen)
