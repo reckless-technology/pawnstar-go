@@ -89,6 +89,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false # no go.sum / external deps to cache
       - name: Generate docs bundle
         run: |
           set -euo pipefail
