@@ -21,18 +21,19 @@ go test ./engine/ -run TestPerft -v               # full suite, up to D6 (slow)
 go test ./engine/ -run TestPerft/002 -v           # single position by 1-based index (002 = second position)
 go test ./engine/ -run TestPerftExtra -short -v  # verify incremental Zobrist hash vs recomputed hash at every node
 go test ./engine/ -run TestSearch -short -v       # search every EPD position to depth 9; exercises TT and search
-go test ./engine/ -run TestBratkoKopec -v         # 24 Bratko-Kopec positions at depth 8; regression test for search quality
+go test ./engine/ -run TestBratkoKopec -v         # 24 Bratko-Kopec positions at depth 8 (NNUE on); search-quality gate, bit-identical to C++
 go test ./engine/ -run TestSEE -v                 # 24 SEE cases + TestSEECrossCheck (fast == make-move reference over ~1M captures)
 go test ./engine/ -run TestOpeningBook -v         # opening-book '?' (questionable) move handling
 make test-uci                                     # UCI protocol as a process (handshake, seldepth, searchmoves, currmove, bench)
-go test ./engine/ -run TestNNUEReference -v       # NNUE exact eval == C++ 250-FEN reference (0 cp)
+go test ./engine/ -run TestNNUEReference -v       # NNUE exact int16 eval == C++ 250-FEN reference (0 cp)
+go test ./engine/ -run TestNNUEInt8 -v            # search's int8 eval within 40 cp of int16 ref (also scalar == SIMD)
 go test ./engine/ -run TestNNUEIncremental -v     # lazy accumulator == full refresh (bit-identical)
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
 Run with `GOEXPERIMENT=simd` (or `make test`) to exercise the SIMD kernels. Move generation correctness is verified by perft — counting leaf nodes to a given depth against known values. All 131 EPD positions must pass at every depth before any change is considered correct.
 
-Perft (move generation only) runs at approximately **42 Mnps**. The NNUE evaluator used in real search is slower per node but far stronger — when first ported it measured **+572 Elo** over the engine's former handcrafted evaluation in a fixed-depth self-play SPRT (146W/3L/5D); that handcrafted eval has since been removed. The C++ original reaches ~600 Mnps via BMI2 PEXT instructions.
+Perft (move generation only) runs at approximately **42 Mnps**. The NNUE evaluator used in real search is slower per node but far stronger — when first ported it measured **+572 Elo** over the engine's former handcrafted evaluation in a fixed-depth self-play SPRT (146W/3L/5D); that handcrafted eval has since been removed. The C++ original reaches ~700 Mnps via BMI2 PEXT instructions. In real NNUE search the Go↔C++ speed gap is much smaller than that raw move-gen gap — search nps is dominated by evaluation, where the SIMD kernels are close to the C++ hot path. Over the 24 Bratko-Kopec positions at depth 10 (single-threaded, bit-identical search trees) the Go engine runs ~1.06 Mnps versus the C++ engine's ~1.77 Mnps — **~1.66× slower**.
 
 ## Architecture
 
@@ -44,10 +45,14 @@ The struct holds:
 - `pieces [7]bitboard` — indexed by piece type constant (`pawn`=1 … `king`=6; index 0 = the occupied-squares bitboard, maintained incrementally so `occupied()` is a plain load)
 - `colors [2]bitboard` — indexed by color constant (`white`=0, `black`=1)
 - `squares[64]piece` — O(1) piece lookup by square
-- `scores[2]int` — incremental material + PST totals per side (excludes king; updated by `addPiece`/`removePiece`/`movePiece`)
+- `checkers bitboard` — pieces currently giving check to the side to move (refreshed by `makeMove`)
+- `hash zobrist` — Zobrist hash, maintained incrementally (recomputed from scratch only in `positionFromFen`)
+- `epSquare square` — en-passant target square, or `noSquare`
+- `halfMove uint8` — half-move clock for the 50-move rule; `fullMove uint8` — full-move number (0-based)
+- `flags uint8` — transient move flags (currently only `flagNullMove`); `castling castlingRights` — remaining castling rights
 - `colorToMove color` — side to move as a direct field
-- Zobrist hash maintained incrementally
-- `halfMove uint8` — half-move clock for the 50-move rule
+
+There is no per-side score accumulator: the former handcrafted evaluator (PST/material `scores[2]int`) has been removed — NNUE is the only evaluator (see below).
 
 `bitboard` ([engine/bitboard.go](engine/bitboard.go)) is a `uint64` with methods for common set operations (`popCount`, `lsb`, `popLsb`, shifts in all eight directions).
 
@@ -123,7 +128,7 @@ The result is a `pins` struct with a `pinned` bitboard and a `[64]bitboard` of a
 
 ### Search
 
-`Game` ([engine/game.go](engine/game.go)) owns all persistent search state: transposition table, history table, evaluation cache, opening book, chess clock, and the `posStack []position` game-history stack. `isCancelPending` is an `atomic.Bool` set by `stopThinking` or by the time-check logic inside the search.
+`Game` ([engine/game.go](engine/game.go)) owns only the state shared across Lazy SMP threads: the lockless transposition table and eval cache, the opening book, the chess clock, the `threadCount`, and the `posStack []position` game-history stack. Everything else — history, killers, continuation history, countermoves, the NNUE accumulator stack, node counts — is **per-thread**, living on each thread's `searchState` so the concurrent search never contends. `isCancelPending` is an `atomic.Bool` set by `stopThinking` or by the time-check logic inside the search.
 
 The search uses **Lazy SMP** (as in the C++ engine): `searchRootNode` runs `threadCount` threads, each an independent iterative-deepening search of the whole root sharing only the lockless transposition table and eval cache. The main thread (id 0) is authoritative — it prints `info`, manages time, and returns the move — while helper threads deepen the shared TT, desynchronised by a Stockfish-style iteration-skip schedule so they explore diverse lines. Thread count defaults to 1 (raised by `main()` from `PAWNSTAR_THREADS`/`NumCPU`, or the UCI `Threads` option). All per-thread state (history, killers, continuation history, countermoves, accumulator, diagnostics) lives on each thread's `searchState`, so nothing is shared except the two lockless tables — the concurrent search is data-race free with no locks.
 
@@ -133,15 +138,20 @@ All recursive search functions ([engine/search.go](engine/search.go)) take `*sea
 
 ```
 searchState
-├── posStack  []position        copy-make stack; seeds with 1 entry (current position)
-├── hashStack []hashStackEntry  compact (hash, halfMoveClock) record for repetition detection
-├── killers   [maxPly][2]move   quiet moves that caused beta cutoffs, indexed by ply
-├── accStack  []nnueAccumulator lazy NNUE accumulator per ply (+ accValid []bool)
-├── nodeCount int               nodes searched this iteration
-└── game      *Game             pointer to all shared state (TT, history, eval cache, clock, cancel)
+├── posStack            []position        copy-make stack; seeds with 1 entry (current position)
+├── hashStack           []hashStackEntry  compact (hash, halfMoveClock) record for repetition detection
+├── killers             [maxPly][2]move   quiet moves that caused beta cutoffs, indexed by ply
+├── history             historyTable      per-thread history heuristic (per-thread to avoid contention)
+├── countermoves        [contKeys]move    best quiet refutation keyed by the previous move
+├── continuationHistory []int16           1-ply continuation history, keyed by [prev.pieceTo()][move.pieceTo()]
+├── accStack            []nnueAccumulator lazy NNUE accumulator per ply (+ accValid []bool)
+├── nodeCount           int               nodes searched this iteration
+├── seldepth            int               deepest ply reached (UCI info seldepth)
+├── dbg                 *debugX           diagnostics: global dbgx for the main thread, a throwaway per helper
+└── game                *Game             pointer to shared state (TT + eval cache, clock, cancel)
 ```
 
-`hashStackEntry` stores only `hash` (8 bytes) and `halfMoveClock` (1 byte + padding = 16 bytes total), compared to 168 bytes for a full `position`, keeping the repetition scan cache-friendly. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. All shared state — TT, history table, eval cache, time control, cancel flag — is accessed only through the `game *Game` pointer.
+`hashStackEntry` stores only `hash` (8 bytes) and `halfMoveClock` (1 byte + padding = 16 bytes total), compared to 168 bytes for a full `position`, keeping the repetition scan cache-friendly. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. Only truly shared state — the lockless TT + eval cache, the read-only time control, and the atomic cancel flag — is reached through the `game *Game` pointer; the history/killers/countermove/continuation tables and the accumulator stack are all local to this `searchState`.
 
 #### Iterative deepening
 
@@ -153,19 +163,25 @@ searchState
    - Search all root moves in a single **full-window** pass `[initialAlpha, initialBeta]`: `alpha` starts at the minimum and is raised as moves improve, so PVS null-windows every move after the first. There is no aspiration window (the C++ engine tested and rejected aspiration; a fixed-depth cross-engine BK diff confirmed it was the largest Go↔C++ divergence, so Go dropped it). Combined with shared-`xorshift64star` Zobrist hashing, matched score scale, a per-move null-window check, and matched PV capture, **all 24 Bratko-Kopec positions now match the C++ reference bit-for-bit** — identical bestmove, score, node count, and PV at fixed depth (verified at depth 8 and 10, single-threaded, book off).
    - Apply early-exit heuristics (Standard clock only): stop early if the best move is consistent and/or the score is stable across depths, as a fraction of the allocated time budget.
 
-**Time allocation (Standard clock):** `allocated = timeRemaining / movesRemaining`. Hard stop = `max(100ms, min(allocated × 2, timeRemaining − 1s))`. The clock is checked every 65 536 nodes (`nodeCount & 0xFFFF == 0`).
+**Time allocation (Standard clock):** `allocated = timeRemaining / movesRemaining`. Hard stop = `max(100ms, min(allocated × 2, timeRemaining − 1s))`. The hard deadline (and any `go nodes` limit) is polled every 2048 nodes (`nodeCount & 0x7FF == 0`) — a coarser interval let a node-heavy batch overrun the deadline; 2048 keeps the overrun sub-millisecond. During a ponder search `hardDeadlineNanos` holds a no-deadline sentinel, so the poll never fires until `ponderhit` swaps in a real deadline.
 
 #### `searchAlphaBeta` highlights
 
+The margins carry over unchanged from the C++ engine (the NNUE eval is the same centipawn scale). At non-PV, non-check nodes a static eval is computed **once** and drives both reverse futility pruning and the null-move gate. The null-window predicate `beta == alpha+1` is recomputed **per move** against the live alpha (not precomputed once before the loop) — at a PV node, once an earlier move raises alpha to `beta−1` the remaining moves are effectively null-window and LMP/LMR must engage; this is required for bit-identical parity with C++.
+
 | Technique | Parameters |
 |---|---|
-| Principal variation search (PVS) | Null-window on moves 2+ when not in check; re-search full window on fail-high |
-| Null-move pruning | R = 4; skipped in check, null-move positions, non-null windows, endgames; requires `pstScore > beta + 100` |
-| Late move reduction (LMR) | −1 ply from the 2nd quiet non-check non-pawn/king move onward (depth > 2); −2 ply additionally from move index 7 (depth > 3, zero history count); re-search at full depth on fail-high |
-| Check extension | In quiescence, an in-check position re-enters `searchAlphaBeta` at the same depth instead of standing pat |
-| Transposition table | Cut/All hits return early if score is conclusive; PV hits increment depth by 1 |
+| Check extension | A node in check is searched one ply deeper; quiescence re-enters `searchAlphaBeta` (rather than standing pat) when in check |
+| Internal iterative reduction | −1 ply at depth ≥ `noTTReduceMinDepth` when there is no TT move |
+| Reverse futility pruning | non-PV non-check: return `eval` when depth ≤ `rfpMaxDepth` and `eval − rfpMargin·depth ≥ beta` |
+| Null-move pruning | R = 4; only when `eval ≥ beta` and there is enough material (no zugzwang); skipped in check / null-move positions |
+| Late move pruning | skip quiet moves at depth ≤ `lmpMaxDepth` once `moveIdx ≥ lmpBase + depth²` |
+| Principal variation search (PVS) | first move full window; later moves null-window; re-search full window on fail-high |
+| Late move reduction (LMR) | null-window non-check: −1 from move index > 3; −2 from index > 6 (depth > 3); −3 additionally when history count is zero; re-search at full depth on fail-high |
+| Quiescence SEE pruning | stop at the first losing capture (keys on the negative-SEE sign of losing captures in move ordering) |
+| Transposition table | Cut/All hits return early if score is conclusive; PV hits extend depth by 1 |
 
-Under Lazy SMP each thread walks the move list independently; parallelism comes from many whole-tree searches sharing the lockless transposition table, not from splitting a node.
+The pruning/reduction stack was worth +183 Elo (SPRT, 10+0.1); the check extension plus the countermove/continuation-history move ordering a further +160 Elo. Under Lazy SMP each thread walks the move list independently; parallelism comes from many whole-tree searches sharing the lockless transposition table, not from splitting a node.
 
 #### Move ordering
 
@@ -227,11 +243,11 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 
 ### Opening book
 
-`openingBook` ([engine/book.go](engine/book.go)) parses [engine/book.txt](engine/book.txt) (385 lines from TSCP), embedded in the binary via `go:embed` ([engine/book_embed.go](engine/book_embed.go)) so no external file is needed. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves. `getMove` returns a random candidate, giving variety across games.
+`openingBook` ([engine/book.go](engine/book.go)) parses [engine/book.txt](engine/book.txt) (385 lines from TSCP — a byte-for-byte copy of the C++ engine's `pawnstar.book`), embedded in the binary via `go:embed` ([engine/book_embed.go](engine/book_embed.go)) so no external file is needed. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves. A move written with a trailing `?` is *questionable*: it is replayed so the rest of the line still parses, but is never offered by `getMove` — matching the C++ book (109 lines carry `?`, filtering 122 candidate entries). `getMove` returns a random candidate, giving variety across games.
 
 ### History heuristic
 
-`historyTable` ([engine/history.go](engine/history.go)) records how often each (ply, from→to) pair raised alpha or caused a beta cutoff. Counts are added to the move sort score via `scoreAndSortMovesInner` and reset at the start of each root search.
+`historyTable` ([engine/history.go](engine/history.go)) records how often each (ply, from→to) pair raised alpha or caused a beta cutoff. Counts are added to the quiet-move sort score by `scoreAndSortMoves` (alongside continuation history). The table lives on each `searchState` (per-thread, so Lazy SMP threads don't contend) and starts fresh each search because a new `searchState` is built per search.
 
 ### UCI protocol
 
@@ -241,7 +257,7 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 |---|---|
 | `uci` | Prints engine id and `uciok` |
 | `isready` | Prints `readyok` |
-| `ucinewgame` | Stops search, resets position and clock |
+| `ucinewgame` | Stops search, resets position and clock. Does **not** clear the TT/eval cache (use `Clear Hash` for that) — so repeating a position in one session reuses the TT and node counts shrink |
 | `position startpos [moves ...]` | Sets position from start FEN, applies move list |
 | `position fen <fen> [moves ...]` | Sets position from FEN, applies move list |
 | `go wtime <ms> btime <ms> [winc <ms> binc <ms>] [movestogo <n>]` | Standard clock; without `movestogo`, moves-to-go is a decreasing horizon `max(40−move, 5)`. Increment is parsed but not folded into the budget (SPRT-neutral) |
@@ -269,4 +285,4 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 
 ### Search diagnostics
 
-[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, draw detection, and killer move beta cutoffs. Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect search behaviour. Counters accumulate across searches unless explicitly reset.
+[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, the pruning/reduction techniques (check extensions, IIR, RFP, LMP, qsearch SEE prunes, the three LMR tiers), draw detection, and killer move beta cutoffs. The search reaches them through `searchState.dbg`: the main thread points at the global `dbgx`, each helper thread at a throwaway, so the counters neither race nor contend under Lazy SMP (helper counts are discarded). Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect single-threaded search behaviour. Counters accumulate across searches unless explicitly reset.
