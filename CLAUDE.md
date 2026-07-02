@@ -22,8 +22,8 @@ Run the engine interactively via UCI: `./pawnstar-go`. NNUE is the only evaluato
 Move generation correctness is verified by perft tests against known node counts:
 
 ```bash
-go test ./engine/ -run TestPerft -v               # all perft positions (slow — runs up to depth 6)
-go test ./engine/ -run TestPerft -short -v        # quick run, caps depth at 5
+go test ./engine/ -run TestPerft -v               # all perft positions, capped at depth 5 (~12s); node counts >= 1e9 removed
+go test ./engine/ -run TestPerft -short -v        # same depth-5 cap (short no longer differs)
 go test ./engine/ -run TestPerft/002 -v           # single position by 1-based index (002 = second position)
 go test ./engine/ -run TestPerftExtra -short -v  # verify incremental Zobrist hash vs recomputed hash at every node
 go test ./engine/ -run TestSearch -short -v       # run search on every EPD position to depth 9
