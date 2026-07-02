@@ -83,7 +83,8 @@ func scaleByRule50(score, rule50 int) int {
 func evaluatePosition(ss *searchState) int {
 	ss.dbg.evalCalls++
 	pos := ss.currentPosition()
-	if pos.isDrawByMaterial() {
+	if cat := pos.materialDrawCategory(); cat != 0 {
+		ss.recordMaterialDraw(cat)
 		return drawScore
 	}
 

@@ -321,23 +321,30 @@ func (position *position) makeNullMove() {
 	position.colorToMove = enemyOf(position.colorToMove)
 }
 
-// isDrawByMaterial reports whether the position is a theoretical draw by
-// insufficient mating material: K vs K, K+N vs K, K+B vs K, or K+B vs K+B
-// where both bishops travel on the same colour squares.
-func (position *position) isDrawByMaterial() bool {
+// materialDrawCategory reports the insufficient-mating-material draw category by total piece count:
+// 2 (K vs K), 3 (K+N vs K or K+B vs K), or 4 (K+B vs K+B, both bishops on the same colour) — or 0 if the
+// position is not a material draw. The category feeds the drawsByMaterial{2,3,4} diagnostic counters.
+func (position *position) materialDrawCategory() int {
 	if position.pieces[pawn].isNotEmpty() || position.pieces[rook].isNotEmpty() || position.pieces[queen].isNotEmpty() {
-		return false
+		return 0
 	}
 	// Only kings, knights, and/or bishops remain.
 	minorPieces := position.pieces[knight] | position.pieces[bishop]
-	if minorPieces.popCount() <= 1 {
-		return true
-	}
-	// Two bishops on the same colour squares is also a draw.
-	if position.pieces[knight] == 0 && minorPieces.popCount() == 2 {
-		if minorPieces&whiteSqs == minorPieces || minorPieces&blackSqs == minorPieces {
-			return true
+	switch minorPieces.popCount() {
+	case 0:
+		return 2 // K vs K
+	case 1:
+		return 3 // K + single minor vs K
+	case 2:
+		// Two bishops on the same colour squares is also a draw.
+		if position.pieces[knight] == 0 && (minorPieces&whiteSqs == minorPieces || minorPieces&blackSqs == minorPieces) {
+			return 4
 		}
 	}
-	return false
+	return 0
+}
+
+// isDrawByMaterial reports whether the position is a theoretical draw by insufficient mating material.
+func (position *position) isDrawByMaterial() bool {
+	return position.materialDrawCategory() != 0
 }
