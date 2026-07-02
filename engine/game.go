@@ -192,7 +192,13 @@ func (game *Game) HandleCommand(line string) bool {
 		game.onPonderhit()
 	case "bench":
 		game.stopThinking()
-		game.runBench()
+		depth := benchDepth // `bench` uses benchDepth; `bench <depth>` overrides (matches C++ handle_bench)
+		if len(fields) > 1 {
+			if d, err := strconv.Atoi(fields[1]); err == nil && d > 0 {
+				depth = d
+			}
+		}
+		game.runBench(depth)
 	case "stop":
 		game.stopThinking()
 	case "quit":

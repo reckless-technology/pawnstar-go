@@ -5,30 +5,36 @@ import (
 	"time"
 )
 
-// benchFens is a small, fixed set of diverse positions searched by the `bench` command. Kept stable so
-// the reported node count is a reproducible signal a change can be measured against.
+// benchFens is the fixed position set searched by the `bench` command — a verbatim copy of the C++
+// engine's kBenchFens (16 Bratko-Kopec positions). Kept identical to C++ so the reported node total is a
+// cross-engine determinism signature: with fixed-depth search parity, the two engines print the same count.
 var benchFens = []string{
-	"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-	"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
-	"8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
-	"r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
-	"2rq1rk1/pp1bppbp/2np1np1/8/2BNP3/2N1BP2/PPPQ2PP/2KR3R w - - 0 1",
-	"r2q1rk1/1b1nbppp/pp1ppn2/8/2PNP3/1PN1BP2/P2QB1PP/R4RK1 w - - 0 1",
-	"r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 1",
-	"4rrk1/pp1n1pp1/2p2q1p/3p4/3P1P2/2P1PN2/PP1Q2PP/R4RK1 w - - 0 1",
-	"r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+	"1k1r4/pp1b1R2/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - - 0 1",
 	"3r1k2/4npp1/1ppr3p/p6P/P2PPPP1/1NR5/5K2/2R5 w - - 0 1",
-	"8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 b - - 0 1",
-	"6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1",
+	"2q1rr1k/3bbnnp/p2p1pp1/2pPp3/PpP1P1P1/1P2BNNP/2BQ1PRK/7R b - - 0 1",
+	"rnbqkb1r/p3pppp/1p6/2ppP3/3N4/2P5/PPP1QPPP/R1B1KB1R w KQkq - 0 1",
+	"r1b2rk1/2q1b1pp/p2ppn2/1p6/3QP3/1BN1B3/PPP3PP/R4RK1 w - - 0 1",
+	"2r3k1/pppR1pp1/4p3/4P1P1/5P2/1P4K1/P1P5/8 w - - 0 1",
+	"1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - - 0 1",
+	"4b3/p3kp2/6p1/3pP2p/2pP1P2/4K1P1/P3N2P/8 w - - 0 1",
+	"2kr1bnr/pbpq4/2n1pp2/3p3p/3P1P1B/2N2N1Q/PPP3PP/2KR1B1R w - - 0 1",
+	"3rr1k1/pp3pp1/1qn2np1/8/3p4/PP1R1P2/2P1NQPP/R1B3K1 b - - 0 1",
+	"2r1nrk1/p2q1ppp/bp1p4/n1pPp3/P1P1P3/2PBB1N1/4QPPP/R4RK1 w - - 0 1",
+	"r3r1k1/ppqb1ppp/8/4p1NQ/8/2P5/PP3PPP/R3R1K1 b - - 0 1",
+	"r2q1rk1/4bppp/p2p4/2pP4/3pP3/3Q4/PP1B1PPP/R3R1K1 w - - 0 1",
+	"rnb2r1k/pp2p2p/2pp2p1/q2P1p2/8/1Pb2NP1/PB2PPBP/R2Q1RK1 w - - 0 1",
+	"2r3k1/1p2q1pp/2b1pr2/p1pp4/6Q1/1P1PP1R1/P1PN2PP/5RK1 w - - 0 1",
+	"r1bqkb1r/4npp1/p1p4p/1p1pP1B1/8/1B6/PPPN1PPP/R2Q1RK1 w kq - 0 1",
 }
 
-// benchDepth is the fixed search depth used by `bench`.
-const benchDepth = 11
+// benchDepth is the default `bench` search depth (matching the C++ kBenchDepth); overridable by `bench <depth>`.
+const benchDepth = 13
 
 // runBench searches every benchFens position to a fixed depth, single-threaded and with the book off, so
 // the same build reports the same node count on every run (guarding the uninitialised-read class of bug
-// that makes counts wobble). It prints "<nodes> nodes <nps> nps".
-func (game *Game) runBench() {
+// that makes counts wobble). Mirrors the C++ handle_bench: the hash is cleared once up front but persists
+// across positions within the run. It prints "<nodes> nodes <nps> nps".
+func (game *Game) runBench(depth int) {
 	savedThreads, savedBook := game.threadCount, game.useOwnBook
 	game.threadCount = 1
 	game.useOwnBook = false
@@ -42,7 +48,7 @@ func (game *Game) runBench() {
 	for _, fen := range benchFens {
 		game.newGameFromFen(fen)
 		game.timeControl.clockType = clockFixedDepth
-		game.timeControl.depth = benchDepth
+		game.timeControl.depth = depth
 		game.isCancelPending.Store(false)
 		searchRootNode(game)
 		total += int64(game.nodeCount)
