@@ -7,14 +7,24 @@ import (
 	"time"
 )
 
-// hashStackEntry is a compact position record used exclusively by isDrawByRepetition.
-// Storing only the Zobrist hash and the half-move clock (16 bytes total) instead of a
-// full position (168 bytes) keeps the repetition scan cache-friendly and the per-search
-// history cheap to build.
-type hashStackEntry struct {
-	hash          zobrist // Zobrist hash identifies the position
-	halfMoveClock uint8   // clock value at this position; a zero entry marks an irreversible move boundary
+// hashStackEntry packs a position's Zobrist hash (top 56 bits) and its half-move clock (low 8 bits) into a
+// single uint64 — the eval-cache packing trick. This halves the entry (8 B vs the 16 B a {hash, uint8}
+// struct occupies with padding), so the per-node repetition scan walks half as many cache lines. Repetition
+// compares only the top 56 bits, which is ample discrimination for a scan window of at most ~100 plies
+// (and safer than the eval cache's 48-bit key); the low byte carries the clock, where a zero marks an
+// irreversible-move boundary that stops the scan.
+type hashStackEntry zobrist
+
+// packHashStack builds an entry: hash in the top 56 bits, half-move clock in the low byte.
+func packHashStack(hash zobrist, clock uint8) hashStackEntry {
+	return hashStackEntry((hash &^ 0xFF) | zobrist(clock))
 }
+
+// clock returns the packed half-move clock (0 marks an irreversible-move boundary).
+func (e hashStackEntry) clock() uint8 { return uint8(e) }
+
+// sameHashAs reports whether two entries hold the same position (top 56 bits of the hash; clock ignored).
+func (e hashStackEntry) sameHashAs(o hashStackEntry) bool { return (e^o)>>8 == 0 }
 
 // searchState holds all mutable state for one Lazy SMP search thread. Each thread owns an independent
 // searchState searching the whole tree; the threads share only the lockless transposition table and
@@ -83,7 +93,7 @@ func newSearchStateFromGame(game *Game) *searchState {
 	n := len(game.posStack)
 	hs := make([]hashStackEntry, n, n+maxPly)
 	for i, pos := range game.posStack {
-		hs[i] = hashStackEntry{pos.hash, pos.halfMove}
+		hs[i] = packHashStack(pos.hash, pos.halfMove)
 	}
 	return newSearchState(hs, &game.posStack[n-1], game)
 }
@@ -135,7 +145,7 @@ func (ss *searchState) playMove(m move) {
 	ss.posStack = append(ss.posStack, ss.posStack[n-1])
 	ss.posStack[n].makeMove(m)
 	pos := &ss.posStack[n]
-	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
+	ss.hashStack = append(ss.hashStack, packHashStack(pos.hash, pos.halfMove))
 	ss.invalidateAcc(n) // depth n's accumulator is now stale; computed on demand by currentAccumulator
 }
 
@@ -146,7 +156,7 @@ func (ss *searchState) makeNullMove() {
 	ss.posStack = append(ss.posStack, ss.posStack[n-1])
 	ss.posStack[n].makeNullMove()
 	pos := &ss.posStack[n]
-	ss.hashStack = append(ss.hashStack, hashStackEntry{pos.hash, pos.halfMove})
+	ss.hashStack = append(ss.hashStack, packHashStack(pos.hash, pos.halfMove))
 	// A null move leaves piece placement unchanged, so the deferred update is a no-op copy; still mark
 	// the new depth invalid so a deeper eval recomputes through it correctly.
 	ss.invalidateAcc(n)
@@ -179,17 +189,17 @@ func (ss *searchState) isDrawByRepetition() bool {
 	if n < 5 {
 		return false
 	}
-	h := ss.hashStack[n-1].hash
+	cur := ss.hashStack[n-1]
 	repetitions := 2
 	for i := n - 5; i >= 0; i -= 2 {
-		if ss.hashStack[i].hash == h {
+		if ss.hashStack[i].sameHashAs(cur) {
 			repetitions--
 			if repetitions == 0 {
 				ss.dbg.drawsByRepetition++
 				return true
 			}
 		}
-		if ss.hashStack[i].halfMoveClock == 0 {
+		if ss.hashStack[i].clock() == 0 {
 			return false
 		}
 	}
