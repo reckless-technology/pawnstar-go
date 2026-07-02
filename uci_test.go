@@ -4,9 +4,9 @@ package main
 // (read the engine's responses before sending the next command, so `quit` never cancels a running search)
 // and asserts on the protocol behaviour.
 //
-// This is a faithful port of test/uci_test.sh — the bash script is kept in place, but `make test-uci` now
-// runs this test. Every assertion the script made is reproduced here (see the section comments, which map
-// 1:1 onto the numbered checks in the script). These features (seldepth / currmove / searchmoves, the
+// This is a faithful port of the former test/uci_test.sh (now removed); `make test-uci` runs this test.
+// Every assertion the script made is reproduced here (see the section comments, which map 1:1 onto the
+// numbered checks in the original script). These features (seldepth / currmove / searchmoves, the
 // uciok/readyok handshake, bench determinism, the ponder protocol) are about the engine's behaviour *as a
 // UCI process*, so the only faithful test drives the built binary the way a GUI does — hence a subprocess.
 //
@@ -161,8 +161,8 @@ var (
 )
 
 // TestUCIProtocol drives the built engine as a UCI process and asserts on its protocol behaviour, mirroring
-// test/uci_test.sh check-for-check. The sub-tests run against one shared engine process (the script uses a
-// single coproc for checks 1–6) except bench determinism, which spawns fresh processes like the script.
+// the former test/uci_test.sh check-for-check. The sub-tests run against one shared engine process (the
+// original script used a single coproc for checks 1–6) except bench determinism, which spawns fresh processes.
 func TestUCIProtocol(t *testing.T) {
 	e := startEngine(t)
 	defer e.close()
