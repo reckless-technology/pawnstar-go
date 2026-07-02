@@ -268,7 +268,7 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 | `go searchmoves <m…>` | Restrict the root search to the given moves |
 | `go ... ponder` | Search on the opponent's time; no `bestmove` until `ponderhit`/`stop` |
 | `ponderhit` | Predicted move was played — convert the ponder search to a timed one (budget from now) |
-| `bench` / `bench <depth>` | Node-count benchmark over the 16 C++-reference (Bratko-Kopec) positions at depth `benchDepth`=13 (or an explicit `<depth>`); deterministic, single-threaded, book off |
+| `bench` / `bench <depth>` | Node-count benchmark over the 16 C++-reference (Bratko-Kopec) positions at depth `benchDepth`=13 (or an explicit `<depth>`); deterministic, single-threaded, book off, on a pinned 64 MB TT (signature independent of the `Hash` option). Current signature: 7,007,401 nodes |
 | `stop` | Signals search goroutines to halt |
 | `quit` | Stops search and exits |
 | `setoption name OwnBook value <true\|false>` | Consult the opening book (false forces a real search) |
