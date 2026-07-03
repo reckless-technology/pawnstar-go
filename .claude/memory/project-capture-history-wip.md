@@ -47,3 +47,16 @@ the depth>3 branch). Go: historyTable→[2][4096]uint32, recordGoodMove/count ta
 (ss.currentPosition().colorToMove); C++ mirror: kTableSize=2*4096, RecordGoodMove/GetCount take colour.
 Same workflow: implement both engines on the settled base (after the variant-2 verdict), verify
 bit-identical bench signature + depth-12 PAWNSTAR_BENCH_DEBUG, SPRT [0,5] at 10+0.1 vs the new baseline.
+
+
+---
+
+**PRE-SPRT ORDERING PROBE (2026-07-03, user-suggested — now the standing gate for ordering changes):**
+before any SPRT, measure the fixed-depth tree: (1) the `bench` signature delta is free (candidate vs
+7,007,401-class baseline); (2) BK-24 @ depth 12 cand-vs-base via the scratchpad driver (~2 min, node
+counts are load-independent). **A real ordering improvement should show node ratio ≤ ~1.00; ratio >
+~1.02 is a red flag** — the change is redirecting search, not improving it, and any TC Elo is
+move-quality luck paying a depth tax. Data: capture-history v1 bench +4.1% → SPRT −6.7; v2 BK-24
++4.1% nodes (huge per-position variance: pos03 −45%, pos10 +126%, 8/24 bestmoves changed) while its
+SPRT read ~+9 ±11 (LLR ~0.9, no formal pass at 2500 games) — mechanism ≠ ordering efficiency, so
+weak evidence. Verdict standard: no formal SPRT pass + probe red flag → reject.
