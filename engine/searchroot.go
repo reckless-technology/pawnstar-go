@@ -3,7 +3,7 @@ package engine
 // The root of the search: searchRootNode (book probe, forced-move shortcut, Lazy SMP thread launch,
 // time management) and iterativeDeepen (one thread's full-window iterative-deepening loop, the
 // Stockfish-style helper skip schedule, info-line printing and the soft-time early exits). The
-// recursion itself lives in searchalphabeta.go / quiescence.go.
+// recursion itself lives in searchalphabeta.go / searchquiescent.go.
 
 import (
 	"fmt"
