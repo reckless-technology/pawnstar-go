@@ -10,13 +10,13 @@ package nnue
 //
 // Go's arm64 assembler has no vector integer multiply or dot-product mnemonic, so SQXTUN/UMULL/SMLAL/SMLAL2
 // are emitted as WORD-encoded instructions (verified by disassembly and gated bit-identical by
-// TestOutputDotInt8Asm). w8 must have 2*nnueHiddenSize entries.
+// TestOutputDotInt8Asm). w8 must have 2*hiddenSize entries.
 //
 //go:noescape
-func outputDotInt8Asm(stm, ntm *[nnueHiddenSize]int16, w8 []int16) int64
+func outputDotInt8Asm(stm, ntm *[hiddenSize]int16, w8 []int16) int64
 
 // int8OutputDot is the search's int8 output dot — the hand-written NEON kernel on arm64. (The scalar
 // outputDotInt8 is retained as the bit-identical reference for TestOutputDotInt8Asm.)
-func (n *Network) int8OutputDot(stm, ntm *[nnueHiddenSize]int16) int64 {
+func (n *Network) int8OutputDot(stm, ntm *[hiddenSize]int16) int64 {
 	return outputDotInt8Asm(stm, ntm, n.outputWeightsI8)
 }

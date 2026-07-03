@@ -91,10 +91,10 @@ func (game *Game) playMove(m move) {
 // Returns moveNone if s does not match any legal move.
 func (game *Game) playMoveString(s string) move {
 	moves := game.currentPosition().generateLegalMoves()
-	for _, move := range moves {
-		if move.String() == s {
-			game.playMove(move)
-			return move
+	for _, m := range moves {
+		if m.String() == s {
+			game.playMove(m)
+			return m
 		}
 	}
 	return moveNone()

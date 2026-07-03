@@ -16,10 +16,10 @@ type pins struct {
 // be captured, but excludes moving off the ray entirely.
 func computePins(pos *position) pins {
 	var p pins
-	color := pos.colorToMove
+	c := pos.colorToMove
 	occupied := pos.occupied()
-	friendlyPieces := pos.colors[color]
-	kingLocation := pos.kingSquare(color)
+	friendlyPieces := pos.colors[c]
+	kingLocation := pos.kingSquare(c)
 	intervening := &interveningSquares[kingLocation]
 
 	// Candidate pinners: enemy sliders on a bishop or rook ray from the king.

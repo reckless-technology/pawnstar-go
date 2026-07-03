@@ -17,7 +17,7 @@ func TestOutputDotInt8Asm(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(12345))
 	for trial := 0; trial < 500; trial++ {
-		var stm, ntm [nnueHiddenSize]int16
+		var stm, ntm [hiddenSize]int16
 		for i := range stm {
 			stm[i] = int16(rng.Intn(900) - 300) // spans <0, [0,QA], and >QA
 			ntm[i] = int16(rng.Intn(900) - 300)
