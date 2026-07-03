@@ -10,7 +10,7 @@ GO ?= go
 export GOEXPERIMENT := simd
 
 BINARY := pawnstar-go
-PKG    := ./engine/
+PKG    := ./...
 
 # Version, mirroring the C++ engine: MAJOR.MINOR are edited by hand (keep in sync with engine/version.go),
 # BUILD is the git commit count (globally reproducible; 0 outside a git checkout). The build number is baked
@@ -33,11 +33,11 @@ build:
 	@for f in $(BINARY)_[0-9]*_[0-9]*_[0-9]*; do [ "$$f" = "$(VERSIONED)" ] || rm -f "$$f"; done
 	@echo "built $(VERSIONED)  (pawnstar-go -> $(VERSIONED), version $(VERSION))"
 
-# Full test suite (perft to depth 6, search to depth 9 — slow).
+# Full test suite (all packages; perft capped at depth 5, search to depth 9).
 test:
 	$(GO) test $(PKG)
 
-# Quick suite (perft capped at depth 5, BK at depth 7).
+# Quick suite (-short: BK at depth 7, smaller NNUE walk).
 test-short:
 	$(GO) test -short $(PKG)
 

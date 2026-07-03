@@ -94,7 +94,7 @@ func evaluatePosition(ss *searchState) int {
 		return scaleByRule50(hashScore, int(pos.halfMove))
 	}
 
-	score := ss.game.nnue.searchEvalAcc(ss.currentAccumulator(), pos.colorToMove)
+	score := clampEvalToBand(ss.game.nnue.EvaluateInt8(ss.currentAccumulator(), int(pos.colorToMove)))
 	ss.game.evalTable.record(pos.hash, score)
 	return scaleByRule50(score, int(pos.halfMove))
 }

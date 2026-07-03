@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"pawnstar-go/engine/nnue"
 )
 
 // startFen is the FEN string for the standard chess starting position.
@@ -111,7 +113,7 @@ type Game struct {
 	timeControl        timeControl        // clock configuration for the current search
 	evalTable          evalHashTable      // lockless evaluation cache, shared by all Lazy SMP threads
 	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
-	nnue               *nnueNetwork       // NNUE evaluator (the only evaluator); installed by NewGame, swappable via EvalFile
+	nnue               *nnue.Network      // NNUE evaluator (the only evaluator); installed by NewGame, swappable via EvalFile
 	threadCount        int                // Lazy SMP search threads; 1 = single-threaded (default; tests rely on it)
 	moveOverhead       time.Duration      // reserved from every hard deadline for GUI/network lag (UCI Move Overhead)
 	useOwnBook         bool               // consult the opening book (UCI OwnBook); false forces a real search
@@ -144,7 +146,7 @@ func NewGame() *Game {
 		timeControl:        newTimeControl(),
 		openingBook:        newOpeningBook(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
-		nnue:               loadEmbeddedNet(),
+		nnue:               nnue.Embedded(),
 		threadCount:        1, // single-threaded by default; main() / UCI `Threads` raise it for play
 		moveOverhead:       30 * time.Millisecond,
 		useOwnBook:         true,

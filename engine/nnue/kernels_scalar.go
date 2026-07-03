@@ -1,6 +1,6 @@
 //go:build !(amd64 && goexperiment.simd)
 
-package engine
+package nnue
 
 // Shared scalar NNUE helper kernels: the portable fallback used on every target that isn't the
 // amd64+goexperiment.simd archsimd build. This file holds the kernels that stay scalar on all such

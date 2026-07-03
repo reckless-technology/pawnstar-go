@@ -1,12 +1,16 @@
 package engine
 
-import "testing"
+import (
+	"testing"
+
+	"pawnstar-go/engine/nnue"
+)
 
 // midgameFen is a non-trivial position for NNUE micro-benchmarks.
 const midgameFen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
 
-func benchNet(b *testing.B) *nnueNetwork {
-	net := loadEmbeddedNet()
+func benchNet(b *testing.B) *nnue.Network {
+	net := nnue.Embedded()
 	if net == nil {
 		b.Fatal("no embedded net")
 	}
@@ -16,11 +20,12 @@ func benchNet(b *testing.B) *nnueNetwork {
 func BenchmarkNNUEEvaluateExact(b *testing.B) {
 	net := benchNet(b)
 	pos := positionFromFen(midgameFen)
-	var acc nnueAccumulator
-	net.refresh(&acc, &pos)
+	board := pos.nnueBoard()
+	var acc nnue.Accumulator
+	net.Refresh(&acc, &board)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sink = net.evaluateExact(&acc, pos.colorToMove)
+		sink = net.EvaluateExact(&acc, int(pos.colorToMove))
 	}
 }
 
@@ -29,21 +34,23 @@ func BenchmarkNNUEEvaluateExact(b *testing.B) {
 func BenchmarkNNUEEvaluateInt8(b *testing.B) {
 	net := benchNet(b)
 	pos := positionFromFen(midgameFen)
-	var acc nnueAccumulator
-	net.refresh(&acc, &pos)
+	board := pos.nnueBoard()
+	var acc nnue.Accumulator
+	net.Refresh(&acc, &board)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sink = net.evaluateInt8(&acc, pos.colorToMove)
+		sink = net.EvaluateInt8(&acc, int(pos.colorToMove))
 	}
 }
 
 func BenchmarkNNUERefresh(b *testing.B) {
 	net := benchNet(b)
 	pos := positionFromFen(midgameFen)
-	var acc nnueAccumulator
+	board := pos.nnueBoard()
+	var acc nnue.Accumulator
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		net.refresh(&acc, &pos)
+		net.Refresh(&acc, &board)
 	}
 }
 
@@ -52,12 +59,13 @@ func BenchmarkNNUEUpdate(b *testing.B) {
 	from := positionFromFen(midgameFen)
 	to := from
 	to.makeMove(to.generateLegalMoves()[0]) // a quiet-ish first move
-	var acc nnueAccumulator
-	net.refresh(&acc, &from)
+	fromBoard, toBoard := from.nnueBoard(), to.nnueBoard()
+	var acc nnue.Accumulator
+	net.Refresh(&acc, &fromBoard)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		net.update(&acc, &from, &to)
-		net.update(&acc, &to, &from) // and back, so acc is unchanged
+		net.Update(&acc, &fromBoard, &toBoard)
+		net.Update(&acc, &toBoard, &fromBoard) // and back, so acc is unchanged
 	}
 }
 

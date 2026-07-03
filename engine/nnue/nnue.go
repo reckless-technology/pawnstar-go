@@ -1,19 +1,23 @@
-package engine
-
-// NNUE (Efficiently Updatable Neural Network) evaluation, ported from the C++ Pawnstar engine
-// (src/nnue.h). This file implements the loader for the stamped "PSN1" net format and the exact
-// int16 SCReLU reference forward pass (evaluateExact) — the correctness oracle that must reproduce
-// the trainer's evaluation within quantisation rounding. The int8 fast path and archsimd kernels
-// are added in a later phase; this scalar reference defines the ground truth they must match.
+// Package nnue implements the engine's NNUE (Efficiently Updatable Neural Network) evaluation,
+// ported from the C++ Pawnstar engine (src/nnue.h): the loader for the stamped "PSN1" net format,
+// the lazily-updatable feature-transformer accumulator, the exact int16 SCReLU reference forward
+// pass (EvaluateExact — the correctness oracle), and the search's int8 fast path (EvaluateInt8),
+// with SIMD kernels (amd64 archsimd + AVX2 asm, arm64 NEON asm) selected by build tag.
 //
 // Architecture (shipped net v12): Chess768 features (2 colours * 6 types * 64 squares) per
-// perspective, x kNumKingBuckets king-square weight banks -> a kHiddenSize int16 accumulator per
-// perspective. Activation is SCReLU (clamp to [0,QA] then square). The output layer dots the two
-// perspectives (side-to-move first) and dequantises to centipawns.
+// perspective, x nnueKingBuckets king-square weight banks -> an nnueHiddenSize int16 accumulator
+// per perspective. Activation is SCReLU (clamp to [0,QA] then square). The output layer dots the
+// two perspectives (side-to-move first) and dequantises to centipawns.
+//
+// The package is decoupled from the engine's board types: positions are passed as a Board — raw
+// uint64 occupancy bitboards plus uint8 piece codes — so the engine (which this package must not
+// import) converts at the call boundary.
+package nnue
 
 import (
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 	"os"
 	"sync"
 )
@@ -37,6 +41,11 @@ const (
 	// Packed payload size: feature_weights + feature_bias + output_weights + output_bias, all int16.
 	nnuePayloadInt16 = nnueNumFeatureWeights + nnueHiddenSize + nnueNumOutputWeights + 1
 	nnuePayloadBytes = nnuePayloadInt16 * 2
+
+	// Piece type codes in Board.Squares / Board.Pieces indices — identical to the engine's piece
+	// constants (and the C++ engine's): 0 = empty, then pawn..king.
+	pawnCode = 1
+	kingCode = 6
 )
 
 var nnueMagic = [4]byte{'P', 'S', 'N', '1'}
@@ -55,21 +64,51 @@ var nnueKingBucketMap = [64]int{
 	4, 4, 5, 5, 6, 6, 7, 7,
 }
 
-// nnueAccumulator holds both perspective accumulators (each the feature-transformer output).
-type nnueAccumulator struct {
+// Board is the raw piece-placement view of a chess position that the evaluator consumes. The engine
+// builds one at the call boundary from its own position type (a plain value conversion), keeping
+// this package free of engine imports. White is colour index 0, black 1; piece codes are 1 (pawn)
+// through 6 (king), 0 = empty — matching the engine's constants bit-for-bit.
+type Board struct {
+	Pieces  [7]uint64 // per-piece-type occupancy; index = piece code (index 0 unused)
+	Colors  [2]uint64 // per-colour occupancy
+	Squares [64]uint8 // piece code per square, 0 when empty
+}
+
+// kingSquare returns the king square of colour c (a legal board always has both kings).
+func (b *Board) kingSquare(c int) int {
+	return bits.TrailingZeros64(b.Pieces[kingCode] & b.Colors[c])
+}
+
+// Accumulator holds both perspective accumulators (each the feature-transformer output for one
+// side's king-relative view). Comparable, so tests can check bit-identity with ==.
+type Accumulator struct {
 	white [nnueHiddenSize]int16
 	black [nnueHiddenSize]int16
 }
 
-// nnueNetwork is a loaded, quantised network: read-only after loading and safe to share.
-type nnueNetwork struct {
+// DiffLanes returns how many white-perspective and black-perspective lanes differ between two
+// accumulators — a test/diagnostic helper for pinpointing incremental-update bugs.
+func DiffLanes(a, b *Accumulator) (white, black int) {
+	for i := 0; i < nnueHiddenSize; i++ {
+		if a.white[i] != b.white[i] {
+			white++
+		}
+		if a.black[i] != b.black[i] {
+			black++
+		}
+	}
+	return white, black
+}
+
+// Network is a loaded, quantised network: read-only after loading and safe to share across threads.
+type Network struct {
 	featureWeights []int16 // [nnueFeatureRows * nnueHiddenSize], column-major: row*hidden + i; rows bucket-major
 	featureBias    []int16 // [nnueHiddenSize]
 	outputWeights  []int16 // [2 * nnueHiddenSize]: first hidden weight stm accumulator, next hidden weight the other
 	outputBias     int16   // in QA*QB units
 	// outputWeightsI8 is outputWeights requantised to int8 range (values in [-127,127], stored int16 for the
 	// SIMD kernel): w8 = clamp(round(w / outputWScale), -127, 127). It drives the search's int8 output dot
-	// (evaluateInt8); the int16 outputWeights stay the reference path (evaluateExact). Mirrors the C++ engine.
+	// (EvaluateInt8); the int16 outputWeights stay the reference path (EvaluateExact). Mirrors the C++ engine.
 	outputWeightsI8 []int16
 	// outputWeightsI8Nat is the same int8 weights in NATURAL order as []int8, consumed by the hand-written
 	// AVX2 int8 dot (outputDotInt8Asm), which packs activations to uint8 and uses VPMADDUBSW against int8
@@ -79,19 +118,19 @@ type nnueNetwork struct {
 	loaded             bool
 }
 
-// loadNNUENetworkFile reads a stamped net file from disk and loads it.
-func loadNNUENetworkFile(path string) (*nnueNetwork, error) {
+// LoadFile reads a stamped net file from disk and loads it.
+func LoadFile(path string) (*Network, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("nnue: cannot read net %q: %w", path, err)
 	}
-	return loadNNUENetwork(data)
+	return Load(data)
 }
 
-// loadNNUENetwork parses a stamped ("PSN1") net image. Every architecture field is validated
-// against this build's constants, so an incompatible or unstamped net is rejected rather than
-// silently misread. Trailing bytes after the packed payload (bullet padding) are ignored.
-func loadNNUENetwork(data []byte) (*nnueNetwork, error) {
+// Load parses a stamped ("PSN1") net image. Every architecture field is validated against this
+// build's constants, so an incompatible or unstamped net is rejected rather than silently misread.
+// Trailing bytes after the packed payload (bullet padding) are ignored.
+func Load(data []byte) (*Network, error) {
 	if len(data) < nnueHeaderBytes {
 		return nil, fmt.Errorf("nnue: net too small (%d bytes) for a 32-byte header", len(data))
 	}
@@ -121,7 +160,7 @@ func loadNNUENetwork(data []byte) (*nnueNetwork, error) {
 
 	// Payload in bullet's save order: feature_weights, feature_bias, output_weights, output_bias.
 	p := data[nnueHeaderBytes:]
-	n := &nnueNetwork{
+	n := &Network{
 		featureWeights: make([]int16, nnueNumFeatureWeights),
 		featureBias:    make([]int16, nnueHiddenSize),
 		outputWeights:  make([]int16, nnueNumOutputWeights),
@@ -138,7 +177,7 @@ func loadNNUENetwork(data []byte) (*nnueNetwork, error) {
 // deriveInt8OutputWeights requantises the int16 output weights to int8 range for the int8 output dot.
 // The scale keeps the largest-magnitude weight inside [-127,127]; nets whose weights already fit (the
 // shipped one) get scale 1 and a lossless copy. Mirrors the C++ Network::LoadFromMemory tail.
-func (n *nnueNetwork) deriveInt8OutputWeights() {
+func (n *Network) deriveInt8OutputWeights() {
 	maxOW := 0
 	for _, v := range n.outputWeights {
 		a := int(v)
@@ -193,77 +232,82 @@ func readInt16Slice(b []byte, off int, dst []int16) int {
 //
 //	white perspective: bucket*768 + colour*384 + (type-1)*64 + square
 //	black perspective: bucket*768 + (1-colour)*384 + (type-1)*64 + (square ^ rankFlip)
-func nnueFeatureRow(bucket, colorIdx int, pc piece, sq square, blackPersp bool) int {
-	typeOffset := (int(pc) - int(pawn)) * 64
+func nnueFeatureRow(bucket, colorIdx int, pc uint8, sq int, blackPersp bool) int {
+	typeOffset := (int(pc) - pawnCode) * 64
 	var base int
 	if blackPersp {
-		base = (1-colorIdx)*384 + typeOffset + int(sq^nnueRankFlip)
+		base = (1-colorIdx)*384 + typeOffset + (sq ^ nnueRankFlip)
 	} else {
-		base = colorIdx*384 + typeOffset + int(sq)
+		base = colorIdx*384 + typeOffset + sq
 	}
 	return bucket*nnueInputSize + base
 }
 
 // column returns the feature-transformer weight column (length nnueHiddenSize) for one piece on
 // square s in the given perspective's bucket bank.
-func (n *nnueNetwork) column(bucket, colorIdx int, pc piece, s square, blackPersp bool) []int16 {
+func (n *Network) column(bucket, colorIdx int, pc uint8, s int, blackPersp bool) []int16 {
 	start := nnueFeatureRow(bucket, colorIdx, pc, s, blackPersp) * nnueHiddenSize
 	return n.featureWeights[start : start+nnueHiddenSize]
 }
 
+// popLsb clears and returns the index of the least-significant set bit of *bb (which must be non-zero).
+func popLsb(bb *uint64) int {
+	s := bits.TrailingZeros64(*bb)
+	*bb &= *bb - 1
+	return s
+}
+
 // addColumn and subColumn (accumulator column add/sub) and outputDot (the SCReLU output dot) are the
-// hot kernels; they have SIMD (archsimd) and scalar implementations selected by build tag in
-// nnue_kernels_amd64.go / nnue_kernels_generic.go. All are bit-identical.
+// hot kernels; they have SIMD (archsimd / hand-written asm) and scalar implementations selected by
+// build tag in kernels_*.go / dot_*.go. All are bit-identical.
 
 // refreshSide rebuilds one perspective accumulator from scratch: seed the bias, then add the
 // feature column of every piece, oriented for that perspective's king bucket.
-func (n *nnueNetwork) refreshSide(side *[nnueHiddenSize]int16, pos *position, bucket int, blackPersp bool) {
+func (n *Network) refreshSide(side *[nnueHiddenSize]int16, b *Board, bucket int, blackPersp bool) {
 	copy(side[:], n.featureBias)
-	for colorIdx := int(white); colorIdx <= int(black); colorIdx++ {
-		friendly := pos.colors[colorIdx]
-		for pc := pawn; pc <= king; pc++ {
-			bb := pos.pieces[pc] & friendly
+	for colorIdx := 0; colorIdx <= 1; colorIdx++ {
+		friendly := b.Colors[colorIdx]
+		for pc := uint8(pawnCode); pc <= kingCode; pc++ {
+			bb := b.Pieces[pc] & friendly
 			for bb != 0 {
-				s := bb.popLsb()
+				s := popLsb(&bb)
 				addColumn(side, n.column(bucket, colorIdx, pc, s, blackPersp))
 			}
 		}
 	}
 }
 
-// refresh rebuilds both perspectives of acc from scratch for pos.
-func (n *nnueNetwork) refresh(acc *nnueAccumulator, pos *position) {
-	whiteKing := (pos.pieces[king] & pos.colors[white]).lsb()
-	blackKing := (pos.pieces[king] & pos.colors[black]).lsb()
-	n.refreshSide(&acc.white, pos, nnueKingBucketMap[whiteKing], false)
-	n.refreshSide(&acc.black, pos, nnueKingBucketMap[blackKing^nnueRankFlip], true)
+// Refresh rebuilds both perspectives of acc from scratch for board b.
+func (n *Network) Refresh(acc *Accumulator, b *Board) {
+	n.refreshSide(&acc.white, b, nnueKingBucketMap[b.kingSquare(0)], false)
+	n.refreshSide(&acc.black, b, nnueKingBucketMap[b.kingSquare(1)^nnueRankFlip], true)
 }
 
-// update moves acc from matching `from` to matching `to` by applying only the feature deltas for
+// Update moves acc from matching `from` to matching `to` by applying only the feature deltas for
 // squares whose occupancy differs. Reversible — swap from/to to undo — and a no-op when placements
 // are identical (a null move). Captures, castling, en passant and promotion are handled uniformly
 // via the colour bitboards: for each square a colour vacated, subtract the piece that was there
 // (read from `from`); for each it now occupies, add the piece now there (read from `to`). A king
 // move that crosses a bucket boundary changes that whole perspective's bank, so it is refreshed.
-func (n *nnueNetwork) update(acc *nnueAccumulator, from, to *position) {
-	wf := nnueKingBucketMap[(from.pieces[king] & from.colors[white]).lsb()]
-	wt := nnueKingBucketMap[(to.pieces[king] & to.colors[white]).lsb()]
-	bf := nnueKingBucketMap[(from.pieces[king]&from.colors[black]).lsb()^nnueRankFlip]
-	bt := nnueKingBucketMap[(to.pieces[king]&to.colors[black]).lsb()^nnueRankFlip]
+func (n *Network) Update(acc *Accumulator, from, to *Board) {
+	wf := nnueKingBucketMap[from.kingSquare(0)]
+	wt := nnueKingBucketMap[to.kingSquare(0)]
+	bf := nnueKingBucketMap[from.kingSquare(1)^nnueRankFlip]
+	bt := nnueKingBucketMap[to.kingSquare(1)^nnueRankFlip]
 
 	if wf == wt && bf == bt {
-		for colorIdx := int(white); colorIdx <= int(black); colorIdx++ {
-			vacated := from.colors[colorIdx] &^ to.colors[colorIdx]
+		for colorIdx := 0; colorIdx <= 1; colorIdx++ {
+			vacated := from.Colors[colorIdx] &^ to.Colors[colorIdx]
 			for vacated != 0 {
-				s := vacated.popLsb()
-				pc := from.squares[s]
+				s := popLsb(&vacated)
+				pc := from.Squares[s]
 				subColumn(&acc.white, n.column(wt, colorIdx, pc, s, false))
 				subColumn(&acc.black, n.column(bt, colorIdx, pc, s, true))
 			}
-			occupied := to.colors[colorIdx] &^ from.colors[colorIdx]
+			occupied := to.Colors[colorIdx] &^ from.Colors[colorIdx]
 			for occupied != 0 {
-				s := occupied.popLsb()
-				pc := to.squares[s]
+				s := popLsb(&occupied)
+				pc := to.Squares[s]
 				addColumn(&acc.white, n.column(wt, colorIdx, pc, s, false))
 				addColumn(&acc.black, n.column(bt, colorIdx, pc, s, true))
 			}
@@ -285,17 +329,17 @@ func (n *nnueNetwork) update(acc *nnueAccumulator, from, to *position) {
 
 // diffSide applies the piece-placement delta from `from` to `to` to a single perspective within one
 // unchanged king bucket (used for the non-crossing perspective when the other king crossed a bucket).
-func (n *nnueNetwork) diffSide(side *[nnueHiddenSize]int16, from, to *position, bucket int, blackPersp bool) {
-	for colorIdx := int(white); colorIdx <= int(black); colorIdx++ {
-		vacated := from.colors[colorIdx] &^ to.colors[colorIdx]
+func (n *Network) diffSide(side *[nnueHiddenSize]int16, from, to *Board, bucket int, blackPersp bool) {
+	for colorIdx := 0; colorIdx <= 1; colorIdx++ {
+		vacated := from.Colors[colorIdx] &^ to.Colors[colorIdx]
 		for vacated != 0 {
-			s := vacated.popLsb()
-			subColumn(side, n.column(bucket, colorIdx, from.squares[s], s, blackPersp))
+			s := popLsb(&vacated)
+			subColumn(side, n.column(bucket, colorIdx, from.Squares[s], s, blackPersp))
 		}
-		occupied := to.colors[colorIdx] &^ from.colors[colorIdx]
+		occupied := to.Colors[colorIdx] &^ from.Colors[colorIdx]
 		for occupied != 0 {
-			s := occupied.popLsb()
-			addColumn(side, n.column(bucket, colorIdx, to.squares[s], s, blackPersp))
+			s := popLsb(&occupied)
+			addColumn(side, n.column(bucket, colorIdx, to.Squares[s], s, blackPersp))
 		}
 	}
 }
@@ -314,78 +358,42 @@ func nnueDequant(output int64, bias int16) int {
 	return int(output)
 }
 
-// evaluateExact is the exact int16 SCReLU forward pass — the reference evaluator. Returns the
-// score in centipawns from the side-to-move's perspective. The side-to-move accumulator feeds the
-// first half of the output layer.
-func (n *nnueNetwork) evaluateExact(acc *nnueAccumulator, sideToMove color) int {
-	stm, ntm := &acc.white, &acc.black
-	if sideToMove == black {
-		stm, ntm = &acc.black, &acc.white
+// EvaluateExact is the exact int16 SCReLU forward pass — the reference evaluator. Returns the score
+// in centipawns from the side-to-move's perspective (stm is the colour index, 0 white / 1 black).
+// The side-to-move accumulator feeds the first half of the output layer.
+func (n *Network) EvaluateExact(acc *Accumulator, stm int) int {
+	s, o := &acc.white, &acc.black
+	if stm == 1 {
+		s, o = &acc.black, &acc.white
 	}
-	return nnueDequant(outputDot(stm, ntm, n.outputWeights), n.outputBias)
+	return nnueDequant(outputDot(s, o, n.outputWeights), n.outputBias)
 }
 
-// evaluateExactPosition refreshes an accumulator for pos and returns the exact evaluation.
-// Diagnostic/reference helper; the search maintains an accumulator incrementally instead.
-func (n *nnueNetwork) evaluateExactPosition(pos *position) int {
-	var acc nnueAccumulator
-	n.refresh(&acc, pos)
-	return n.evaluateExact(&acc, pos.colorToMove)
-}
-
-// evaluateInt8 is the int8 output-layer forward pass — the search's hot-path evaluator (mirrors the C++
-// Network::Evaluate). Activations are requantised to uint8 (SCReLU >> nnueInt8Shift) and the output
-// weights to int8; the dot then scales back by outputWScale * 2^shift before dequant. It is ~faster than
-// the exact int16 dot at a small (~<=40 cp) deviation from evaluateExact, which the search tolerates.
-func (n *nnueNetwork) evaluateInt8(acc *nnueAccumulator, sideToMove color) int {
-	stm, ntm := &acc.white, &acc.black
-	if sideToMove == black {
-		stm, ntm = &acc.black, &acc.white
+// EvaluateInt8 is the int8 output-layer forward pass — the search's hot-path evaluator (mirrors the
+// C++ Network::Evaluate). Activations are requantised to uint8 (SCReLU >> nnueInt8Shift) and the
+// output weights to int8; the dot then scales back by outputWScale * 2^shift before dequant. Faster
+// than the exact int16 dot at a small (~<=40 cp) deviation from EvaluateExact, which the search
+// tolerates. stm is the colour index (0 white / 1 black).
+func (n *Network) EvaluateInt8(acc *Accumulator, stm int) int {
+	s, o := &acc.white, &acc.black
+	if stm == 1 {
+		s, o = &acc.black, &acc.white
 	}
-	dot := n.int8OutputDot(stm, ntm)
+	dot := n.int8OutputDot(s, o)
 	output := dot * int64(n.outputWScale) * (1 << nnueInt8Shift)
 	return nnueDequant(output, n.outputBias)
 }
 
-// nnueSearchClamp keeps a returned NNUE evaluation strictly inside the search's non-mate band, so a
-// large eval can never be mistaken for a forced win (winThreshold) or collide with mate scores.
-const nnueSearchClamp = winThreshold - 1000
-
-// clampEvalToBand clamps a raw NNUE score into the search's non-mate band.
-func clampEvalToBand(score int) int {
-	if score > nnueSearchClamp {
-		return nnueSearchClamp
-	}
-	if score < -nnueSearchClamp {
-		return -nnueSearchClamp
-	}
-	return score
-}
-
-// searchEvalAcc evaluates from a maintained accumulator and clamps into the search's eval band.
-// This is the hot-path evaluator used by the search — the int8 output layer, matching the C++ engine.
-func (n *nnueNetwork) searchEvalAcc(acc *nnueAccumulator, stm color) int {
-	return clampEvalToBand(n.evaluateInt8(acc, stm))
-}
-
-// searchEval evaluates pos with a full accumulator refresh (used where no maintained accumulator is
-// available); the search itself uses searchEvalAcc with the incrementally-maintained accumulator.
-func (n *nnueNetwork) searchEval(pos *position) int {
-	var acc nnueAccumulator
-	n.refresh(&acc, pos)
-	return clampEvalToBand(n.evaluateInt8(&acc, pos.colorToMove))
-}
-
 var (
-	defaultNet     *nnueNetwork
+	defaultNet     *Network
 	defaultNetOnce sync.Once
 )
 
-// loadEmbeddedNet parses the embedded net once and caches the read-only result for reuse across
-// games (e.g. repeated NewGame calls in tests); returns nil if the embedded net fails to load.
-func loadEmbeddedNet() *nnueNetwork {
+// Embedded parses the embedded net once and caches the read-only result for reuse across games
+// (e.g. repeated NewGame calls in tests); returns nil if the embedded net fails to load.
+func Embedded() *Network {
 	defaultNetOnce.Do(func() {
-		net, err := loadNNUENetwork(embeddedNet)
+		net, err := Load(embeddedNet)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "info string NNUE: %v\n", err)
 			return
@@ -393,30 +401,4 @@ func loadEmbeddedNet() *nnueNetwork {
 		defaultNet = net
 	})
 	return defaultNet
-}
-
-// EnableNNUE (re)installs the embedded NNUE network as this game's evaluator, replacing any net loaded
-// via EvalFile. NewGame already installs it, so this is only needed to revert to the embedded net.
-// Returns an error if the embedded net is unusable.
-func (game *Game) EnableNNUE() error {
-	net := loadEmbeddedNet()
-	if net == nil {
-		return fmt.Errorf("nnue: embedded net unavailable")
-	}
-	game.nnue = net
-	game.evalTable.clear() // cached scores are net-dependent
-	return nil
-}
-
-// LoadNNUEFile loads an external PSN1 net from disk and installs it as this game's evaluator,
-// replacing the embedded net. Returns an error (leaving the current evaluator unchanged) if the file
-// is missing or incompatible with this build.
-func (game *Game) LoadNNUEFile(path string) error {
-	net, err := loadNNUENetworkFile(path)
-	if err != nil {
-		return err
-	}
-	game.nnue = net
-	game.evalTable.clear() // cached scores are net-dependent
-	return nil
 }

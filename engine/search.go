@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"pawnstar-go/engine/nnue"
 )
 
 // hashStackEntry packs a position's Zobrist hash (top 56 bits) and its half-move clock (low 8 bits) into a
@@ -60,7 +62,7 @@ type searchState struct {
 	// valid ancestor + forward updates) only when an eval actually reads it (on eval-cache miss), so
 	// cut-off nodes never pay for it. undoMove is free: ancestors stay valid, and the popped depth is
 	// re-invalidated by the next playMove into that slot. Both slices are nil when nnue is disabled.
-	accStack []nnueAccumulator
+	accStack []nnue.Accumulator
 	accValid []bool
 }
 
@@ -78,9 +80,10 @@ func newSearchState(hs []hashStackEntry, startPos *position, game *Game) *search
 	}
 	// Seed the current position's accumulator (depth 0); deeper accumulators are computed on demand.
 	// accStack grows lazily to the search depth so construction stays cheap.
-	ss.accStack = make([]nnueAccumulator, 1, 8)
+	ss.accStack = make([]nnue.Accumulator, 1, 8)
 	ss.accValid = make([]bool, 1, maxPly+8)
-	game.nnue.refresh(&ss.accStack[0], &ss.posStack[0])
+	rootBoard := ss.posStack[0].nnueBoard()
+	game.nnue.Refresh(&ss.accStack[0], &rootBoard)
 	ss.accValid[0] = true
 	return ss
 }
@@ -107,7 +110,7 @@ func (ss *searchState) currentPosition() *position {
 // (invalid) entries and happens only when the search first reaches a new maximum depth.
 func (ss *searchState) ensureAccDepth(d int) {
 	for len(ss.accStack) <= d {
-		ss.accStack = append(ss.accStack, nnueAccumulator{})
+		ss.accStack = append(ss.accStack, nnue.Accumulator{})
 		ss.accValid = append(ss.accValid, false)
 	}
 }
@@ -123,17 +126,23 @@ func (ss *searchState) invalidateAcc(d int) {
 // time (copy the parent accumulator, apply the piece delta). Called only on an eval-cache miss, so a
 // node that never evaluates never triggers any accumulator work. accValid[0] is seeded true at
 // construction, so the backward walk always terminates.
-func (ss *searchState) currentAccumulator() *nnueAccumulator {
+func (ss *searchState) currentAccumulator() *nnue.Accumulator {
 	d := len(ss.posStack) - 1
 	ss.ensureAccDepth(d)
 	k := d
 	for k > 0 && !ss.accValid[k] {
 		k--
 	}
-	for j := k + 1; j <= d; j++ {
-		ss.accStack[j] = ss.accStack[j-1]
-		ss.game.nnue.update(&ss.accStack[j], &ss.posStack[j-1], &ss.posStack[j])
-		ss.accValid[j] = true
+	if k < d {
+		// Chain the board views forward so each position converts exactly once per catch-up sweep.
+		from := ss.posStack[k].nnueBoard()
+		for j := k + 1; j <= d; j++ {
+			to := ss.posStack[j].nnueBoard()
+			ss.accStack[j] = ss.accStack[j-1]
+			ss.game.nnue.Update(&ss.accStack[j], &from, &to)
+			ss.accValid[j] = true
+			from = to
+		}
 	}
 	return &ss.accStack[d]
 }

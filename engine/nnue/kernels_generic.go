@@ -1,6 +1,6 @@
 //go:build !(amd64 && goexperiment.simd) && !arm64
 
-package engine
+package nnue
 
 // Scalar accumulator column kernels: the portable fallback for targets without a hand-written
 // vectorised addColumn/subColumn. arm64 supplies NEON versions in nnue_kernels_arm64.{go,s}; the
