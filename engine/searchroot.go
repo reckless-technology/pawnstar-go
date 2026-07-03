@@ -62,7 +62,16 @@ func searchRootNode(game *Game) move {
 	// new search.
 	game.transpositionTable.age()
 
-	ss := newSearchStateFromGame(game)
+	// Reuse the main thread's searchState across searches (helpers below always build fresh): the
+	// ~1 MiB history table and continuation-history slice are recycled instead of re-allocated per
+	// `go`. resetForSearch restores exact fresh-construction state, so behaviour is unchanged.
+	ss := game.mainSearchState
+	if ss == nil {
+		ss = newSearchStateFromGame(game)
+		game.mainSearchState = ss
+	} else {
+		ss.resetForSearch()
+	}
 
 	// Initial shallow pass to get move ordering before deepening.
 	var initPV variation

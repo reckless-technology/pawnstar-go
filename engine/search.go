@@ -59,39 +59,54 @@ type searchState struct {
 	accValid []bool
 }
 
-// newSearchState is the private constructor used by newSearchStateFromGame.  hs is the caller's
-// pre-built hashStack (ownership transfers).  startPos is the single seed entry for posStack.
-func newSearchState(hs []hashStackEntry, startPos *position, game *Game) *searchState {
-	ps := make([]position, 1, maxPly)
-	ps[0] = *startPos
+// newSearchStateFromGame creates a searchState for one search thread. posStack is seeded with only
+// the current position; hashStack is built from the game's full position history so that
+// draw-by-repetition detection can look back through the complete game.
+func newSearchStateFromGame(game *Game) *searchState {
 	ss := &searchState{
-		posStack:            ps,
-		hashStack:           hs,
 		game:                game,
+		posStack:            make([]position, 1, maxPly),
 		continuationHistory: make([]int16, contKeys*contKeys),
-		dbg:                 &dbgx, // main thread / single-threaded default; helper threads get their own
+		// Seed the current position's accumulator (depth 0); deeper accumulators are computed on
+		// demand — accStack grows lazily to the search depth so construction stays cheap.
+		accStack: make([]nnue.Accumulator, 1, 8),
+		accValid: make([]bool, 1, maxPly+8),
+		dbg:      &dbgx, // main thread / single-threaded default; helper threads get their own
 	}
-	// Seed the current position's accumulator (depth 0); deeper accumulators are computed on demand.
-	// accStack grows lazily to the search depth so construction stays cheap.
-	ss.accStack = make([]nnue.Accumulator, 1, 8)
-	ss.accValid = make([]bool, 1, maxPly+8)
-	rootBoard := ss.posStack[0].nnueBoard()
-	game.nnue.Refresh(&ss.accStack[0], &rootBoard)
-	ss.accValid[0] = true
+	ss.resetForSearch()
 	return ss
 }
 
-// newSearchStateFromGame creates a searchState for the main (serial) search.
-// posStack is seeded with only the current position.  hashStack is built from
-// the game's full position history so that draw-by-repetition detection can
-// look back through the complete game.
-func newSearchStateFromGame(game *Game) *searchState {
+// resetForSearch restores the exact freshly-constructed state so a searchState can be reused across
+// searches (the main thread's lives on Game to avoid re-allocating the ~1 MiB history table and the
+// continuation-history slice every `go`): rebuild hashStack from the game history, reseed posStack
+// with the current position, zero every per-search heuristic table, and refresh the root NNUE
+// accumulator. Reuse MUST be indistinguishable from fresh construction — the golden bench signature
+// (which reuses the main state across its 16 positions) enforces this bit-for-bit.
+func (ss *searchState) resetForSearch() {
+	game := ss.game
 	n := len(game.posStack)
-	hs := make([]hashStackEntry, n, n+maxPly)
-	for i, pos := range game.posStack {
-		hs[i] = packHashStack(pos.hash, pos.halfMove)
+	if cap(ss.hashStack) < n+maxPly {
+		ss.hashStack = make([]hashStackEntry, n, n+maxPly)
+	} else {
+		ss.hashStack = ss.hashStack[:n]
 	}
-	return newSearchState(hs, &game.posStack[n-1], game)
+	for i := range game.posStack {
+		ss.hashStack[i] = packHashStack(game.posStack[i].hash, game.posStack[i].halfMove)
+	}
+	ss.posStack = ss.posStack[:1]
+	ss.posStack[0] = game.posStack[n-1]
+	ss.killers = [maxPly][2]move{}
+	ss.history = historyTable{}
+	ss.countermoves = [contKeys]move{}
+	clear(ss.continuationHistory)
+	ss.nodeCount = 0
+	ss.seldepth = 0
+	ss.accStack = ss.accStack[:1]
+	ss.accValid = ss.accValid[:1]
+	rootBoard := ss.posStack[0].nnueBoard()
+	game.nnue.Refresh(&ss.accStack[0], &rootBoard)
+	ss.accValid[0] = true
 }
 
 // currentPosition returns a pointer to the current (deepest) position on the stack.
