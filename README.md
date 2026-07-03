@@ -132,7 +132,7 @@ The search uses **Lazy SMP** (as in the C++ engine): `searchRootNode` runs `thre
 
 #### searchState
 
-The search is split by layer — per-thread state in [engine/search.go](engine/search.go), the root driver in [engine/rootsearch.go](engine/rootsearch.go), the main recursion in [engine/alphabeta.go](engine/alphabeta.go), quiescence in [engine/quiescence.go](engine/quiescence.go), move ordering in [engine/moveorder.go](engine/moveorder.go). All recursive search functions take `*searchState` rather than `*Game` directly:
+The search is split by layer — per-thread state in [engine/search.go](engine/search.go), the root driver in [engine/searchroot.go](engine/searchroot.go), the main recursion in [engine/searchalphabeta.go](engine/searchalphabeta.go), quiescence in [engine/quiescence.go](engine/quiescence.go), move ordering in [engine/moveorder.go](engine/moveorder.go). All recursive search functions take `*searchState` rather than `*Game` directly:
 
 ```
 searchState

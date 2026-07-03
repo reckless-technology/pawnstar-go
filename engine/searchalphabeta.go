@@ -1,7 +1,7 @@
 package engine
 
 // The main recursive alpha-beta search (PVS + the pruning/reduction stack ported from the C++
-// Pawnstar). The root driver lives in rootsearch.go, the capture resolver in quiescence.go, the
+// Pawnstar). The root driver lives in searchroot.go, the capture resolver in quiescence.go, the
 // move-ordering heuristics in moveorder.go, and the per-thread search state in search.go.
 
 import "time"
