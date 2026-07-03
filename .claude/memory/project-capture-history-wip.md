@@ -11,10 +11,11 @@ metadata:
 
 **Why uncommitted:** the Go golden test (`benchGoldenNodes` = 7007401) fails by design until the SPRT justifies adoption. **On SPRT pass:** bump `benchGoldenNodes` to 7295483, update the signature mentions in CLAUDE.md/README (+ [[project-cross-engine-bit-parity]] memory), commit Go (push ok) and C++ (commit; push only when told), and re-verify cross-engine bench. **On SPRT fail:** revert both working trees, record the negative result here.
 
-**Running on the Mac (background, chained by scratchpad/match_chain.sh):**
-1. Go-vs-C++ **parity match** at 10+0.1 (Threads=1, Hash=64 both, C++ = DEBUGX-off release build `pawnstar/build-release/pawnstar_0_13_606`), stopping at ~300 games.
-2. Then the **capture-history SPRT**: `TC=10+0.1 CONCURRENCY=8 tools/sprt.sh ./pawnstar-go ./pawnstar-go-baseline 500`, bounds [0,10].
-Results accumulate in `~/pawnstar_nnue/results_summary.txt` (+ full logs `go_vs_cpp_10+0.1.log`, `caphist_sprt.log`).
+**PARITY MATCH RESULT (2026-07-02, 300 games @ 10+0.1, Threads=1 Hash=64 both, C++ = DEBUGX-off release):
+Go +5.79 ± 23.72 Elo (50.83%, W81 L76 D143) — statistical parity, point estimate in Go's favor.**
+The arm64 NEON work closed the playing-strength gap (history: −62 → −32 on amd64 → +6±24 on arm64).
+
+**Still running:** the **capture-history SPRT** (`TC=10+0.1 CONCURRENCY=8 tools/sprt.sh ./pawnstar-go ./pawnstar-go-baseline 500`, bounds [0,10]), auto-launched by the chain. Results accumulate in `~/pawnstar_nnue/results_summary.txt` (+ `caphist_sprt.log`).
 
 **Harness (set up this session):** fastchess built from source → `~/.local/bin/fastchess`; openings `~/pawnstar_nnue/openings.epd` → symlink to `UHO_Lichess_4852_v1.epd` (downloaded from official-stockfish/books; the Linux box's original file was unavailable — note if strict continuity with old SPRT numbers matters). Baseline binary `./pawnstar-go-baseline` = 7,007,401 build. **Gotcha found: a default C++ cmake build has DEBUGX=ON (~8% slower, bench 1.15 vs 1.24 Mnps release) — always compare against `-DPAWNSTAR_DEBUGX=OFF`.** True arm64 speed ratio vs release C++ is ~0.91×, not the ~0.98× recorded against the DEBUGX build in [[reference-pawnstar-perf-measurement]].
 
