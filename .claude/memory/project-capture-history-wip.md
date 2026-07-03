@@ -31,3 +31,19 @@ The arm64 NEON work closed the playing-strength gap (history: −62 → −32 on
 **Harness (set up this session):** fastchess built from source → `~/.local/bin/fastchess`; openings `~/pawnstar_nnue/openings.epd` → symlink to `UHO_Lichess_4852_v1.epd` (downloaded from official-stockfish/books; the Linux box's original file was unavailable — note if strict continuity with old SPRT numbers matters). Baseline binary `./pawnstar-go-baseline` = 7,007,401 build. **Gotcha found: a default C++ cmake build has DEBUGX=ON (~8% slower, bench 1.15 vs 1.24 Mnps release) — always compare against `-DPAWNSTAR_DEBUGX=OFF`.** True arm64 speed ratio vs release C++ is ~0.91×, not the ~0.98× recorded against the DEBUGX build in [[reference-pawnstar-perf-measurement]].
 
 v0.1.166 was released earlier this session (release pipeline verified end-to-end).
+
+
+---
+
+**QUEUED NEXT (2026-07-03, user-approved): butterfly history experiment.** Replace the per-ply main
+history `counts[maxPly][4096]` with a standard **butterfly table `counts[2][4096]` keyed by
+side-to-move** (from-to). Rationale: per-ply fragments the cross-tree statistics history exists to
+pool — sparse near the root where positions are coherent, saturated-but-unselective deep; ply parity
+was only working as an accidental colour proxy (and null-move subtrees flip parity, contaminating it) —
+the butterfly makes colour explicit. 32× smaller (1 MiB → 32 KB/thread). **Coupled change (required):**
+the LMR tier-3 gate `history.count(ply,m)==0` loses meaning post-pooling; replace with a pure lateness
+gate extending the doubling ladder: −1 at i>3 (depth>2), −2 at i>6 (depth>3), **−3 at i>12** (inside
+the depth>3 branch). Go: historyTable→[2][4096]uint32, recordGoodMove/count take stm colour
+(ss.currentPosition().colorToMove); C++ mirror: kTableSize=2*4096, RecordGoodMove/GetCount take colour.
+Same workflow: implement both engines on the settled base (after the variant-2 verdict), verify
+bit-identical bench signature + depth-12 PAWNSTAR_BENCH_DEBUG, SPRT [0,5] at 10+0.1 vs the new baseline.
