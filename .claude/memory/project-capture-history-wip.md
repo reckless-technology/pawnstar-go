@@ -1,11 +1,22 @@
 ---
 name: project-capture-history-wip
-description: "IN FLIGHT: capture history implemented in BOTH engines, uncommitted, awaiting SPRT; matches chained on the Mac"
+description: "RESULT: capture-history SEE-tiebreak variant tested and REJECTED (-6.7 Elo over 2700 games); reverted; design notes for the next attempt"
 metadata:
   type: project
 ---
 
-**WIP as of 2026-07-02 late evening — code UNCOMMITTED in both repos, awaiting SPRT.**
+**CONCLUDED 2026-07-03: REJECTED and reverted.** Pooled result over two 10+0.1 runs (1000 + 1700 games):
+**2700 games, W1184 L1236 D280, 49.04% → −6.7 Elo, 95% CI [−19.1, +5.7]**; the extension run alone hit the
+SPRT H0-accept (LLR −2.60 at 1658 games, bounds [0,10]). The first 1000 games read +6.3 ± 18.5 — a noise
+head-fake; the extension caught it. Both working trees reverted; both engines verified back at the golden
+7,007,401 signature. **Lesson for the next attempt:** the [0,99] within-SEE-class tiebreak is too timid to
+gain and adds enough ordering churn to cost a few Elo — try the aggressive form instead (capture history as
+a first-class ordering term across SEE classes, and/or gravity-style bonus+malus updates), and use tighter
+SPRT bounds ([0,5]) or plan ≥3000 games for small effects. The implementation below is known bit-identical
+across engines (both benched 7,295,483, 659/659 diagnostics identical) — the dual-implementation workflow
+itself is proven and repeatable.
+
+Original implementation notes (for reproducing the next variant):
 
 **Capture history** (first strength feature since bit-parity was reached) is implemented identically in pawnstar-go (working tree, on top of `fbf0844`) and pawnstar C++ (`src/search_state.h`, on top of `fca64ca`): per-thread `captureHistory[move.pieceTo()*7 + captured]` int16, saturating ++ at 16384 on good captures (recorded beside continuation history in recordGood / the 5 C++ RecordContinuationHistory sites — NOT in qsearch, matching both engines), used in scoreAndSortMoves/ScoreAndSortMoves as a **[0,99]-clamped bonus added to the SEE sort** (SEE quantum is 100 cp so it refines order only *within* a SEE class). **Verified bit-identical across engines: both bench 7,295,483** (old signature 7,007,401), and depth-12 `PAWNSTAR_BENCH_DEBUG` output identical line-for-line (659 lines). C++ side is clang-format-18 clean.
 
