@@ -1,6 +1,6 @@
 //go:build arm64
 
-package engine
+package nnue
 
 // outputDotInt8Asm is the hand-written NEON int8 output dot (nnue_dot_arm64.s), the arm64 analogue of the
 // amd64 AVX2 kernel. Per 8 int16 lanes it SCReLU-requantises the accumulator to a uint8-range activation
@@ -17,6 +17,6 @@ func outputDotInt8Asm(stm, ntm *[nnueHiddenSize]int16, w8 []int16) int64
 
 // int8OutputDot is the search's int8 output dot — the hand-written NEON kernel on arm64. (The scalar
 // outputDotInt8 is retained as the bit-identical reference for TestOutputDotInt8Asm.)
-func (n *nnueNetwork) int8OutputDot(stm, ntm *[nnueHiddenSize]int16) int64 {
+func (n *Network) int8OutputDot(stm, ntm *[nnueHiddenSize]int16) int64 {
 	return outputDotInt8Asm(stm, ntm, n.outputWeightsI8)
 }

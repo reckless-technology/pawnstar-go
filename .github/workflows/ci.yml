@@ -98,7 +98,7 @@ jobs:
           if-no-files-found: error
 
   # macOS arm64 (Apple Silicon). amd64-only files (archsimd + the AVX2 asm) are build-tag-excluded here;
-  # arm64 builds the hand-written NEON NNUE kernels (nnue_kernels_arm64.s / nnue_dot_arm64.s) — no AVX2 check.
+  # arm64 builds the hand-written NEON NNUE kernels (engine/nnue/kernels_arm64.s + dot_arm64.s) — no AVX2 check.
   artifact-macos:
     name: artifact (macos arm64)
     runs-on: macos-latest
@@ -151,8 +151,8 @@ jobs:
           if-no-files-found: error
 
   # Documentation bundle + source archive, versioned like the binaries. The docs zip holds the markdown
-  # docs plus `go doc -all` for the engine package twice: engine-api.txt (the exported API) and
-  # engine-internals.txt (-u, every documented internal function/type). The source tar.gz is a clean
+  # docs plus `go doc -all` for the engine and engine/nnue packages, each twice: *-api.txt (the exported
+  # API) and *-internals.txt (-u, every documented internal function/type). The source tar.gz is a clean
   # `git archive` of the built commit (no .git). These need no test gate of their own: the Release
   # workflow only promotes runs whose overall conclusion is success, so bundles from a red run are
   # never released. Keep MAJOR/MINOR in sync with engine/version.go + the Makefile.
@@ -174,6 +174,8 @@ jobs:
           cp README.md CLAUDE.md docs-bundle/
           go doc -all ./engine > docs-bundle/engine-api.txt
           go doc -all -u ./engine > docs-bundle/engine-internals.txt
+          go doc -all ./engine/nnue > docs-bundle/nnue-api.txt
+          go doc -all -u ./engine/nnue > docs-bundle/nnue-internals.txt
           ( cd docs-bundle && zip -rq "../pawnstar-go-$ver-docs.zip" . )
       - name: Source archive
         run: |

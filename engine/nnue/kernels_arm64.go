@@ -1,6 +1,6 @@
 //go:build arm64
 
-package engine
+package nnue
 
 // arm64 NEON accumulator column kernels. addColumn/subColumn are hand-written 128-bit NEON in
 // nnue_kernels_arm64.s (VADD/VSUB over int16 lanes), 32 int16 per iteration. Go's arm64 assembler

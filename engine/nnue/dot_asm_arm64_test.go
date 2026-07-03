@@ -1,6 +1,6 @@
 //go:build arm64
 
-package engine
+package nnue
 
 import (
 	"math/rand"
@@ -11,7 +11,7 @@ import (
 // (itself gated bit-identical to the int16 reference by TestNNUEInt8) over random accumulators —
 // including values below 0 and above QA so the SQXTUN clamp is exercised on both ends.
 func TestOutputDotInt8Asm(t *testing.T) {
-	net := loadEmbeddedNet()
+	net := Embedded()
 	if net == nil {
 		t.Fatal("no embedded net")
 	}

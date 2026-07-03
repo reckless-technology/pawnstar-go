@@ -1,6 +1,6 @@
 //go:build amd64 && goexperiment.simd
 
-package engine
+package nnue
 
 import (
 	"math/rand"
@@ -11,7 +11,7 @@ import (
 // (itself gated bit-identical to scalar) over random accumulators — including values below 0 and above QA
 // so the SCReLU clamp is exercised on both ends.
 func TestOutputDotInt8Asm(t *testing.T) {
-	net := loadEmbeddedNet()
+	net := Embedded()
 	if net == nil {
 		t.Fatal("no embedded net")
 	}

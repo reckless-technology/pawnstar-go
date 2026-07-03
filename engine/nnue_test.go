@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"pawnstar-go/engine/nnue"
 )
 
 // TestNNUEReference cross-checks the scalar int16 EvaluateExact forward pass against the trainer's
@@ -17,7 +19,7 @@ import (
 func TestNNUEReference(t *testing.T) {
 	const tolerance = 2 // integer-quantisation rounding vs bullet; mirrors the C++ test_nnue bound
 
-	net, err := loadNNUENetworkFile("nnue/pawnstar-v12.bin")
+	net, err := nnue.LoadFile("nnue/pawnstar-v12.bin")
 	if err != nil {
 		t.Fatalf("load net: %v", err)
 	}
@@ -43,7 +45,7 @@ func TestNNUEReference(t *testing.T) {
 		}
 
 		pos := positionFromFen(fen)
-		got := net.evaluateExactPosition(&pos)
+		got := evaluateExactPosition(net, &pos)
 		diff := got - expected
 		if diff < 0 {
 			diff = -diff
@@ -73,7 +75,7 @@ func TestNNUEReference(t *testing.T) {
 func TestNNUEInt8(t *testing.T) {
 	const int8Bound = 40 // matches C++ kInt8Bound; the measured max is far smaller
 
-	net, err := loadNNUENetworkFile("nnue/pawnstar-v12.bin")
+	net, err := nnue.LoadFile("nnue/pawnstar-v12.bin")
 	if err != nil {
 		t.Fatalf("load net: %v", err)
 	}
@@ -93,10 +95,11 @@ func TestNNUEInt8(t *testing.T) {
 		}
 		fen := strings.TrimSpace(line[:bar])
 		pos := positionFromFen(fen)
-		var acc nnueAccumulator
-		net.refresh(&acc, &pos)
-		i8 := net.evaluateInt8(&acc, pos.colorToMove)
-		ref := net.evaluateExact(&acc, pos.colorToMove)
+		b := pos.nnueBoard()
+		var acc nnue.Accumulator
+		net.Refresh(&acc, &b)
+		i8 := net.EvaluateInt8(&acc, int(pos.colorToMove))
+		ref := net.EvaluateExact(&acc, int(pos.colorToMove))
 		dev := i8 - ref
 		if dev < 0 {
 			dev = -dev
@@ -153,11 +156,21 @@ func TestNNUEIncremental(t *testing.T) {
 	}
 }
 
+// evaluateExactPosition refreshes a scratch accumulator for pos and returns the exact int16
+// reference evaluation (test helper; the search maintains its accumulator incrementally).
+func evaluateExactPosition(net *nnue.Network, pos *position) int {
+	b := pos.nnueBoard()
+	var acc nnue.Accumulator
+	net.Refresh(&acc, &b)
+	return net.EvaluateExact(&acc, int(pos.colorToMove))
+}
+
 // accsEqual reports whether the maintained (caught-up) accumulator for the current node matches a
 // full refresh of the current position.
-func accsEqual(net *nnueNetwork, ss *searchState) (bool, *nnueAccumulator, *nnueAccumulator) {
-	fresh := &nnueAccumulator{}
-	net.refresh(fresh, ss.currentPosition())
+func accsEqual(net *nnue.Network, ss *searchState) (bool, *nnue.Accumulator, *nnue.Accumulator) {
+	fresh := &nnue.Accumulator{}
+	b := ss.currentPosition().nnueBoard()
+	net.Refresh(fresh, &b)
 	got := ss.currentAccumulator()
 	return *fresh == *got, fresh, got
 }
@@ -165,9 +178,9 @@ func accsEqual(net *nnueNetwork, ss *searchState) (bool, *nnueAccumulator, *nnue
 // findAccMismatch walks all legal move sequences to the given depth, forcing a catch-up and comparing
 // against a full refresh at every node and after every undo. Returns "" if all match, else a
 // description (move path + lane-diff counts) of the first mismatch found.
-func findAccMismatch(net *nnueNetwork, ss *searchState, depth int) string {
+func findAccMismatch(net *nnue.Network, ss *searchState, depth int) string {
 	if ok, fresh, got := accsEqual(net, ss); !ok {
-		dw, db := accDiffCount(fresh, got)
+		dw, db := nnue.DiffLanes(fresh, got)
 		return fmt.Sprintf("depth %d: accumulator differs (%d white / %d black lanes)", depth, dw, db)
 	}
 	if depth == 0 {
@@ -189,7 +202,7 @@ func findAccMismatch(net *nnueNetwork, ss *searchState, depth int) string {
 // findDeepCatchUpMismatch descends the first legal move at each node all the way to the leaf WITHOUT
 // ever evaluating, then forces a single multi-ply catch-up at the leaf and compares to a full refresh.
 // This exercises the deferred path where several plies are brought current in one sweep.
-func findDeepCatchUpMismatch(net *nnueNetwork, ss *searchState, depth int) string {
+func findDeepCatchUpMismatch(net *nnue.Network, ss *searchState, depth int) string {
 	played := 0
 	for d := depth; d > 0; d-- {
 		moves := ss.currentPosition().generateLegalMoves()
@@ -199,25 +212,12 @@ func findDeepCatchUpMismatch(net *nnueNetwork, ss *searchState, depth int) strin
 		ss.playMove(moves[0]) // no currentAccumulator call here — leaves intermediate depths invalid
 		played++
 	}
-	fresh := &nnueAccumulator{}
-	net.refresh(fresh, ss.currentPosition())
+	fresh := &nnue.Accumulator{}
+	b := ss.currentPosition().nnueBoard()
+	net.Refresh(fresh, &b)
 	if got := ss.currentAccumulator(); *fresh != *got { // single sweep catches up all `played` plies
-		dw, db := accDiffCount(fresh, got)
+		dw, db := nnue.DiffLanes(fresh, got)
 		return fmt.Sprintf("deep catch-up over %d plies differs (%d white / %d black lanes)", played, dw, db)
 	}
 	return ""
-}
-
-// accDiffCount returns how many white-perspective and black-perspective lanes differ.
-func accDiffCount(a, b *nnueAccumulator) (int, int) {
-	dw, db := 0, 0
-	for i := 0; i < nnueHiddenSize; i++ {
-		if a.white[i] != b.white[i] {
-			dw++
-		}
-		if a.black[i] != b.black[i] {
-			db++
-		}
-	}
-	return dw, db
 }
