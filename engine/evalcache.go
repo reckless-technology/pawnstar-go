@@ -11,14 +11,13 @@ import "sync/atomic"
 const hashNotFoundScore = -2345678
 
 // evalHashEntry is one lockless slot in the evaluation cache: a single 64-bit atomic packing the top
-// 48 bits of the position hash (a key check) in the high bits and a 16-bit score in the low bits. A
-// load or store is atomic with no torn value and no lock, so the cache is shared freely by all Lazy SMP
-// threads; a foreign or evicted entry fails the key check and reads as a miss, and racing writers
-// resolve to a benign last-writer-wins. Mirrors the C++ EvalCache. Because the packed score depends on
-// the loaded NNUE net, clear() must be called whenever the net changes.
-type evalHashEntry struct {
-	packed atomic.Uint64 // (hash & 0xFFFF_FFFF_FFFF_0000) | uint16(int16(score))
-}
+// 48 bits of the position hash (a key check) in the high bits and a 16-bit score in the low bits —
+// (hash & 0xFFFF_FFFF_FFFF_0000) | uint16(int16(score)). A load or store is atomic with no torn value
+// and no lock, so the cache is shared freely by all Lazy SMP threads; a foreign or evicted entry fails
+// the key check and reads as a miss, and racing writers resolve to a benign last-writer-wins. Mirrors
+// the C++ EvalCache. Because the packed score depends on the loaded NNUE net, clear() must be called
+// whenever the net changes. A plain alias: the slot needs no struct around the one atomic word.
+type evalHashEntry = atomic.Uint64
 
 // evalHashTable is a fixed-size, lockless direct-mapped cache for static evaluations. The table size
 // is a power of 2 so entries are indexed with a bitmask.
@@ -42,7 +41,7 @@ func newEvalHashTable(count int) evalHashTable {
 
 // find returns the cached score for hash, or hashNotFoundScore on a miss.
 func (t *evalHashTable) find(hash zobrist) int {
-	entry := t.entries[hash&t.mask].packed.Load()
+	entry := t.entries[hash&t.mask].Load()
 	if entry>>16 != uint64(hash)>>16 {
 		return hashNotFoundScore
 	}
@@ -53,13 +52,13 @@ func (t *evalHashTable) find(hash zobrist) int {
 func (t *evalHashTable) record(hash zobrist, score int) {
 	score = min(max(score, -evalCacheClampMax), evalCacheClampMax)
 	packed := (uint64(hash) & 0xFFFFFFFFFFFF0000) | uint64(uint16(int16(score)))
-	t.entries[hash&t.mask].packed.Store(packed)
+	t.entries[hash&t.mask].Store(packed)
 }
 
 // clear resets every entry. Call whenever the loaded NNUE net changes (the cached score depends on it),
 // since the key check keys only on the hash, not on which network produced the score.
 func (t *evalHashTable) clear() {
 	for i := range t.entries {
-		t.entries[i].packed.Store(0)
+		t.entries[i].Store(0)
 	}
 }
