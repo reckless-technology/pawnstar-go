@@ -8,3 +8,4 @@
 - [reference-go-nnue-kernel-layout](reference-go-nnue-kernel-layout.md) — NNUE kernel files/build-tags/dispatch + the 3 output-weight representations; how to slot in a new-arch SIMD kernel
 - [project-go-state-2026-07](project-go-state-2026-07.md) — handoff snapshot: pawnstar-go HEAD 9f04267, this session's commits, and where the arm64 work picks up
 - [project-capture-history-wip](project-capture-history-wip.md) — REJECTED: capture-history SEE-tiebreak, −6.7 Elo over 2700 games @10+0.1; reverted; next attempt should be the aggressive variant with [0,5] bounds
+- [reference-staged-movegen-analysis](reference-staged-movegen-analysis.md) — staged movegen analysed and rejected (legal-gen setup paid twice; pseudo-legal moves cost to try-time; ~+3-4 Elo ceiling); shared-analysis-pass split is the one sound design if revisited
