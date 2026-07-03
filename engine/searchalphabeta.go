@@ -25,7 +25,7 @@ import "time"
 //     (winning captures, killers, countermove, then history + continuation history).
 //   - Late move pruning: skip quiet moves at depth ≤ lmpMaxDepth once moveIdx ≥ lmpBase + depth².
 //   - Late move reduction (null-window, non-check): −1 from moveIdx > 3; −2 from moveIdx > 6 (depth > 3);
-//     −3 additionally when history count is zero. Re-search at full depth if the reduced search beats alpha.
+//     −3 from moveIdx > 12. Re-search at full depth if the reduced search beats alpha.
 //   - On a beta cutoff or alpha raise, recordGood credits the move to history / continuation history
 //     (and, for a quiet cutoff, killers + countermove). TT write with Cut/All/PV node type on exit.
 func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *variation, prevMove move) int {
@@ -214,7 +214,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			if depth > 3 && i > 6 {
 				ss.dbg.lateMoveReduction2++
 				childDepth--
-				if ss.history.count(ply, m) == 0 {
+				if i > 12 {
 					ss.dbg.lateMoveReduction3++
 					childDepth--
 				}

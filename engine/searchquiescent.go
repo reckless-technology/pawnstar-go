@@ -52,7 +52,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 			return searchCancelledScore
 		}
 		if score >= beta {
-			ss.history.recordGoodMove(ply, m)
+			ss.history.recordGoodMove(ss.currentPosition().colorToMove, m)
 			ss.dbg.quiescentBetaCutoffs++
 			return score
 		}
@@ -61,7 +61,7 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 			if score > alpha {
 				alpha = score
 				ss.dbg.quiescentPvChanged++
-				ss.history.recordGoodMove(ply, m)
+				ss.history.recordGoodMove(ss.currentPosition().colorToMove, m)
 			}
 		}
 	}

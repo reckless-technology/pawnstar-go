@@ -158,8 +158,13 @@ func (m move) isChecking() bool { return int64(m)&moveCheckBit != 0 }
 func (m move) withCheck() move { return move(int64(m) | moveCheckBit) }
 
 // pieceTo returns a (piece, to-square) index in [0, contKeys) used to key the countermove and
-// continuation-history tables. moveNone maps to 0 (a harmless slot). Mirrors the C++ Move::piece_to.
-func (m move) pieceTo() int { return int(m.piece())<<6 | int(m.to()) }
+// continuation-history tables. moveNone maps to 0 (a harmless slot). Mirrors the C++ Move::piece_to,
+// including its single-shift form: the piece field (bits 12–14) shifted right by moveFromShift lands
+// directly in bits 6–8 — its final position above the to-square — so one shift + in-place mask
+// replaces extracting the piece and shifting it back up.
+func (m move) pieceTo() int {
+	return int(int64(m)&moveSquareMask | (int64(m)>>moveFromShift)&(movePieceMask<<moveFromShift))
+}
 
 // fromTo returns the combined from+to index (bits 0–11) used as a hash key in
 // the history table.

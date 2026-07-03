@@ -1,6 +1,6 @@
 ---
 name: project-capture-history-wip
-description: "RESULTS: capture-history v1 (tiebreak, cap 99) REJECTED -6.7 Elo/2700g; v2 (cross-class, cap 400) REJECTED at cap +9.4 +/-10.6 LLR 1.06 no-pass + probe red flag; both reverted"
+description: "Ordering experiments 2026-07: capture-history v1+v2 REJECTED; BUTTERFLY HISTORY ADOPTED (+~7 Elo both TCs, probe -17.7%, golden now 6,888,983); probe protocol standing"
 metadata:
   type: project
 ---
@@ -71,3 +71,16 @@ huge per-position variance, 8/24 bestmoves changed): not an ordering improvement
 search — variant-1's head-fake profile. Reverted in both repos; both re-verified at 7,007,401.
 **If ever revisited:** only via a probe-clean variant (node ratio ≤ 1.00); the borderline TC result
 means a well-designed capture-history probably has a few Elo in it, but this formulation isn't it.
+
+
+---
+
+**BUTTERFLY HISTORY: ADOPTED 2026-07-03 (user decision, stopping the 12+0.12 run early).** Evidence:
+probe bench −1.7% / BK-24 @ d12 **−17.7% nodes, −21% time**; 10+0.1 3000 games **+7.8 ± 9.8**;
+12+0.12 stopped at 2140 games **+6.8 ± 11.7** (consistent ~+7 across TCs; pooled ~5140 games CI > 0).
+Adoption: golden signature **7,007,401 → 6,888,983** (benchGoldenNodes bumped); BK accepted sets
+regenerated in Go (GEN_BK — remember `-v` + tee, t.Logf is silent otherwise) — 4 positions' choices
+changed; C++ BK sets were already broad enough (24/24 untouched). Cross-language verified at depth 13:
+both engines 6,888,983 with 667/667 identical per-position bestmove/node/diagnostic lines. The Go
+pieceTo() also adopted C++'s single-shift form (identity-preserving, test-pinned). Committed in both
+repos. The first strength feature landed since bit-parity was established.

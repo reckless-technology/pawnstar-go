@@ -332,7 +332,7 @@ func TestUCIProtocol(t *testing.T) {
 // engine reports the same count; see CLAUDE.md). Any change to search, move ordering, pruning, the TT, or
 // the eval shifts this number: bump it ONLY for a deliberate, SPRT-gated engine change, never to quieten
 // the test.
-const benchGoldenNodes = "7007401"
+const benchGoldenNodes = "6888983"
 
 // TestUCIBenchDeterminism: single-threaded bench is deterministic, so two runs must agree (guards the
 // uninitialised-read class of bug that made node counts wobble) AND must equal the golden bit-parity

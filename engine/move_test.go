@@ -48,6 +48,13 @@ func TestMovePackingRoundTrip(t *testing.T) {
 	if rt := moveFromBits(m.withScore(-9).bits()); rt != m.withScore(-9) {
 		t.Error("bits/moveFromBits round-trip failed")
 	}
+
+	// pieceTo is piece*64+to (the countermove / continuation-history key), whatever its bit tricks.
+	for _, mv := range []move{m, moveNone(), moveCastling(e1, g1), movePromotion(e7, e8, queen, rook)} {
+		if got, want := mv.pieceTo(), int(mv.piece())<<6|int(mv.to()); got != want {
+			t.Errorf("pieceTo(%v) = %d, want %d", mv, got, want)
+		}
+	}
 }
 
 // TestMoveStringPromotion pins UCI notation for promotions — move.String must emit the e7e8q form

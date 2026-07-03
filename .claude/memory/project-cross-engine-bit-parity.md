@@ -1,13 +1,13 @@
 ---
 name: project-cross-engine-bit-parity
-description: "Go and C++ pawnstar are kept bit-for-bit identical at fixed depth; bench=7,007,401 is the signature"
+description: "Go and C++ pawnstar are kept bit-for-bit identical at fixed depth; bench=6,888,983 is the signature (7,007,401 before butterfly history, 2026-07-03)"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 6ae67a0a-eca5-4c78-b247-b3c77c1452d5
 ---
 
-pawnstar-go (Go, `/home/jonny/work/pawnstar-go`) is a faithful port of pawnstar (C++, `/home/jonny/work/pawnstar`, GitHub `jonny-reckless/pawnstar`). They are maintained **bit-for-bit identical at fixed depth**: the 16-position `bench` command reports the same node total — **7,007,401** — and the same per-position bestmove + node count in both engines. This is the standing faithfulness gate for any search / move-gen / eval / TT change.
+pawnstar-go (Go, `/home/jonny/work/pawnstar-go`) is a faithful port of pawnstar (C++, `/home/jonny/work/pawnstar`, GitHub `jonny-reckless/pawnstar`). They are maintained **bit-for-bit identical at fixed depth**: the 16-position `bench` command reports the same node total — **6,888,983** since the butterfly history table (2026-07-03; 7,007,401 before it) — and the same per-position bestmove + node count in both engines. Enforced by `benchGoldenNodes` in the Go UCI test. This is the standing faithfulness gate for any search / move-gen / eval / TT change.
 
 **Why:** Any divergence signals a real bug in one engine. Example (fixed 2026-07): C++ had no `kPawnSinglePush` move type, so a single pawn push was encoded as `kNonCapture` and *incremented* the reversible-move (50-move) clock instead of resetting it; since the Zobrist hash excludes the clock, `ScaleByRule50` then scaled a deep static eval differently, flipping one quiescence stand-pat cutoff at int8 resolution (C++ commit 452145e; Go was already correct).
 
