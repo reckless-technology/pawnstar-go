@@ -16,8 +16,8 @@ Point any UCI-compatible GUI (Arena, Cute Chess, etc.) at the binary — no conf
 ## Testing
 
 ```bash
-go test ./engine/ -run TestPerft -short -v        # all 131 EPD positions, depth ≤ D5, ~15s
-go test ./engine/ -run TestPerft -v               # full suite, up to D6 (slow)
+go test ./engine/ -run TestPerft -v               # all 128 EPD positions, capped at depth 5 (~12s)
+go test ./engine/ -run TestPerft -short -v        # same depth-5 cap (short no longer differs)
 go test ./engine/ -run TestPerft/002 -v           # single position by 1-based index (002 = second position)
 go test ./engine/ -run TestPerftExtra -short -v  # verify incremental Zobrist hash vs recomputed hash at every node
 go test ./engine/ -run TestSearch -short -v       # search every EPD position to depth 9; exercises TT and search
@@ -31,9 +31,9 @@ go test ./engine/ -run TestNNUEIncremental -v     # lazy accumulator == full ref
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
-Run with `GOEXPERIMENT=simd` (or `make test`) to exercise the SIMD kernels. Move generation correctness is verified by perft — counting leaf nodes to a given depth against known values. All 131 EPD positions must pass at every depth before any change is considered correct.
+Run with `GOEXPERIMENT=simd` (or `make test`) to exercise the SIMD kernels. Move generation correctness is verified by perft — counting leaf nodes to a given depth against known values. All 128 EPD positions must pass at every depth before any change is considered correct.
 
-Perft (move generation only) runs at approximately **42 Mnps**. The NNUE evaluator used in real search is slower per node but far stronger — when first ported it measured **+572 Elo** over the engine's former handcrafted evaluation in a fixed-depth self-play SPRT (146W/3L/5D); that handcrafted eval has since been removed. The C++ original reaches ~700 Mnps via BMI2 PEXT instructions. In real NNUE search the Go↔C++ speed gap is much smaller than that raw move-gen gap — search nps is dominated by evaluation, where the SIMD kernels are close to the C++ hot path. Over the 24 Bratko-Kopec positions at depth 10 (single-threaded, bit-identical search trees) the Go engine runs ~1.06 Mnps versus the C++ engine's ~1.77 Mnps — **~1.66× slower** on the amd64 machine. On **arm64 (Apple Silicon)**, after the hand-written NEON kernels, the gap is essentially closed: the 16-position `bench` (identical 7,007,401-node trees, interleaved) runs at **~1.14 Mnps vs C++ ~1.15–1.19 Mnps — parity (~0.98×)**, up 6.0× from ~190k nps when arm64 was fully scalar.
+Perft (move generation only) runs at approximately **200 Mnps** single-threaded (start position, amd64 dev machine) and is core-count-independent now that move generation is allocation-free. The NNUE evaluator used in real search is slower per node but far stronger — when first ported it measured **+572 Elo** over the engine's former handcrafted evaluation in a fixed-depth self-play SPRT (146W/3L/5D); that handcrafted eval has since been removed. The C++ original reaches ~540 Mnps on the same machine via BMI2 PEXT sliding attacks — a raw move-gen gap of ~2.7×. In real NNUE search the Go↔C++ speed gap is much smaller than that raw move-gen gap — search nps is dominated by evaluation, where the SIMD kernels are close to the C++ hot path. Over the 24 Bratko-Kopec positions at depth 10 (single-threaded, bit-identical search trees) the Go engine runs ~1.06 Mnps versus the C++ engine's ~1.77 Mnps — **~1.66× slower** on the amd64 machine. On **arm64 (Apple Silicon)**, after the hand-written NEON kernels, the gap is essentially closed: the 16-position `bench` (identical 7,007,401-node trees, interleaved) runs at **~1.14 Mnps vs C++ ~1.15–1.19 Mnps — parity (~0.98×)**, up 6.0× from ~190k nps when arm64 was fully scalar.
 
 ## Architecture
 
@@ -44,7 +44,7 @@ Perft (move generation only) runs at approximately **42 Mnps**. The NNUE evaluat
 The struct holds:
 - `pieces [7]bitboard` — indexed by piece type constant (`pawn`=1 … `king`=6; index 0 = the occupied-squares bitboard, maintained incrementally so `occupied()` is a plain load)
 - `colors [2]bitboard` — indexed by color constant (`white`=0, `black`=1)
-- `squares[64]piece` — O(1) piece lookup by square
+- `squares [64]piece` — O(1) piece lookup by square
 - `checkers bitboard` — pieces currently giving check to the side to move (refreshed by `makeMove`)
 - `hash zobrist` — Zobrist hash, maintained incrementally (recomputed from scratch only in `positionFromFen`)
 - `epSquare square` — en-passant target square, or `noSquare`
@@ -75,7 +75,7 @@ bits 41–63   score (signed 23-bit)
 
 `move.equal`/`isNone` mask to the identity bits (0–21), so the score and TT metadata never affect identity. `move(0)` is the null sentinel (`moveNone()`). `String()` outputs UCI long-algebraic notation (`e2e4`, `e7e8q`). Bits 23–63 are dual-purpose: a move-ordering sort score (`withScore`/`score`, bits 41–63) during search, or packed `{score, depth, nodeType, age}` metadata inside a transposition entry (`withTTData`/`setTTAge`). A move is only ever one or the other, so the spare bits are shared — which lets a TT cell be exactly two 64-bit words for the lockless table.
 
-Move lists are plain `[]move` slices allocated with `make([]move, 0, 64)` — no fixed-capacity struct.
+Move lists use a **stack-resident `moveList`** (a fixed `[256]move` array + count; [engine/movegen.go](engine/movegen.go)): the hot paths (`perft`, `searchAlphaBeta`, `searchQuiescent`) declare a local `var ml moveList` and call `generateLegalMovesInto`/`generateLegalCapturesInto`, so move generation is **allocation-free** (escape analysis keeps `ml` on the stack). Cold callers (UCI setup, opening book, tests) use the slice-returning `generateLegalMoves`/`generateLegalCaptures` wrappers, which copy into a right-sized heap slice. This replaced a per-node `make([]move, 0, 64)` that heap-allocated on every node.
 
 ### Attack generation
 
@@ -149,7 +149,7 @@ searchState
 └── game                *Game             pointer to shared state (TT + eval cache, clock, cancel)
 ```
 
-`hashStackEntry` stores only `hash` (8 bytes) and `halfMoveClock` (1 byte + padding = 16 bytes total), compared to 160 bytes for a full `position`, keeping the repetition scan cache-friendly. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. Only truly shared state — the lockless TT + eval cache, the read-only time control, and the atomic cancel flag — is reached through the `game *Game` pointer; the history/killers/countermove/continuation tables and the accumulator stack are all local to this `searchState`.
+`hashStackEntry` packs the Zobrist hash (top 56 bits) and the half-move clock (low 8 bits) into a **single `uint64`** — 8 bytes, versus 160 bytes for a full `position` — keeping the repetition scan cache-friendly. Repetition detection compares only the top 56 hash bits (ample for a scan window of at most ~100 plies); a zero clock byte marks an irreversible-move boundary that stops the scan. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. Only truly shared state — the lockless TT + eval cache, the read-only time control, and the atomic cancel flag — is reached through the `game *Game` pointer; the history/killers/countermove/continuation tables and the accumulator stack are all local to this `searchState`.
 
 #### Iterative deepening
 
@@ -158,7 +158,7 @@ searchState
 1. Return the opening book move if available; return immediately for forced moves (single legal move).
 2. Run an initial pass at `startDepth` to score and order moves.
 3. For each depth from `startDepth+1` to `maxPly`:
-   - Search all root moves in a single **full-window** pass `[initialAlpha, initialBeta]`: `alpha` starts at the minimum and is raised as moves improve, so PVS null-windows every move after the first. There is no aspiration window (the C++ engine tested and rejected aspiration; a fixed-depth cross-engine BK diff confirmed it was the largest Go↔C++ divergence, so Go dropped it). Combined with shared-`xorshift64star` Zobrist hashing, matched score scale, a per-move null-window check, and matched PV capture, **all 24 Bratko-Kopec positions now match the C++ reference bit-for-bit** — identical bestmove, score, node count, and PV at fixed depth (verified at depth 8 and 10, single-threaded, book off).
+   - Search all root moves in a single **full-window** pass `[initialAlpha, initialBeta]`: `alpha` starts at the minimum and is raised as moves improve, so PVS null-windows every move after the first. There is no aspiration window (the C++ engine tested and rejected aspiration; a fixed-depth cross-engine BK diff confirmed it was the largest Go↔C++ divergence, so Go dropped it). Combined with shared-`xorshift64star` Zobrist hashing, matched score scale, a per-move null-window check, and matched PV capture, **all 24 Bratko-Kopec positions now match the C++ reference bit-for-bit** — identical bestmove, score, node count, and PV at fixed depth (verified at depths 8, 10 and 12, single-threaded, book off; at depth 12 the per-position diagnostic counters — cutoffs, TT hits, prunes, reductions, extensions — are identical too).
    - Apply early-exit heuristics (Standard clock only): stop early if the best move is consistent and/or the score is stable across depths, as a fraction of the allocated time budget.
 
 **Time allocation (Standard clock):** `allocated = timeRemaining / movesRemaining`. Hard stop = `max(100ms, min(allocated × 2, timeRemaining − 1s))`. The hard deadline (and any `go nodes` limit) is polled every 2048 nodes (`nodeCount & 0x7FF == 0`) — a coarser interval let a node-heavy batch overrun the deadline; 2048 keeps the overrun sub-millisecond. During a ponder search `hardDeadlineNanos` holds a no-deadline sentinel, so the poll never fires until `ponderhit` swaps in a real deadline.
@@ -277,7 +277,7 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 | `setoption name Move Overhead value <ms>` | Time reserved from every deadline for GUI/network lag |
 | `setoption name Ponder value <true\|false>` | Advertises pondering support (the GUI drives it via `go ponder`/`ponderhit`) |
 
-`info` lines carry `depth`, `seldepth`, `score cp`/`score mate N`, `time`, `nodes`, `nps`, `hashfull`, and `pv`. [main.go](main.go) reads stdin line-by-line and calls `game.HandleCommand` and sets the thread count from `PAWNSTAR_THREADS`/`NumCPU` (NNUE is installed by `NewGame`).
+`info` lines carry `depth`, `seldepth`, `score cp`/`score mate N`, `time`, `nodes`, `nps`, `hashfull`, and `pv`. [main.go](main.go) sets the thread count from `PAWNSTAR_THREADS`/`NumCPU`, then reads stdin line-by-line and delegates each command to `game.HandleCommand` (NNUE is installed by `NewGame`).
 
 **Pondering** (`go ponder` / `ponderhit` / `Ponder` option) searches on the opponent's time until the predicted move is played (`ponderhit`, which converts it to a timed search budgeted from that moment) or `stop`. The live clock is two `atomic.Int64`s on `Game` — armed on the UCI goroutine before the search starts, mutated only by `ponderhit` — so the concurrent read/write is data-race free (verified under `-race` by `TestPonderRace`). `bestmove` is deferred while pondering and emitted as `bestmove <m> ponder <reply>`.
 
