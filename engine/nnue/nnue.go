@@ -115,7 +115,6 @@ type Network struct {
 	// weights (so, unlike the archsimd path, no VPACKSSDW-order regroup — it permutes activations instead).
 	outputWeightsI8Nat []int8
 	outputWScale       int // divisor mapping the int16 output weights into int8 range (>= 1); 1 when they already fit
-	loaded             bool
 }
 
 // LoadFile reads a stamped net file from disk and loads it.
@@ -170,7 +169,6 @@ func Load(data []byte) (*Network, error) {
 	off = readInt16Slice(p, off, n.outputWeights)
 	n.outputBias = int16(binary.LittleEndian.Uint16(p[off : off+2]))
 	n.deriveInt8OutputWeights()
-	n.loaded = true
 	return n, nil
 }
 

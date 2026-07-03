@@ -33,13 +33,7 @@ const nnueSearchClamp = winThreshold - 1000
 
 // clampEvalToBand clamps a raw NNUE score into the search's non-mate band.
 func clampEvalToBand(score int) int {
-	if score > nnueSearchClamp {
-		return nnueSearchClamp
-	}
-	if score < -nnueSearchClamp {
-		return -nnueSearchClamp
-	}
-	return score
+	return min(max(score, -nnueSearchClamp), nnueSearchClamp)
 }
 
 // EnableNNUE (re)installs the embedded NNUE network as this game's evaluator, replacing any net loaded

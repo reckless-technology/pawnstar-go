@@ -328,9 +328,15 @@ func TestUCIProtocol(t *testing.T) {
 	})
 }
 
+// benchGoldenNodes is the expected `bench` node total — the cross-engine bit-parity signature (the C++
+// engine reports the same count; see CLAUDE.md). Any change to search, move ordering, pruning, the TT, or
+// the eval shifts this number: bump it ONLY for a deliberate, SPRT-gated engine change, never to quieten
+// the test.
+const benchGoldenNodes = "7007401"
+
 // TestUCIBenchDeterminism: single-threaded bench is deterministic, so two runs must agree (guards the
-// uninitialised-read class of bug that made node counts wobble). Each run is a fresh `bench\nquit` piped
-// into a new process, exactly like the bash script.
+// uninitialised-read class of bug that made node counts wobble) AND must equal the golden bit-parity
+// signature benchGoldenNodes. Each run is a fresh `bench\nquit` piped into a new process.
 func TestUCIBenchDeterminism(t *testing.T) {
 	if testing.Short() {
 		t.Skip("UCI subprocess test skipped in -short mode")
@@ -355,7 +361,10 @@ func TestUCIBenchDeterminism(t *testing.T) {
 	b2 := run()
 	if b1 != b2 {
 		t.Errorf("bench nondeterministic: run1=%q run2=%q", b1, b2)
+	}
+	if b1 != benchGoldenNodes {
+		t.Errorf("bench signature changed: got %s nodes, want %s (bit-parity gate — see benchGoldenNodes)", b1, benchGoldenNodes)
 	} else {
-		t.Logf("bench is deterministic across runs (%s nodes)", b1)
+		t.Logf("bench matches the golden signature (%s nodes)", b1)
 	}
 }

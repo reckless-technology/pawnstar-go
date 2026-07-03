@@ -26,7 +26,7 @@ func TestLazySMPSmoke(t *testing.T) {
 			}
 			game.SetThreads(threads)
 			game.newGameFromFen(fen)
-			game.openingBook.clearOpeningBook()
+			game.openingBook.clear()
 			game.timeControl.clockType = clockFixedDepth
 			game.timeControl.depth = depth
 

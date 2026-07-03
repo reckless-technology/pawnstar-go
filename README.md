@@ -217,11 +217,11 @@ Each individual word is an `atomic.Uint64` (relaxed load/store), so no *single* 
 
 **Aging:** `currentAge uint8` is bumped by `age()` (O(1), wraps at 256) at the start of each root search; `record` stamps it onto each entry via `setTTAge`.
 
-**API:** `find(hash) → (transposition, bool)` returns `{hash, move}` with `score()`/`depth()`/`nodeType()`/`age()` reading straight out of the packed move; `record(hash, m, depth, nt)` takes a move whose search score is already packed via `m.withScore(score)`.
+**API:** `find(hash) → (transposition, bool)` returns `{hash, move}` with `depth()`/`nodeType()` accessors (the score is read via `move.score()`) straight out of the packed move; `record(hash, m, depth, nt)` takes a move whose search score is already packed via `m.withScore(score)`.
 
 ### Evaluation
 
-The engine evaluates exclusively with the embedded **NNUE** network (see below); scores are in centipawns from the perspective of the side to move. Two pieces of shared, evaluator-independent machinery live in [engine/evaluate.go](engine/evaluate.go):
+The engine evaluates exclusively with the embedded **NNUE** network (see below); scores are in centipawns from the perspective of the side to move. The evaluator entry point and fifty-move scaling live in [engine/evaluate.go](engine/evaluate.go); the lockless eval cache in [engine/evalcache.go](engine/evalcache.go):
 
 **Eval cache:** results are cached in the **lockless** `evalHashTable` (~8 MB, ported from the C++ `EvalCache`): each slot is a single `atomic.Uint64` packing the top 48 bits of the hash and a 16-bit score, so a load/store is atomic with no lock and a foreign/evicted entry fails the key check and reads as a miss. The cached value is the raw, clock-independent eval; `clear()` is called whenever the loaded net changes (`EvalFile`).
 
@@ -249,7 +249,7 @@ The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direc
 
 ### UCI protocol
 
-`Game.HandleCommand` ([engine/game.go](engine/game.go)) processes commands on the calling goroutine. Supported:
+`Game.HandleCommand` ([engine/uci.go](engine/uci.go); engine state in [engine/game.go](engine/game.go), the chess clock in [engine/clock.go](engine/clock.go)) processes commands on the calling goroutine. Supported:
 
 | Command | Notes |
 |---|---|

@@ -65,14 +65,15 @@ const (
 
 // constructMove encodes all move fields into a move value.
 func constructMove(from, to square, p piece, mt moveType, captured piece) move {
-	return move(int64(to) | int64(from)<<6 | int64(p)<<12 | int64(captured)<<15 | int64(mt)<<18)
+	return move(int64(to) | int64(from)<<moveFromShift | int64(p)<<movePieceShift |
+		int64(captured)<<moveCapturedShift | int64(mt)<<moveTypeShift)
 }
 
 // Constructor helpers — each encodes the move type and fills in fixed fields.
 
 // moveNonCapture encodes a quiet (non-capturing) move.
 func moveNonCapture(from, to square, p piece) move {
-	return move(int64(to) | int64(from)<<6 | int64(p)<<12)
+	return move(int64(to) | int64(from)<<moveFromShift | int64(p)<<movePieceShift)
 }
 
 // moveCapture encodes a standard capture move.

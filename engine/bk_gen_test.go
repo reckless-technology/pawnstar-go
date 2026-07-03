@@ -32,7 +32,7 @@ func TestGenerateBratkoKopecNNUE(t *testing.T) {
 					t.Fatalf("enable NNUE: %v", err)
 				}
 				game.newGameFromFen(tc.fen)
-				game.openingBook.clearOpeningBook()
+				game.openingBook.clear()
 				game.timeControl.clockType = clockFixedDepth
 				game.timeControl.depth = depth
 				dbgxClear()

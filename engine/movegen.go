@@ -189,8 +189,8 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 		eastDelta      int
 	)
 
+	pawns = position.pieces[pawn] & friendlyPieces
 	if color == white {
-		pawns = position.pieces[pawn] & friendlyPieces
 		singlePushes = pawns.shiftNorth() & ^occupied
 		doublePushes = singlePushes.shiftNorth() & ^occupied & rank4
 		capturesWest = pawns.shiftNorthwest() & enemyPieces
@@ -203,7 +203,6 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 		eastDelta = 9
 		promoRank = rank8
 	} else {
-		pawns = position.pieces[pawn] & friendlyPieces
 		singlePushes = pawns.shiftSouth() & ^occupied
 		doublePushes = singlePushes.shiftSouth() & ^occupied & rank5
 		capturesWest = pawns.shiftSouthwest() & enemyPieces
@@ -296,7 +295,7 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 		from := epSources.popLsb()
 		to := position.epSquare
 		// The captured pawn is on the source rank, destination file.
-		capturedSq := square((from & 0x38) | (to & 0x07))
+		capturedSq := epCapturedSquare(from, to)
 		if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() &&
 			(allowedCaptures & squareBB(capturedSq)).isNotEmpty() {
 			// Check for a horizontal discovered check through the king's rank.

@@ -21,17 +21,11 @@ type transposition struct {
 	move move    // best move, with score/depth/nodeType/age packed into its spare bits.
 }
 
-// score returns the stored search score (read out of the packed move).
-func (t transposition) score() int { return t.move.score() }
-
 // depth returns the depth the stored result was searched to.
 func (t transposition) depth() int { return t.move.ttDepth() }
 
 // nodeType returns the stored bound type (PV/cut/all), which decides how the score may be used.
 func (t transposition) nodeType() nodeType { return t.move.ttNodeType() }
-
-// age returns the generation the entry was stored in (compared against currentAge for replacement).
-func (t transposition) age() uint8 { return t.move.ttAge() }
 
 // atomicEntry is one lockless table cell.  It stores key = hash ^ data alongside data (the packed
 // move bits).  A reader accepts the cell only when key ^ data equals the probe hash, so a torn pair —

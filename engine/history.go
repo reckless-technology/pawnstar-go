@@ -8,31 +8,13 @@ type historyTable struct {
 	counts [maxPly][4096]uint
 }
 
-// reset zeroes all counts.  Called at the start of each root search.
-func (h *historyTable) reset() {
-	*h = historyTable{}
-}
-
 // recordGoodMove increments the counter for m at ply, indicating that m raised alpha
 // or caused a beta cutoff at that ply.
 func (h *historyTable) recordGoodMove(ply int, m move) {
 	h.counts[ply][m.fromTo()]++
 }
 
-// getCount returns the accumulated count for m at ply, or 0 if ply is out of range.
-func (h *historyTable) getCount(ply int, m move) uint {
+// count returns the accumulated count for m at ply.
+func (h *historyTable) count(ply int, m move) uint {
 	return h.counts[ply][m.fromTo()]
-}
-
-// getMaxCount returns the largest count stored in the table across all plies and moves.
-func (h *historyTable) getMaxCount() uint {
-	var maximum uint = 0
-	for i := range maxPly {
-		for j := range 4096 {
-			if h.counts[i][j] > maximum {
-				maximum = h.counts[i][j]
-			}
-		}
-	}
-	return maximum
 }

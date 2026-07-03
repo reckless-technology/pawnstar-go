@@ -2,7 +2,7 @@
 
 package nnue
 
-// outputDotInt8Asm is the hand-written NEON int8 output dot (nnue_dot_arm64.s), the arm64 analogue of the
+// outputDotInt8Asm is the hand-written NEON int8 output dot (dot_arm64.s), the arm64 analogue of the
 // amd64 AVX2 kernel. Per 8 int16 lanes it SCReLU-requantises the accumulator to a uint8-range activation
 // (SQXTUN clamp+narrow, UMULL square, +round, VUSHR >>9), then signed-widening multiply-accumulates
 // (SMLAL/SMLAL2) against the int8-range weights (stored int16, natural order) into int32 accumulators.
