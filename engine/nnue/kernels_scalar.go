@@ -5,8 +5,8 @@ package nnue
 // Shared scalar NNUE helper kernels: the portable fallback used on every target that isn't the
 // amd64+goexperiment.simd archsimd build. This file holds the kernels that stay scalar on all such
 // targets (including arm64, which only accelerates addColumn/subColumn and the int8 output dot);
-// addColumn/subColumn live in the arch-split files (nnue_kernels_generic.go / nnue_kernels_arm64.{go,s}).
-// All are bit-identical to the SIMD kernels in nnue_kernels_amd64.go.
+// addColumn/subColumn live in the arch-split files (kernels_generic.go / kernels_arm64.{go,s}).
+// All are bit-identical to the SIMD kernels in kernels_amd64.go.
 
 // nnueSCReLU is the squared clipped ReLU activation: clamp to [0,QA] then square.
 func nnueSCReLU(x int16) int32 {

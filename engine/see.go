@@ -36,7 +36,7 @@ func evaluateStaticExchange(pos *position, m move) (int, bool) {
 	capturedSquare := to
 	captured := m.captured()
 	if m.kind() == epCapture {
-		capturedSquare = (from & 0x38) | (to & 0x07)
+		capturedSquare = epCapturedSquare(from, to)
 		captured = pawn
 	}
 	pieceOnTo := mover

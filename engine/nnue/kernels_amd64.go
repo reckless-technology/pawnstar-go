@@ -5,7 +5,7 @@ package nnue
 import "simd/archsimd"
 
 // SIMD NNUE kernels using 256-bit AVX2-width archsimd vectors. Bit-identical to the scalar fallback
-// in nnue_kernels_generic.go: the int16 column add/sub wrap identically, and the output dot uses the
+// in kernels_generic.go: the int16 column add/sub wrap identically, and the output dot uses the
 // same clamp^2*weight products (which fit int32) accumulated in int64. Requires GOEXPERIMENT=simd.
 //
 // nnueHiddenSize (1024) is a multiple of 16, so every kernel loops in whole 16-lane int16 steps.
@@ -72,7 +72,7 @@ const nnueInt8Round = 1 << (nnueInt8Shift - 1)
 // int8-range weights (stored int16). Per 16 lanes: clamp to [0,QA], widen to int32, square, add the
 // rounding term and shift right by nnueInt8Shift to the uint8-range activation ([0,127]), multiply by
 // the sign-extended int8 weight (product fits int32), then widen to int64 and accumulate. Bit-identical
-// to the scalar fallback in nnue_kernels_generic.go.
+// to the scalar fallback in kernels_generic.go.
 func outputDotInt8(stm, ntm *[nnueHiddenSize]int16, w8 []int16) int64 {
 	zero := archsimd.BroadcastInt16x16(0)
 	qa := archsimd.BroadcastInt16x16(nnueQA)

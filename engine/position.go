@@ -281,7 +281,7 @@ func (position *position) makeMove(m move) {
 	case epCapture:
 		position.halfMove = 0
 		// The captured pawn is on the same rank as from, same file as to.
-		capturedSq := (from & 0x38) | (to & 0x07)
+		capturedSq := epCapturedSquare(from, to)
 		position.removePiece(enemyOf(color), pawn, capturedSq)
 		position.movePiece(color, pawn, from, to)
 
@@ -342,9 +342,4 @@ func (position *position) materialDrawCategory() int {
 		}
 	}
 	return 0
-}
-
-// isDrawByMaterial reports whether the position is a theoretical draw by insufficient mating material.
-func (position *position) isDrawByMaterial() bool {
-	return position.materialDrawCategory() != 0
 }

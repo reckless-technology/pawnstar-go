@@ -23,7 +23,7 @@ VERSION := $(MAJOR).$(MINOR).$(BUILD)
 VERSIONED := $(BINARY)_$(MAJOR)_$(MINOR)_$(BUILD)
 LDFLAGS := -X pawnstar-go/engine.versionBuild=$(BUILD)
 
-.PHONY: all build test test-short check perft search bk see nnue timing test-uci bench baseline vet fmt clean
+.PHONY: all build test test-short check perft search bk see nnue book lazysmp race timing test-uci bench baseline vet fmt clean
 
 all: build
 
@@ -41,10 +41,10 @@ test:
 test-short:
 	$(GO) test -short $(PKG)
 
-# Focused correctness gate: movegen (perft), SEE, Bratko-Kopec, NNUE, chess-clock timing,
-# and the UCI protocol regression (drives the built binary). `perft` here is the full
-# depth-6 sweep, so this is thorough rather than quick — use `make test-short` for a fast pass.
-check: perft see bk nnue timing test-uci
+# Focused correctness gate: movegen (perft), SEE, Bratko-Kopec, NNUE, the opening book, Lazy SMP,
+# the race detector over the concurrency tests, chess-clock timing, and the UCI protocol regression
+# (drives the built binary; includes the golden bench signature). Use `make test-short` for a fast pass.
+check: perft see bk nnue book lazysmp race timing test-uci
 
 perft:
 	$(GO) test $(PKG) -run TestPerft -v
@@ -61,6 +61,19 @@ see:
 # NNUE gates: int16 reference (0 cp vs C++), int8 search eval (<=40 cp, scalar==SIMD), lazy accumulator.
 nnue:
 	$(GO) test $(PKG) -run TestNNUE -v
+
+# Opening-book gate (questionable-move filtering).
+book:
+	$(GO) test $(PKG) -run TestOpeningBook -v
+
+# Lazy SMP smoke test (multi-threaded search sanity).
+lazysmp:
+	$(GO) test $(PKG) -run TestLazySMP -v
+
+# The concurrency tests under the race detector — the data-race-freedom claims (lockless TT/eval
+# cache sharing, the ponder clock atomics) are only actually verified when -race is on.
+race:
+	$(GO) test $(PKG) -race -run 'TestLazySMP|TestPonderRace|TestFixedTimeDeadlineFires' -v
 
 # Chess-clock / time-management tests (budget, deadline firing, defaults, ponder race).
 timing:

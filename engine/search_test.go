@@ -16,7 +16,7 @@ func TestSearch(t *testing.T) {
 		t.Logf("\n\r%s\n", fen)
 		game := NewGame()
 		game.newGameFromFen(fen)
-		game.openingBook.clearOpeningBook()
+		game.openingBook.clear()
 		game.timeControl.clockType = clockFixedDepth
 		game.timeControl.depth = maxDepth
 		// Bound each position: the promotion/ep search extensions (like the C++ engine) are unguarded, so a
@@ -76,7 +76,7 @@ func TestBratkoKopec(t *testing.T) {
 			t.Fatalf("enable NNUE: %v", err)
 		}
 		game.newGameFromFen(tc.fen)
-		game.openingBook.clearOpeningBook()
+		game.openingBook.clear()
 		game.timeControl.clockType = clockFixedDepth
 		depth := 8
 		if testing.Short() {

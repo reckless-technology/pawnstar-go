@@ -238,15 +238,15 @@ var bishopMagic = [64]uint64{
 // the result at the index given by the magic hash.
 func initMagics() {
 	var occupancies [4096]bitboard
-	var target_squares [4096]bitboard
+	var targetSquares [4096]bitboard
 
 	for sq := range square(64) {
 		mask := (northOf[sq] & ^rank8) | (southOf[sq] & ^rank1) | (eastOf[sq] & ^fileH) | (westOf[sq] & ^fileA)
 		rookMask[sq] = mask
 		rookShift[sq] = uint(64 - mask.popCount())
 		rookTable[sq] = make([]bitboard, 1<<mask.popCount())
-		n := enumerateOccupancies(mask, occupancies[:], target_squares[:], rookAttacksClassic, sq)
-		fillMagicTable(rookMagic[sq], occupancies[:n], target_squares[:n], rookShift[sq], rookTable[sq])
+		n := enumerateOccupancies(mask, occupancies[:], targetSquares[:], rookAttacksClassic, sq)
+		fillMagicTable(rookMagic[sq], occupancies[:n], targetSquares[:n], rookShift[sq], rookTable[sq])
 	}
 
 	for sq := range square(64) {
@@ -255,8 +255,8 @@ func initMagics() {
 		bishopMask[sq] = mask
 		bishopShift[sq] = uint(64 - mask.popCount())
 		bishopTable[sq] = make([]bitboard, 1<<mask.popCount())
-		n := enumerateOccupancies(mask, occupancies[:], target_squares[:], bishopAttacksClassic, sq)
-		fillMagicTable(bishopMagic[sq], occupancies[:n], target_squares[:n], bishopShift[sq], bishopTable[sq])
+		n := enumerateOccupancies(mask, occupancies[:], targetSquares[:], bishopAttacksClassic, sq)
+		fillMagicTable(bishopMagic[sq], occupancies[:n], targetSquares[:n], bishopShift[sq], bishopTable[sq])
 	}
 }
 

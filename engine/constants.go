@@ -21,18 +21,9 @@ const (
 	// maxPly caps search depth and is also the first dimension of the history table.
 	maxPly = 64
 
-	// rankFlip is XORed with a square index to flip rank perspective (a1↔a8).
-	// Used when indexing piece-square tables for White, whose tables are stored
-	// from Black's point of view (rank 8 at low indices).
-	rankFlip = 0x38
-
 	// searchCancelledScore is a sentinel returned by a search iteration that was
 	// interrupted by the time limit, allowing the caller to detect cancellation.
 	searchCancelledScore = -12345678
-
-	// hashNotFoundScore is returned by evalHashTable.find when there is no cached
-	// entry for the queried hash; it is outside the range of any real score.
-	hashNotFoundScore = -2345678
 
 	// scoreInstabilityThresh is the centipawn tolerance for the early-exit heuristic:
 	// if the best-move score varies by more than this across consecutive depths the
@@ -121,13 +112,3 @@ const (
 func (p piece) toString() string {
 	return string(" pnbrqk"[p])
 }
-
-// clockType controls how the engine manages its time budget during search.
-type clockType uint8
-
-const (
-	clockStandard   clockType = iota // wtime/btime/movestogo: allocate a fraction of remaining time.
-	clockFixedDepth                  // Search to a fixed depth regardless of elapsed time.
-	clockFixedTime                   // Search for a fixed wall-clock duration (movetime).
-	clockInfinite                    // Search indefinitely until a stop command is received.
-)

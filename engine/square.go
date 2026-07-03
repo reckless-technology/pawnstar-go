@@ -94,3 +94,9 @@ const (
 	g8
 	h8
 )
+
+// epCapturedSquare returns the square of the pawn removed by an en-passant capture: the captured
+// pawn sits on the capturing pawn's rank (rank bits of from) and the target's file (file bits of to).
+func epCapturedSquare(from, to square) square {
+	return (from & 0x38) | (to & 0x07)
+}

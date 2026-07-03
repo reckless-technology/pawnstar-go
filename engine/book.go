@@ -48,8 +48,8 @@ func loadOpeningBook(r io.Reader) openingBook {
 	return b
 }
 
-// clearOpeningBook empties the book so the engine will not use book moves.
-func (book *openingBook) clearOpeningBook() {
+// clear empties the book so the engine will not use book moves (parity with the TT and eval-cache clear).
+func (book *openingBook) clear() {
 	clear(book.moves)
 }
 
