@@ -49,6 +49,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	}
 
 	position := ss.currentPosition()
+	inCheck := position.isInCheck() // constant for the whole node (copy-make: moves apply to copies)
 	if cat := position.materialDrawCategory(); cat != 0 {
 		ss.recordMaterialDraw(cat)
 		return drawScore
@@ -59,14 +60,14 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 	// Check extension: searching a node that is in check one ply deeper resolves the forcing line
 	// before evaluating, and gates off the static-eval pruning below (which is disabled in check).
-	if position.isInCheck() {
+	if inCheck {
 		ss.dbg.checkExtensions++
 		depth++
 	}
 
 	if ply >= maxPly {
 		ss.dbg.maxPlyReached++
-		return evaluatePosition(ss)
+		return evaluatePositionNonDraw(ss) // material draw was excluded at node entry
 	}
 
 	// Transposition table lookup.
@@ -102,15 +103,15 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 	// Enter quiescence at depth <= 0 (unless in check, which quiescence handles
 	// by re-entering alpha-beta at the same depth).
-	if depth <= 0 && !position.isInCheck() {
+	if depth <= 0 && !inCheck {
 		return searchQuiescent(ss, depth, ply, alpha, beta)
 	}
 
 	// Static-eval-based pruning at non-PV nodes that are not in check. The static eval is computed
 	// once here and reused by reverse-futility pruning and null-move pruning.
 	isPV := beta-alpha > 1
-	if !isPV && !position.isInCheck() {
-		evalScore := evaluatePosition(ss)
+	if !isPV && !inCheck {
+		evalScore := evaluatePositionNonDraw(ss) // material draw was excluded at node entry
 
 		// Reverse futility pruning (static null move): at shallow depth, if we are far enough above
 		// beta that even conceding rfpMargin per ply still leaves us at/above beta, assume a quiet
@@ -175,7 +176,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	position.generateLegalMovesInto(&ml)
 	moves := ml.slice()
 	if len(moves) == 0 {
-		if position.isInCheck() {
+		if inCheck {
 			ss.dbg.checkmates++
 			return checkmatedScore + ply
 		}
@@ -184,8 +185,6 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	}
 
 	ss.scoreAndSortMoves(moves, ply, prevMove)
-
-	inCheck := position.isInCheck()
 
 	for i, move := range moves {
 		if isTransposition && move.equal(transpos.move) {
