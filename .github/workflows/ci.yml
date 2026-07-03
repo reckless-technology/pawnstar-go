@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false # no go.sum / external deps to cache
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false # no go.sum / external deps to cache
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false # no go.sum / external deps to cache
@@ -91,7 +91,7 @@ jobs:
       - name: Test
         run: make -j"$(nproc)" check
       - name: Upload engine binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pawnstar-go-linux-amd64
           path: pawnstar-go_[0-9]*_[0-9]*_[0-9]* # the versioned binary, not the pawnstar-go symlink
@@ -106,7 +106,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false # no go.sum / external deps to cache
@@ -115,7 +115,7 @@ jobs:
       - name: Test
         run: make -j"$(sysctl -n hw.logicalcpu)" check
       - name: Upload engine binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pawnstar-go-macos-arm64
           path: pawnstar-go_[0-9]*_[0-9]*_[0-9]*
@@ -133,7 +133,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false # no go.sum / external deps to cache
@@ -144,7 +144,7 @@ jobs:
       - name: Test
         run: go test ./...
       - name: Upload engine binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pawnstar-go-windows-amd64
           path: pawnstar-go_*.exe
@@ -163,7 +163,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false # no go.sum / external deps to cache
@@ -180,13 +180,13 @@ jobs:
           ver="0.1.$(git rev-list --count HEAD)"
           git archive --format=tar.gz --prefix="pawnstar-go-$ver/" -o "pawnstar-go-$ver-source.tar.gz" HEAD
       - name: Upload docs bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pawnstar-go-docs
           path: pawnstar-go-*-docs.zip
           if-no-files-found: error
       - name: Upload source archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pawnstar-go-source
           path: pawnstar-go-*-source.tar.gz
