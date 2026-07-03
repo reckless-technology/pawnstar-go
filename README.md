@@ -32,7 +32,7 @@ go test ./engine/ -run TestNNUEIncremental -v     # lazy accumulator == full ref
 go test ./engine/ -bench BenchmarkPerft7 -benchtime=10s
 ```
 
-Run with `GOEXPERIMENT=simd` (or `make test`) to exercise the SIMD kernels; `make check` runs the full gate suite (perft, SEE, Bratko-Kopec, NNUE, book, Lazy SMP, `-race`, timing, UCI — including the golden 7,007,401 bench-signature assertion). Move generation correctness is verified by perft — counting leaf nodes to a given depth against known values. All 128 EPD positions must pass at every depth before any change is considered correct.
+Run with `GOEXPERIMENT=simd` (or `make test`) to exercise the SIMD kernels; `make check` runs the full gate suite (perft, SEE, Bratko-Kopec, NNUE, book, Lazy SMP, `-race`, timing, UCI — including the golden 6,888,983 bench-signature assertion). Move generation correctness is verified by perft — counting leaf nodes to a given depth against known values. All 128 EPD positions must pass at every depth before any change is considered correct.
 
 Perft (move generation only) runs at approximately **200 Mnps** single-threaded (start position, amd64 dev machine) and is core-count-independent now that move generation is allocation-free. The NNUE evaluator used in real search is slower per node but far stronger — when first ported it measured **+572 Elo** over the engine's former handcrafted evaluation in a fixed-depth self-play SPRT (146W/3L/5D); that handcrafted eval has since been removed. The C++ original reaches ~540 Mnps on the same machine — a raw move-gen gap of ~2.7×, attributable to compiler codegen rather than algorithm (PEXT vs magic bitboards measured near-identical in the C++ engine's own testing). In real NNUE search the Go↔C++ speed gap is much smaller than that raw move-gen gap — search nps is dominated by evaluation, where the SIMD kernels are close to the C++ hot path. Over the 24 Bratko-Kopec positions at depth 10 (single-threaded, bit-identical search trees) the Go engine runs ~1.06 Mnps versus the C++ engine's ~1.77 Mnps — **~1.66× slower** on the amd64 machine. On **arm64 (Apple Silicon)**, after the hand-written NEON kernels, the gap is essentially closed: the 16-position `bench` (identical 7,007,401-node trees, interleaved) runs at **~1.14 Mnps vs C++ ~1.15–1.19 Mnps — parity (~0.98×)**, up 6.0× from ~190k nps when arm64 was fully scalar.
 
@@ -176,7 +176,7 @@ The margins carry over unchanged from the C++ engine (the NNUE eval is the same 
 | Null-move pruning | R = 4; only when `eval ≥ beta` and there is enough material (no zugzwang); skipped in check / null-move positions |
 | Late move pruning | skip quiet moves at depth ≤ `lmpMaxDepth` once `moveIdx ≥ lmpBase + depth²` |
 | Principal variation search (PVS) | first move full window; later moves null-window; re-search full window on fail-high |
-| Late move reduction (LMR) | null-window non-check: −1 from move index > 3; −2 from index > 6 (depth > 3); −3 additionally when history count is zero; re-search at full depth on fail-high |
+| Late move reduction (LMR) | null-window non-check: −1 from move index > 3; −2 from index > 6 (depth > 3); −3 from index > 12; re-search at full depth on fail-high |
 | Quiescence SEE pruning | stop at the first losing capture (keys on the negative-SEE sign of losing captures in move ordering) |
 | Transposition table | Cut/All hits return early if score is conclusive; PV hits extend depth by 1 |
 
@@ -246,7 +246,7 @@ The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direc
 
 ### History heuristic
 
-`historyTable` ([engine/history.go](engine/history.go)) records how often each (ply, from→to) pair raised alpha or caused a beta cutoff. Counts are added to the quiet-move sort score by `scoreAndSortMoves` (alongside continuation history). The table lives on each `searchState` (per-thread, so Lazy SMP threads don't contend) and starts fresh each search because a new `searchState` is built per search.
+`historyTable` ([engine/history.go](engine/history.go)) is a **butterfly table** — `counts[2][4096]` indexed by side-to-move and the move's from/to squares — counting how often each move raised alpha or caused a beta cutoff anywhere in the search tree. Pooling across plies (it replaced a per-ply `[maxPly][4096]` table) concentrates the statistics where positions repeat across branches and transpositions, and the explicit colour dimension replaces the accidental colour proxy that ply parity provided. Counts are added to the quiet-move sort score by `scoreAndSortMoves` (alongside continuation history). The table lives on each `searchState` (per-thread, so Lazy SMP threads don't contend) and starts fresh each search.
 
 ### UCI protocol
 
@@ -267,7 +267,7 @@ The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direc
 | `go searchmoves <m…>` | Restrict the root search to the given moves |
 | `go ... ponder` | Search on the opponent's time; no `bestmove` until `ponderhit`/`stop` |
 | `ponderhit` | Predicted move was played — convert the ponder search to a timed one (budget from now) |
-| `bench` / `bench <depth>` | Node-count benchmark over the 16 C++-reference (Bratko-Kopec) positions at depth `benchDepth`=13 (or an explicit `<depth>`); deterministic, single-threaded, book off, on a pinned 64 MB TT (signature independent of the `Hash` option). Current signature: 7,007,401 nodes, pinned by a golden-signature test |
+| `bench` / `bench <depth>` | Node-count benchmark over the 16 C++-reference (Bratko-Kopec) positions at depth `benchDepth`=13 (or an explicit `<depth>`); deterministic, single-threaded, book off, on a pinned 64 MB TT (signature independent of the `Hash` option). Current signature: 6,888,983 nodes (since the butterfly history table), pinned by a golden-signature test |
 | `stop` | Signals search goroutines to halt |
 | `quit` | Stops search and exits |
 | `setoption name OwnBook value <true\|false>` | Consult the opening book (false forces a real search) |

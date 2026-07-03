@@ -35,7 +35,7 @@ func (ss *searchState) scoreAndSortMoves(moves []move, ply int, prevMove move) {
 		case ss.isCountermove(prevMove, m):
 			sort = countermoveScore
 		default: // quiet move: main history + continuation history, clamped below the countermove
-			h := int(ss.history.count(ply, m)) + ss.contHistScore(prevMove, m)
+			h := int(ss.history.count(pos.colorToMove, m)) + ss.contHistScore(prevMove, m)
 			if h > maxQuietScore {
 				h = maxQuietScore
 			}
@@ -89,7 +89,7 @@ func (ss *searchState) recordCountermove(prevMove, m move) {
 // move-ordering heuristics: the main history and continuation history for any move; additionally, on a
 // beta cutoff, a quiet m becomes a killer at ply and the countermove to prevMove.
 func (ss *searchState) recordGood(ply int, prevMove, m move, isCutoff bool) {
-	ss.history.recordGoodMove(ply, m)
+	ss.history.recordGoodMove(ss.currentPosition().colorToMove, m)
 	ss.recordContinuationHistory(prevMove, m)
 	if isCutoff && m.isQuiet() {
 		ss.updateKillers(ply, m)

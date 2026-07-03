@@ -2,10 +2,11 @@
 - [reference-go-simd-archsimd](reference-go-simd-archsimd.md) — Go 1.26.4 already on PATH; simd/archsimd needs GOEXPERIMENT=simd at build time; keep a scalar fallback
 - [feedback-direct-push-main-pawnstar-go](feedback-direct-push-main-pawnstar-go.md) — OK to commit/push directly to main in pawnstar-go (no branch-first/ask); still run gates; does NOT apply to the C++ repo
 - [feedback-root-cause-not-benign](feedback-root-cause-not-benign.md) — don't excuse a deterministic-system divergence as "benign"; bisect empirically to the real cause and show evidence
-- [project-cross-engine-bit-parity](project-cross-engine-bit-parity.md) — Go and C++ pawnstar kept bit-identical at fixed depth; bench=7,007,401 is the gate; verify in both repos after search/movegen/eval/TT changes
+- [project-cross-engine-bit-parity](project-cross-engine-bit-parity.md) — Go and C++ pawnstar kept bit-identical at fixed depth; bench=6,888,983 is the gate (post-butterfly); verify in both repos after search/movegen/eval/TT changes
 - [reference-pawnstar-perf-measurement](reference-pawnstar-perf-measurement.md) — perf-measurement pitfalls (thermal/memprofile/GOMAXPROCS); eval now C++-parity via the hand-written AVX2 dot (+19% nps, SPRT ~−62→−32 Elo); macOS/arm64 still scalar
 - [project-go-nnue-arm64-neon](project-go-nnue-arm64-neon.md) — DONE: arm64/NEON NNUE kernels landed (WORD-encoded SQXTUN/UMULL/SMLAL + ILP unroll); arm64 Go bench 190k→1.14M nps (6.0×), now ~parity with C++
 - [reference-go-nnue-kernel-layout](reference-go-nnue-kernel-layout.md) — NNUE kernel files/build-tags/dispatch + the 3 output-weight representations; how to slot in a new-arch SIMD kernel
 - [project-go-state-2026-07](project-go-state-2026-07.md) — handoff snapshot: pawnstar-go HEAD 9f04267, this session's commits, and where the arm64 work picks up
-- [project-capture-history-wip](project-capture-history-wip.md) — REJECTED: capture-history SEE-tiebreak, −6.7 Elo over 2700 games @10+0.1; reverted; next attempt should be the aggressive variant with [0,5] bounds
+- [project-capture-history-wip](project-capture-history-wip.md) — ordering experiments: capture-history v1/v2 rejected; BUTTERFLY HISTORY ADOPTED (+~7 Elo, probe −17.7%, golden 6,888,983); pre-SPRT probe protocol standing
 - [reference-staged-movegen-analysis](reference-staged-movegen-analysis.md) — staged movegen analysed and rejected (legal-gen setup paid twice; pseudo-legal moves cost to try-time; ~+3-4 Elo ceiling); shared-analysis-pass split is the one sound design if revisited
+- [feedback-tee-test-output](feedback-tee-test-output.md) — always tee test output to a tmp file (inline grep discards evidence; empty grep masquerades as no-output)
