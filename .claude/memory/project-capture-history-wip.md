@@ -1,6 +1,6 @@
 ---
 name: project-capture-history-wip
-description: "RESULT: capture-history SEE-tiebreak variant tested and REJECTED (-6.7 Elo over 2700 games); reverted; design notes for the next attempt"
+description: "RESULTS: capture-history v1 (tiebreak, cap 99) REJECTED -6.7 Elo/2700g; v2 (cross-class, cap 400) REJECTED at cap +9.4 +/-10.6 LLR 1.06 no-pass + probe red flag; both reverted"
 metadata:
   type: project
 ---
@@ -60,3 +60,14 @@ move-quality luck paying a depth tax. Data: capture-history v1 bench +4.1% → S
 +4.1% nodes (huge per-position variance: pos03 −45%, pos10 +126%, 8/24 bestmoves changed) while its
 SPRT read ~+9 ±11 (LLR ~0.9, no formal pass at 2500 games) — mechanism ≠ ordering efficiency, so
 weak evidence. Verdict standard: no formal SPRT pass + probe red flag → reject.
+
+
+---
+
+**VARIANT 2 FINAL (2026-07-03): REJECTED per the pre-registered standard.** 3000 games @ 10+0.1,
+bounds [0,5]: **+9.38 ± 10.60, LLR 1.06 — no formal pass** (needed +2.94). Borderline-positive
+(~95% LOS) BUT the fixed-depth probe red-flagged the mechanism (+4.1% BK-24 nodes, +14.7% bench-13,
+huge per-position variance, 8/24 bestmoves changed): not an ordering improvement, just redirected
+search — variant-1's head-fake profile. Reverted in both repos; both re-verified at 7,007,401.
+**If ever revisited:** only via a probe-clean variant (node ratio ≤ 1.00); the borderline TC result
+means a well-designed capture-history probably has a few Elo in it, but this formulation isn't it.
