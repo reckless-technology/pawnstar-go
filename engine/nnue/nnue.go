@@ -5,7 +5,7 @@
 // with SIMD kernels (amd64 archsimd + AVX2 asm, arm64 NEON asm) selected by build tag.
 //
 // Architecture (shipped net v12): Chess768 features (2 colours * 6 types * 64 squares) per
-// perspective, x nnueKingBuckets king-square weight banks -> an nnueHiddenSize int16 accumulator
+// perspective, x kingBuckets king-square weight banks -> an hiddenSize int16 accumulator
 // per perspective. Activation is SCReLU (clamp to [0,QA] then square). The output layer dots the
 // two perspectives (side-to-move first) and dequantises to centipawns.
 //
@@ -23,24 +23,24 @@ import (
 )
 
 const (
-	nnueInputSize     = 768                             // features per perspective per bucket: 2 colours * 6 types * 64
-	nnueKingBuckets   = 8                               // king-square weight banks
-	nnueFeatureRows   = nnueInputSize * nnueKingBuckets // 6144 (bucket-major)
-	nnueHiddenSize    = 1024                            // feature-transformer / accumulator width per perspective
-	nnueQA            = 255                             // feature-transformer weight/activation scale (SCReLU clamp)
-	nnueQB            = 64                              // output-layer weight scale
-	nnueScale         = 400                             // maps raw network output to centipawns
-	nnueInt8Shift     = 9                               // SCReLU activation >> shift for the int8 output dot (C++ kInt8Shift)
-	nnueMaxEval       = 30000                           // eval clamp magnitude (matches C++ kMaxEvaluation)
-	nnueRankFlip      = 0x38                            // XOR mask to flip a square's rank (a1<->a8)
-	nnueFormatVersion = 1                               // net header format version
-	nnueHeaderBytes   = 32                              // stamped NetHeader size
+	inputSize     = 768                     // features per perspective per bucket: 2 colours * 6 types * 64
+	kingBuckets   = 8                       // king-square weight banks
+	featureRows   = inputSize * kingBuckets // 6144 (bucket-major)
+	hiddenSize    = 1024                    // feature-transformer / accumulator width per perspective
+	qa            = 255                     // feature-transformer weight/activation scale (SCReLU clamp)
+	qb            = 64                      // output-layer weight scale
+	evalScale     = 400                     // maps raw network output to centipawns
+	int8Shift     = 9                       // SCReLU activation >> shift for the int8 output dot (C++ kInt8Shift)
+	maxEval       = 30000                   // eval clamp magnitude (matches C++ kMaxEvaluation)
+	rankFlip      = 0x38                    // XOR mask to flip a square's rank (a1<->a8)
+	formatVersion = 1                       // net header format version
+	headerBytes   = 32                      // stamped NetHeader size
 
-	nnueNumFeatureWeights = nnueFeatureRows * nnueHiddenSize // 6291456
-	nnueNumOutputWeights  = 2 * nnueHiddenSize               // 2048
+	numFeatureWeights = featureRows * hiddenSize // 6291456
+	numOutputWeights  = 2 * hiddenSize           // 2048
 	// Packed payload size: feature_weights + feature_bias + output_weights + output_bias, all int16.
-	nnuePayloadInt16 = nnueNumFeatureWeights + nnueHiddenSize + nnueNumOutputWeights + 1
-	nnuePayloadBytes = nnuePayloadInt16 * 2
+	payloadInt16 = numFeatureWeights + hiddenSize + numOutputWeights + 1
+	payloadBytes = payloadInt16 * 2
 
 	// Piece type codes in Board.Squares / Board.Pieces indices — identical to the engine's piece
 	// constants (and the C++ engine's): 0 = empty, then pawn..king.
@@ -48,12 +48,12 @@ const (
 	kingCode = 6
 )
 
-var nnueMagic = [4]byte{'P', 'S', 'N', '1'}
+var magic = [4]byte{'P', 'S', 'N', '1'}
 
-// nnueKingBucketMap maps a king square (in the perspective's own orientation) to its weight bank.
+// kingBucketMap maps a king square (in the perspective's own orientation) to its weight bank.
 // File-pair (file/2) selects columns 0-3; board half (own ranks 1-4 vs advanced 5-8) adds 4.
 // MUST be byte-identical to the map in the C++ engine and the bullet trainer.
-var nnueKingBucketMap = [64]int{
+var kingBucketMap = [64]int{
 	0, 0, 1, 1, 2, 2, 3, 3,
 	0, 0, 1, 1, 2, 2, 3, 3,
 	0, 0, 1, 1, 2, 2, 3, 3,
@@ -82,14 +82,14 @@ func (b *Board) kingSquare(c int) int {
 // Accumulator holds both perspective accumulators (each the feature-transformer output for one
 // side's king-relative view). Comparable, so tests can check bit-identity with ==.
 type Accumulator struct {
-	white [nnueHiddenSize]int16
-	black [nnueHiddenSize]int16
+	white [hiddenSize]int16
+	black [hiddenSize]int16
 }
 
 // DiffLanes returns how many white-perspective and black-perspective lanes differ between two
 // accumulators — a test/diagnostic helper for pinpointing incremental-update bugs.
 func DiffLanes(a, b *Accumulator) (white, black int) {
-	for i := 0; i < nnueHiddenSize; i++ {
+	for i := 0; i < hiddenSize; i++ {
 		if a.white[i] != b.white[i] {
 			white++
 		}
@@ -102,9 +102,9 @@ func DiffLanes(a, b *Accumulator) (white, black int) {
 
 // Network is a loaded, quantised network: read-only after loading and safe to share across threads.
 type Network struct {
-	featureWeights []int16 // [nnueFeatureRows * nnueHiddenSize], column-major: row*hidden + i; rows bucket-major
-	featureBias    []int16 // [nnueHiddenSize]
-	outputWeights  []int16 // [2 * nnueHiddenSize]: first hidden weight stm accumulator, next hidden weight the other
+	featureWeights []int16 // [featureRows * hiddenSize], column-major: row*hidden + i; rows bucket-major
+	featureBias    []int16 // [hiddenSize]
+	outputWeights  []int16 // [2 * hiddenSize]: first hidden weight stm accumulator, next hidden weight the other
 	outputBias     int16   // in QA*QB units
 	// outputWeightsI8 is outputWeights requantised to int8 range (values in [-127,127], stored int16 for the
 	// SIMD kernel): w8 = clamp(round(w / outputWScale), -127, 127). It drives the search's int8 output dot
@@ -130,11 +130,11 @@ func LoadFile(path string) (*Network, error) {
 // build's constants, so an incompatible or unstamped net is rejected rather than silently misread.
 // Trailing bytes after the packed payload (bullet padding) are ignored.
 func Load(data []byte) (*Network, error) {
-	if len(data) < nnueHeaderBytes {
+	if len(data) < headerBytes {
 		return nil, fmt.Errorf("nnue: net too small (%d bytes) for a 32-byte header", len(data))
 	}
-	if [4]byte(data[0:4]) != nnueMagic {
-		return nil, fmt.Errorf("nnue: not a stamped Pawnstar net (missing %q header)", string(nnueMagic[:]))
+	if [4]byte(data[0:4]) != magic {
+		return nil, fmt.Errorf("nnue: not a stamped Pawnstar net (missing %q header)", string(magic[:]))
 	}
 	// Header fields are little-endian; validate each against this build.
 	got := struct{ version, inputSize, kingBuckets, hiddenSize, qa, qb, scale int }{
@@ -146,23 +146,23 @@ func Load(data []byte) (*Network, error) {
 		qb:          int(int16(binary.LittleEndian.Uint16(data[14:16]))),
 		scale:       int(int16(binary.LittleEndian.Uint16(data[16:18]))),
 	}
-	if got.version != nnueFormatVersion || got.inputSize != nnueInputSize || got.kingBuckets != nnueKingBuckets ||
-		got.hiddenSize != nnueHiddenSize || got.qa != nnueQA || got.qb != nnueQB || got.scale != nnueScale {
+	if got.version != formatVersion || got.inputSize != inputSize || got.kingBuckets != kingBuckets ||
+		got.hiddenSize != hiddenSize || got.qa != qa || got.qb != qb || got.scale != evalScale {
 		return nil, fmt.Errorf("nnue: incompatible net (file v%d/in%d/buckets%d/hidden%d/qa%d/qb%d/scale%d; "+
 			"engine expects v%d/in%d/buckets%d/hidden%d/qa%d/qb%d/scale%d)",
 			got.version, got.inputSize, got.kingBuckets, got.hiddenSize, got.qa, got.qb, got.scale,
-			nnueFormatVersion, nnueInputSize, nnueKingBuckets, nnueHiddenSize, nnueQA, nnueQB, nnueScale)
+			formatVersion, inputSize, kingBuckets, hiddenSize, qa, qb, evalScale)
 	}
-	if len(data) < nnueHeaderBytes+nnuePayloadBytes {
-		return nil, fmt.Errorf("nnue: net truncated (%d bytes, need at least %d)", len(data), nnueHeaderBytes+nnuePayloadBytes)
+	if len(data) < headerBytes+payloadBytes {
+		return nil, fmt.Errorf("nnue: net truncated (%d bytes, need at least %d)", len(data), headerBytes+payloadBytes)
 	}
 
 	// Payload in bullet's save order: feature_weights, feature_bias, output_weights, output_bias.
-	p := data[nnueHeaderBytes:]
+	p := data[headerBytes:]
 	n := &Network{
-		featureWeights: make([]int16, nnueNumFeatureWeights),
-		featureBias:    make([]int16, nnueHiddenSize),
-		outputWeights:  make([]int16, nnueNumOutputWeights),
+		featureWeights: make([]int16, numFeatureWeights),
+		featureBias:    make([]int16, hiddenSize),
+		outputWeights:  make([]int16, numOutputWeights),
 	}
 	off := readInt16Slice(p, 0, n.featureWeights)
 	off = readInt16Slice(p, off, n.featureBias)
@@ -226,26 +226,26 @@ func readInt16Slice(b []byte, off int, dst []int16) int {
 	return off
 }
 
-// nnueFeatureRow is the feature row for a piece in one perspective's bucket bank.
+// featureRow is the feature row for a piece in one perspective's bucket bank.
 //
 //	white perspective: bucket*768 + colour*384 + (type-1)*64 + square
 //	black perspective: bucket*768 + (1-colour)*384 + (type-1)*64 + (square ^ rankFlip)
-func nnueFeatureRow(bucket, colorIdx int, pc uint8, sq int, blackPersp bool) int {
+func featureRow(bucket, colorIdx int, pc uint8, sq int, blackPersp bool) int {
 	typeOffset := (int(pc) - pawnCode) * 64
 	var base int
 	if blackPersp {
-		base = (1-colorIdx)*384 + typeOffset + (sq ^ nnueRankFlip)
+		base = (1-colorIdx)*384 + typeOffset + (sq ^ rankFlip)
 	} else {
 		base = colorIdx*384 + typeOffset + sq
 	}
-	return bucket*nnueInputSize + base
+	return bucket*inputSize + base
 }
 
-// column returns the feature-transformer weight column (length nnueHiddenSize) for one piece on
+// column returns the feature-transformer weight column (length hiddenSize) for one piece on
 // square s in the given perspective's bucket bank.
 func (n *Network) column(bucket, colorIdx int, pc uint8, s int, blackPersp bool) []int16 {
-	start := nnueFeatureRow(bucket, colorIdx, pc, s, blackPersp) * nnueHiddenSize
-	return n.featureWeights[start : start+nnueHiddenSize]
+	start := featureRow(bucket, colorIdx, pc, s, blackPersp) * hiddenSize
+	return n.featureWeights[start : start+hiddenSize]
 }
 
 // popLsb clears and returns the index of the least-significant set bit of *bb (which must be non-zero).
@@ -261,7 +261,7 @@ func popLsb(bb *uint64) int {
 
 // refreshSide rebuilds one perspective accumulator from scratch: seed the bias, then add the
 // feature column of every piece, oriented for that perspective's king bucket.
-func (n *Network) refreshSide(side *[nnueHiddenSize]int16, b *Board, bucket int, blackPersp bool) {
+func (n *Network) refreshSide(side *[hiddenSize]int16, b *Board, bucket int, blackPersp bool) {
 	copy(side[:], n.featureBias)
 	for colorIdx := 0; colorIdx <= 1; colorIdx++ {
 		friendly := b.Colors[colorIdx]
@@ -277,8 +277,8 @@ func (n *Network) refreshSide(side *[nnueHiddenSize]int16, b *Board, bucket int,
 
 // Refresh rebuilds both perspectives of acc from scratch for board b.
 func (n *Network) Refresh(acc *Accumulator, b *Board) {
-	n.refreshSide(&acc.white, b, nnueKingBucketMap[b.kingSquare(0)], false)
-	n.refreshSide(&acc.black, b, nnueKingBucketMap[b.kingSquare(1)^nnueRankFlip], true)
+	n.refreshSide(&acc.white, b, kingBucketMap[b.kingSquare(0)], false)
+	n.refreshSide(&acc.black, b, kingBucketMap[b.kingSquare(1)^rankFlip], true)
 }
 
 // Update moves acc from matching `from` to matching `to` by applying only the feature deltas for
@@ -288,10 +288,10 @@ func (n *Network) Refresh(acc *Accumulator, b *Board) {
 // (read from `from`); for each it now occupies, add the piece now there (read from `to`). A king
 // move that crosses a bucket boundary changes that whole perspective's bank, so it is refreshed.
 func (n *Network) Update(acc *Accumulator, from, to *Board) {
-	wf := nnueKingBucketMap[from.kingSquare(0)]
-	wt := nnueKingBucketMap[to.kingSquare(0)]
-	bf := nnueKingBucketMap[from.kingSquare(1)^nnueRankFlip]
-	bt := nnueKingBucketMap[to.kingSquare(1)^nnueRankFlip]
+	wf := kingBucketMap[from.kingSquare(0)]
+	wt := kingBucketMap[to.kingSquare(0)]
+	bf := kingBucketMap[from.kingSquare(1)^rankFlip]
+	bt := kingBucketMap[to.kingSquare(1)^rankFlip]
 
 	if wf == wt && bf == bt {
 		for colorIdx := 0; colorIdx <= 1; colorIdx++ {
@@ -327,7 +327,7 @@ func (n *Network) Update(acc *Accumulator, from, to *Board) {
 
 // diffSide applies the piece-placement delta from `from` to `to` to a single perspective within one
 // unchanged king bucket (used for the non-crossing perspective when the other king crossed a bucket).
-func (n *Network) diffSide(side *[nnueHiddenSize]int16, from, to *Board, bucket int, blackPersp bool) {
+func (n *Network) diffSide(side *[hiddenSize]int16, from, to *Board, bucket int, blackPersp bool) {
 	for colorIdx := 0; colorIdx <= 1; colorIdx++ {
 		vacated := from.Colors[colorIdx] &^ to.Colors[colorIdx]
 		for vacated != 0 {
@@ -342,16 +342,16 @@ func (n *Network) diffSide(side *[nnueHiddenSize]int16, from, to *Board, bucket 
 	}
 }
 
-// nnueDequant reduces the raw int64 dot (in QA*QA*QB units) to clamped centipawns.
-func nnueDequant(output int64, bias int16) int {
-	output /= nnueQA
+// dequant reduces the raw int64 dot (in QA*QA*QB units) to clamped centipawns.
+func dequant(output int64, bias int16) int {
+	output /= qa
 	output += int64(bias)
-	output *= nnueScale
-	output /= nnueQA * nnueQB
-	if output > nnueMaxEval {
-		output = nnueMaxEval
-	} else if output < -nnueMaxEval {
-		output = -nnueMaxEval
+	output *= evalScale
+	output /= qa * qb
+	if output > maxEval {
+		output = maxEval
+	} else if output < -maxEval {
+		output = -maxEval
 	}
 	return int(output)
 }
@@ -364,11 +364,11 @@ func (n *Network) EvaluateExact(acc *Accumulator, stm int) int {
 	if stm == 1 {
 		s, o = &acc.black, &acc.white
 	}
-	return nnueDequant(outputDot(s, o, n.outputWeights), n.outputBias)
+	return dequant(outputDot(s, o, n.outputWeights), n.outputBias)
 }
 
 // EvaluateInt8 is the int8 output-layer forward pass — the search's hot-path evaluator (mirrors the
-// C++ Network::Evaluate). Activations are requantised to uint8 (SCReLU >> nnueInt8Shift) and the
+// C++ Network::Evaluate). Activations are requantised to uint8 (SCReLU >> int8Shift) and the
 // output weights to int8; the dot then scales back by outputWScale * 2^shift before dequant. Faster
 // than the exact int16 dot at a small (~<=40 cp) deviation from EvaluateExact, which the search
 // tolerates. stm is the colour index (0 white / 1 black).
@@ -378,8 +378,8 @@ func (n *Network) EvaluateInt8(acc *Accumulator, stm int) int {
 		s, o = &acc.black, &acc.white
 	}
 	dot := n.int8OutputDot(s, o)
-	output := dot * int64(n.outputWScale) * (1 << nnueInt8Shift)
-	return nnueDequant(output, n.outputBias)
+	output := dot * int64(n.outputWScale) * (1 << int8Shift)
+	return dequant(output, n.outputBias)
 }
 
 var (

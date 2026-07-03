@@ -167,11 +167,11 @@ func (game *Game) handleUciGo(args []string) {
 	tc.numMovesRemaining = 0 // no movestogo unless this `go` provides one (else computeBudget uses the horizon)
 	tc.increment = 0
 	game.isPondering.Store(false) // set true below if this is a `go ponder`
-	color := game.currentPosition().colorToMove
+	c := game.currentPosition().colorToMove
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "wtime":
-			if color == white {
+			if c == white {
 				tc.clockType = clockStandard
 				if v, err := strconv.Atoi(args[i+1]); err == nil {
 					tc.timeRemaining = time.Duration(v) * time.Millisecond
@@ -179,7 +179,7 @@ func (game *Game) handleUciGo(args []string) {
 			}
 			i++
 		case "btime":
-			if color == black {
+			if c == black {
 				tc.clockType = clockStandard
 				if v, err := strconv.Atoi(args[i+1]); err == nil {
 					tc.timeRemaining = time.Duration(v) * time.Millisecond
@@ -187,14 +187,14 @@ func (game *Game) handleUciGo(args []string) {
 			}
 			i++
 		case "winc":
-			if color == white {
+			if c == white {
 				if v, err := strconv.Atoi(args[i+1]); err == nil {
 					tc.increment = time.Duration(v) * time.Millisecond
 				}
 			}
 			i++
 		case "binc":
-			if color == black {
+			if c == black {
 				if v, err := strconv.Atoi(args[i+1]); err == nil {
 					tc.increment = time.Duration(v) * time.Millisecond
 				}
@@ -256,11 +256,11 @@ func formatScore(score int) string {
 // pvString formats a principal variation as a space-separated UCI move list.
 func pvString(pv variation) string {
 	var b strings.Builder
-	for i, move := range pv.moves {
+	for i, m := range pv.moves {
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-		b.WriteString(move.String())
+		b.WriteString(m.String())
 	}
 	return b.String()
 }

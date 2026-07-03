@@ -28,27 +28,27 @@ func (ml *moveList) slice() []move {
 }
 
 // generateLegalMovesInto fills ml with all legal moves from pos (allocation-free hot path).
-func (position *position) generateLegalMovesInto(ml *moveList) {
-	position.generateMovesInto(ml, position.colorToMove, true)
+func (pos *position) generateLegalMovesInto(ml *moveList) {
+	pos.generateMovesInto(ml, pos.colorToMove, true)
 }
 
 // generateLegalCapturesInto fills ml with captures and promotions only (quiescence hot path).
-func (position *position) generateLegalCapturesInto(ml *moveList) {
-	position.generateMovesInto(ml, position.colorToMove, false)
+func (pos *position) generateLegalCapturesInto(ml *moveList) {
+	pos.generateMovesInto(ml, pos.colorToMove, false)
 }
 
 // generateLegalMoves returns all legal moves as a freshly allocated slice — a convenience wrapper
 // for cold callers (UCI setup, opening book, tests). Hot paths use generateLegalMovesInto instead.
-func (position *position) generateLegalMoves() []move {
+func (pos *position) generateLegalMoves() []move {
 	var ml moveList
-	position.generateMovesInto(&ml, position.colorToMove, true)
+	pos.generateMovesInto(&ml, pos.colorToMove, true)
 	return append([]move(nil), ml.slice()...)
 }
 
 // generateLegalCaptures returns captures and promotions as a freshly allocated slice (cold callers).
-func (position *position) generateLegalCaptures() []move {
+func (pos *position) generateLegalCaptures() []move {
 	var ml moveList
-	position.generateMovesInto(&ml, position.colorToMove, false)
+	pos.generateMovesInto(&ml, pos.colorToMove, false)
 	return append([]move(nil), ml.slice()...)
 }
 
@@ -75,26 +75,26 @@ const (
 //  6. Generate piece moves filtered by pin constraints.
 //  7. Generate castling if not in check and squares are clear and unattacked.
 //  8. Generate pawn moves, with en-passant horizontal-pin detection.
-func (position *position) generateMovesInto(ml *moveList, color color, doAllMoves bool) {
-	occupied := position.occupied()
-	friendlyPieces := position.colors[color]
+func (pos *position) generateMovesInto(ml *moveList, c color, doAllMoves bool) {
+	occupied := pos.occupied()
+	friendlyPieces := pos.colors[c]
 	enemyPieces := occupied ^ friendlyPieces
-	enemyPawns := position.pieces[pawn] & enemyPieces
-	kingLocation := position.kingSquare(color)
+	enemyPawns := pos.pieces[pawn] & enemyPieces
+	kingLocation := pos.kingSquare(c)
 
 	// Build forbidden squares for the king by computing all enemy attacks
 	// (temporarily removing our king so X-ray attacks are included).
 	var forbidden bitboard
-	if color == white {
+	if c == white {
 		forbidden = enemyPawns.shiftSouthwest() | enemyPawns.shiftSoutheast()
 	} else {
 		forbidden = enemyPawns.shiftNorthwest() | enemyPawns.shiftNortheast()
 	}
 	occExceptKing := occupied ^ squareBB(kingLocation)
-	for piece := knight; piece <= king; piece++ {
-		for b := position.pieces[piece] & enemyPieces; b.isNotEmpty(); {
+	for pt := knight; pt <= king; pt++ {
+		for b := pos.pieces[pt] & enemyPieces; b.isNotEmpty(); {
 			s := b.popLsb()
-			forbidden |= pieceAttacks(piece, occExceptKing, s)
+			forbidden |= pieceAttacks(pt, occExceptKing, s)
 		}
 	}
 
@@ -102,7 +102,7 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 	kingTargets := kingAttacks[kingLocation] & ^forbidden
 	for b := kingTargets & enemyPieces; b.isNotEmpty(); {
 		to := b.popLsb()
-		ml.add(moveCapture(kingLocation, to, king, position.squares[to]))
+		ml.add(moveCapture(kingLocation, to, king, pos.squares[to]))
 	}
 	if doAllMoves {
 		for b := kingTargets & ^occupied; b.isNotEmpty(); {
@@ -115,30 +115,30 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 	allowedNonCaptures := ^occupied
 
 	// In check: restrict allowed targets.
-	if position.isInCheck() {
-		if position.checkers.popCount() > 1 {
+	if pos.isInCheck() {
+		if pos.checkers.popCount() > 1 {
 			return // Double check — only king moves are legal.
 		}
-		checkerSq := position.checkers.lsb()
-		allowedCaptures = position.checkers
+		checkerSq := pos.checkers.lsb()
+		allowedCaptures = pos.checkers
 		allowedNonCaptures = interveningSquares[kingLocation][checkerSq]
 	}
 
-	pinInfo := computePins(position)
+	pinInfo := computePins(pos)
 
 	// Piece moves (knight, bishop, rook, queen).
-	for piece := knight; piece <= queen; piece++ {
-		for b := position.pieces[piece] & friendlyPieces; b.isNotEmpty(); {
+	for pt := knight; pt <= queen; pt++ {
+		for b := pos.pieces[pt] & friendlyPieces; b.isNotEmpty(); {
 			from := b.popLsb()
-			attacks := pieceAttacks(piece, occupied, from) & pinInfo.allowedSquares(from)
+			attacks := pieceAttacks(pt, occupied, from) & pinInfo.allowedSquares(from)
 			for captures := attacks & allowedCaptures; captures.isNotEmpty(); {
 				to := captures.popLsb()
-				ml.add(moveCapture(from, to, piece, position.squares[to]))
+				ml.add(moveCapture(from, to, pt, pos.squares[to]))
 			}
 			if doAllMoves {
 				for nonCaptures := attacks & allowedNonCaptures; nonCaptures.isNotEmpty(); {
 					to := nonCaptures.popLsb()
-					ml.add(moveNonCapture(from, to, piece))
+					ml.add(moveNonCapture(from, to, pt))
 				}
 			}
 		}
@@ -146,27 +146,27 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 
 	// Castling (only when not in check; squares between king and rook must be
 	// empty and unattacked).
-	if doAllMoves && !position.isInCheck() {
-		if color == white {
-			if position.castling.mayWhiteCastleKingside() &&
+	if doAllMoves && !pos.isInCheck() {
+		if c == white {
+			if pos.castling.mayWhiteCastleKingside() &&
 				(occupied & f1g1bb).isEmpty() &&
-				!position.isAttacked(f1, black) && !position.isAttacked(g1, black) {
+				!pos.isAttacked(f1, black) && !pos.isAttacked(g1, black) {
 				ml.add(moveCastling(e1, g1))
 			}
-			if position.castling.mayWhiteCastleQueenside() &&
+			if pos.castling.mayWhiteCastleQueenside() &&
 				(occupied & b1c1d1bb).isEmpty() &&
-				!position.isAttacked(d1, black) && !position.isAttacked(c1, black) {
+				!pos.isAttacked(d1, black) && !pos.isAttacked(c1, black) {
 				ml.add(moveCastling(e1, c1))
 			}
 		} else {
-			if position.castling.mayBlackCastleKingside() &&
+			if pos.castling.mayBlackCastleKingside() &&
 				(occupied & f8g8bb).isEmpty() &&
-				!position.isAttacked(f8, white) && !position.isAttacked(g8, white) {
+				!pos.isAttacked(f8, white) && !pos.isAttacked(g8, white) {
 				ml.add(moveCastling(e8, g8))
 			}
-			if position.castling.mayBlackCastleQueenside() &&
+			if pos.castling.mayBlackCastleQueenside() &&
 				(occupied & b8c8d8bb).isEmpty() &&
-				!position.isAttacked(d8, white) && !position.isAttacked(c8, white) {
+				!pos.isAttacked(d8, white) && !pos.isAttacked(c8, white) {
 				ml.add(moveCastling(e8, c8))
 			}
 		}
@@ -189,14 +189,14 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 		eastDelta      int
 	)
 
-	pawns = position.pieces[pawn] & friendlyPieces
-	if color == white {
+	pawns = pos.pieces[pawn] & friendlyPieces
+	if c == white {
 		singlePushes = pawns.shiftNorth() & ^occupied
 		doublePushes = singlePushes.shiftNorth() & ^occupied & rank4
 		capturesWest = pawns.shiftNorthwest() & enemyPieces
 		capturesEast = pawns.shiftNortheast() & enemyPieces
-		if position.epSquare != noSquare {
-			epSources = pawnAttacksBlack[position.epSquare] & pawns
+		if pos.epSquare != noSquare {
+			epSources = pawnAttacksBlack[pos.epSquare] & pawns
 		}
 		pushDelta = 8
 		westDelta = 7
@@ -207,8 +207,8 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 		doublePushes = singlePushes.shiftSouth() & ^occupied & rank5
 		capturesWest = pawns.shiftSouthwest() & enemyPieces
 		capturesEast = pawns.shiftSoutheast() & enemyPieces
-		if position.epSquare != noSquare {
-			epSources = pawnAttacksWhite[position.epSquare] & pawns
+		if pos.epSquare != noSquare {
+			epSources = pawnAttacksWhite[pos.epSquare] & pawns
 		}
 		pushDelta = -8
 		westDelta = -9
@@ -232,7 +232,7 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 			to := b.popLsb()
 			from := square(int(to) - pair.delta)
 			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
-				captured := position.squares[to]
+				captured := pos.squares[to]
 				ml.add(movePromotion(from, to, queen, captured))
 				ml.add(movePromotion(from, to, rook, captured))
 				ml.add(movePromotion(from, to, bishop, captured))
@@ -264,7 +264,7 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 			to := b.popLsb()
 			from := square(int(to) - pair.delta)
 			if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() {
-				ml.add(moveCapture(from, to, pawn, position.squares[to]))
+				ml.add(moveCapture(from, to, pawn, pos.squares[to]))
 			}
 		}
 	}
@@ -293,7 +293,7 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 	// check whether a rook or queen on that rank attacks the king.
 	for epSources.isNotEmpty() {
 		from := epSources.popLsb()
-		to := position.epSquare
+		to := pos.epSquare
 		// The captured pawn is on the source rank, destination file.
 		capturedSq := epCapturedSquare(from, to)
 		if (pinInfo.allowedSquares(from) & squareBB(to)).isNotEmpty() &&
@@ -302,7 +302,7 @@ func (position *position) generateMovesInto(ml *moveList, color color, doAllMove
 			if kingLocation.rank() == from.rank() {
 				pseudoOcc := occupied ^ squareBB(capturedSq) ^ squareBB(from)
 				horizontalAttacks := rookAttacks(pseudoOcc, kingLocation) & (westOf[kingLocation] | eastOf[kingLocation])
-				if (horizontalAttacks & position.colors[enemyOf(color)] & (position.pieces[rook] | position.pieces[queen])).isNotEmpty() {
+				if (horizontalAttacks & pos.colors[enemyOf(c)] & (pos.pieces[rook] | pos.pieces[queen])).isNotEmpty() {
 					continue
 				}
 			}

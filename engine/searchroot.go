@@ -154,21 +154,21 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, threadID int)
 		// improve; beta stays at initialBeta, so PVS null-windows every move after the first improvement.
 		var pv variation
 		alpha := initialAlpha
-		for i, move := range moves {
+		for i, m := range moves {
 			// Report the move currently being searched at the root, but only once a search is slow
 			// enough that a GUI benefits — avoids flooding info lines on the fast shallow iterations.
 			if isMain && ss.game.elapsedSinceSearchStart() > 3*time.Second {
-				fmt.Printf("info depth %d currmove %s currmovenumber %d\n", depth, move.String(), i+1)
+				fmt.Printf("info depth %d currmove %s currmovenumber %d\n", depth, m.String(), i+1)
 			}
 			pv.clear()
-			score := searchSingleMove(ss, depth, 0, alpha, initialBeta, move, &pv, i)
-			moves[i] = move.withScore(score)
+			score := searchSingleMove(ss, depth, 0, alpha, initialBeta, m, &pv, i)
+			moves[i] = m.withScore(score)
 			if ss.isCancelled() {
 				return bestMove
 			}
 			if score > alpha {
 				alpha = score
-				bestMove = move
+				bestMove = m
 				if isMain {
 					copyVariation(&principalVariation, pv, bestMove)
 					// Publish the predicted reply (PV[1]) as it improves, so `bestmove <m> ponder <reply>`
@@ -225,8 +225,8 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, threadID int)
 
 // allSame returns true if every move in moves has the same identity as best.
 func allSame(moves []move, best move) bool {
-	for _, move := range moves {
-		if !move.equal(best) {
+	for _, m := range moves {
+		if !m.equal(best) {
 			return false
 		}
 	}
@@ -236,8 +236,8 @@ func allSame(moves []move, best move) bool {
 // allScoreStable returns true if every move in moves has a score within
 // scoreInstabilityThresh centipawns of best's score.
 func allScoreStable(moves []move, best move) bool {
-	for _, move := range moves {
-		if absInt(move.score()-best.score()) > scoreInstabilityThresh {
+	for _, m := range moves {
+		if absInt(m.score()-best.score()) > scoreInstabilityThresh {
 			return false
 		}
 	}
