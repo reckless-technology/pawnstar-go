@@ -7,3 +7,4 @@
 - [project-go-nnue-arm64-neon](project-go-nnue-arm64-neon.md) — DONE: arm64/NEON NNUE kernels landed (WORD-encoded SQXTUN/UMULL/SMLAL + ILP unroll); arm64 Go bench 190k→1.14M nps (6.0×), now ~parity with C++
 - [reference-go-nnue-kernel-layout](reference-go-nnue-kernel-layout.md) — NNUE kernel files/build-tags/dispatch + the 3 output-weight representations; how to slot in a new-arch SIMD kernel
 - [project-go-state-2026-07](project-go-state-2026-07.md) — handoff snapshot: pawnstar-go HEAD 9f04267, this session's commits, and where the arm64 work picks up
+- [project-capture-history-wip](project-capture-history-wip.md) — IN FLIGHT: capture history in both engines (bench 7,295,483, bit-identical), uncommitted pending SPRT; match chain running on the Mac
