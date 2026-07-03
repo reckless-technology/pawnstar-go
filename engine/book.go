@@ -5,6 +5,7 @@ import (
 	"io"
 	"math/rand"
 	"strings"
+	"sync"
 )
 
 // openingBook maps position Zobrist hashes to candidate next moves.
@@ -12,12 +13,22 @@ type openingBook struct {
 	moves map[zobrist][]move
 }
 
-// newOpeningBook builds the hash→moves index from the embedded book (engine/book.txt, compiled in via
+var (
+	embeddedBookOnce  sync.Once
+	embeddedBookMoves map[zobrist][]move
+)
+
+// newOpeningBook returns the hash→moves index for the embedded book (engine/book.txt, compiled in via
 // go:embed), so the engine always has a book with no external file to ship. Each line is a sequence of
 // moves from the starting position; for every prefix of a line, the next move is recorded as a candidate
-// for that position's hash.
+// for that position's hash. Parsing replays every line with full legal move generation (~10 ms), so the
+// index is built once and shared read-only by every Game — clear() drops a game's reference instead of
+// mutating the shared map.
 func newOpeningBook() openingBook {
-	return loadOpeningBook(strings.NewReader(embeddedBook))
+	embeddedBookOnce.Do(func() {
+		embeddedBookMoves = loadOpeningBook(strings.NewReader(embeddedBook)).moves
+	})
+	return openingBook{moves: embeddedBookMoves}
 }
 
 // loadOpeningBook builds a hash→moves index from book text (one move-sequence per line). A move written
@@ -48,9 +59,11 @@ func loadOpeningBook(r io.Reader) openingBook {
 	return b
 }
 
-// clear empties the book so the engine will not use book moves (parity with the TT and eval-cache clear).
+// clear empties this game's book so the engine will not use book moves (parity with the TT and
+// eval-cache clear). It drops the map reference rather than emptying the map, because the parsed
+// embedded book is shared read-only across games; getMove on the nil map returns no candidates.
 func (book *openingBook) clear() {
-	clear(book.moves)
+	book.moves = nil
 }
 
 // getMove returns a randomly chosen book move for hash, or moveNone if the

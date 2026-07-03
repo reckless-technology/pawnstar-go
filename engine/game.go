@@ -28,6 +28,7 @@ type Game struct {
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
 	posStack           []position         // game history + current search path
 	isCancelPending    atomic.Bool        // set true to signal all search goroutines to stop
+	mainSearchState    *searchState       // main thread's search state, reused across searches (resetForSearch per go)
 	// Pondering + the live clock. isPondering suppresses the hard/soft time stops while a `go ponder`
 	// search runs. searchStartNanos (soft-budget origin) and hardDeadlineNanos are atomics because
 	// `ponderhit` (UCI goroutine) mutates them while the search goroutines read them every node; the
