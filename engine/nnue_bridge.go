@@ -7,14 +7,32 @@ package engine
 
 import (
 	"fmt"
+	"unsafe"
 
 	"pawnstar-go/engine/nnue"
 )
 
-// nnueBoard builds the raw piece-placement view the nnue package consumes. Pure value conversion —
-// the engine's bitboard/piece codes already match the nnue package's (uint64 occupancy, piece codes
-// pawn=1..king=6), so this is a plain widening copy with no re-encoding.
-func (pos *position) nnueBoard() nnue.Board {
+// nnueBoard returns the position as the raw piece-placement view the nnue package consumes — a
+// zero-copy reinterpret, not a conversion. position's first three fields (pieces [7]bitboard,
+// colors [2]bitboard, squares [64]piece) are laid out byte-identically to nnue.Board (Pieces
+// [7]uint64, Colors [2]uint64, Squares [64]uint8) because bitboard is uint64 and piece is uint8 and
+// the field order matches — so the position's leading 136 bytes ARE an nnue.Board. Passing the
+// pointer (rather than materialising a value) is what C++ gets for free by handing Update a
+// `Position const&`; profiling showed the old per-eval materialisation was ~10% of runtime, almost
+// all of it redundant rebuilds of the parent board across a node's siblings.
+//
+// The layout equivalence is a contract, not a coincidence: it mirrors the C++ Position. It is asserted
+// bit-for-bit by TestNnueBoardLayout (offsets + a random-position round-trip against
+// nnueBoardExplicit), and any reorder of position's leading fields fails that test loudly. The nnue
+// package stays free of engine imports — this file remains the only place the two vocabularies meet.
+func (pos *position) nnueBoard() *nnue.Board {
+	return (*nnue.Board)(unsafe.Pointer(pos))
+}
+
+// nnueBoardExplicit builds the nnue.Board by explicit field copy — the independent oracle that
+// TestNnueBoardLayout checks the zero-copy nnueBoard() against, so the unsafe reinterpret can never
+// silently diverge from a plain, obviously-correct construction. Not used on any hot path.
+func (pos *position) nnueBoardExplicit() nnue.Board {
 	var b nnue.Board
 	for i, bb := range pos.pieces {
 		b.Pieces[i] = uint64(bb)

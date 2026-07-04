@@ -7,9 +7,51 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"pawnstar-go/engine/nnue"
 )
+
+// TestNnueBoardLayout guards the zero-copy reinterpret in nnueBoard(): position's leading fields must
+// stay laid out identically to nnue.Board, or a *position reinterpreted as *nnue.Board would read
+// garbage and corrupt every eval. It asserts the field offsets and struct size, then checks the
+// reinterpret against the independent explicit builder over the start position, Kiwipete, and every
+// bench position — plus every one-ply successor of each, so captures, en passant, castling and
+// promotion all appear in a `to` position. A reorder of position's first three fields fails here.
+func TestNnueBoardLayout(t *testing.T) {
+	var pos position
+	var brd nnue.Board
+	if got, want := unsafe.Offsetof(pos.pieces), unsafe.Offsetof(brd.Pieces); got != want {
+		t.Fatalf("pieces offset %d != nnue.Board.Pieces offset %d", got, want)
+	}
+	if got, want := unsafe.Offsetof(pos.colors), unsafe.Offsetof(brd.Colors); got != want {
+		t.Fatalf("colors offset %d != nnue.Board.Colors offset %d", got, want)
+	}
+	if got, want := unsafe.Offsetof(pos.squares), unsafe.Offsetof(brd.Squares); got != want {
+		t.Fatalf("squares offset %d != nnue.Board.Squares offset %d", got, want)
+	}
+	if unsafe.Sizeof(pos) < unsafe.Sizeof(brd) {
+		t.Fatalf("position (%d bytes) smaller than nnue.Board (%d bytes) — reinterpret would over-read",
+			unsafe.Sizeof(pos), unsafe.Sizeof(brd))
+	}
+
+	check := func(p *position, label string) {
+		t.Helper()
+		if got, want := *p.nnueBoard(), p.nnueBoardExplicit(); got != want {
+			t.Fatalf("nnueBoard reinterpret != explicit build (%s)", label)
+		}
+	}
+	fens := append([]string{startFen, midgameFen}, benchFens[:]...)
+	for _, fen := range fens {
+		p := positionFromFen(fen)
+		check(&p, fen)
+		for _, m := range p.generateLegalMoves() {
+			c := p
+			c.makeMove(m)
+			check(&c, fen+" after "+m.String())
+		}
+	}
+}
 
 // TestNNUEReference cross-checks the scalar int16 EvaluateExact forward pass against the trainer's
 // reference evaluations (engine/testdata/nnue_reference.txt, one "<fen> | <expected_cp>" per line,
@@ -97,7 +139,7 @@ func TestNNUEInt8(t *testing.T) {
 		pos := positionFromFen(fen)
 		b := pos.nnueBoard()
 		var acc nnue.Accumulator
-		net.Refresh(&acc, &b)
+		net.Refresh(&acc, b)
 		i8 := net.EvaluateInt8(&acc, int(pos.colorToMove))
 		ref := net.EvaluateExact(&acc, int(pos.colorToMove))
 		dev := i8 - ref
@@ -161,7 +203,7 @@ func TestNNUEIncremental(t *testing.T) {
 func evaluateExactPosition(net *nnue.Network, pos *position) int {
 	b := pos.nnueBoard()
 	var acc nnue.Accumulator
-	net.Refresh(&acc, &b)
+	net.Refresh(&acc, b)
 	return net.EvaluateExact(&acc, int(pos.colorToMove))
 }
 
@@ -170,7 +212,7 @@ func evaluateExactPosition(net *nnue.Network, pos *position) int {
 func accsEqual(net *nnue.Network, ss *searchState) (bool, *nnue.Accumulator, *nnue.Accumulator) {
 	fresh := &nnue.Accumulator{}
 	b := ss.currentPosition().nnueBoard()
-	net.Refresh(fresh, &b)
+	net.Refresh(fresh, b)
 	got := ss.currentAccumulator()
 	return *fresh == *got, fresh, got
 }
@@ -214,7 +256,7 @@ func findDeepCatchUpMismatch(net *nnue.Network, ss *searchState, depth int) stri
 	}
 	fresh := &nnue.Accumulator{}
 	b := ss.currentPosition().nnueBoard()
-	net.Refresh(fresh, &b)
+	net.Refresh(fresh, b)
 	if got := ss.currentAccumulator(); *fresh != *got { // single sweep catches up all `played` plies
 		dw, db := nnue.DiffLanes(fresh, got)
 		return fmt.Sprintf("deep catch-up over %d plies differs (%d white / %d black lanes)", played, dw, db)

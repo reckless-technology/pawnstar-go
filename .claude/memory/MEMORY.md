@@ -10,3 +10,4 @@
 - [project-capture-history-wip](project-capture-history-wip.md) — ordering experiments: capture-history v1/v2 rejected; BUTTERFLY HISTORY ADOPTED (+~7 Elo, probe −17.7%, golden 6,888,983); pre-SPRT probe protocol standing
 - [reference-staged-movegen-analysis](reference-staged-movegen-analysis.md) — staged movegen analysed and rejected (legal-gen setup paid twice; pseudo-legal moves cost to try-time; ~+3-4 Elo ceiling); shared-analysis-pass split is the one sound design if revisited
 - [feedback-tee-test-output](feedback-tee-test-output.md) — always tee test output to a tmp file (inline grep discards evidence; empty grep masquerades as no-output)
+- [reference-profile-ryzen-2026-07](reference-profile-ryzen-2026-07.md) — perf profile Go vs C++ on Ryzen 4500U: Go 1.53x slower, nnueBoard() conversion ~10% is the standout Go-only optimization lever
