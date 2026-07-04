@@ -18,12 +18,14 @@ func newSeeBoard(pos *position) seeBoard {
 	return seeBoard{pieces: pos.pieces, colors: pos.colors}
 }
 
-// evaluateStaticExchange returns the SEE score for m (positive = winning capture) and whether m gives
-// check. It applies only the capturing move to a lightweight bitboard board — no makeMove, so no
-// Zobrist/castling/squares[] bookkeeping — detects check by testing whether the moving side now attacks
-// the enemy king (seeAttackersTo, which catches discovered, promotion and en-passant-discovered checks),
-// and scores the recapture sequence with evaluateSwapOff. Mirrors the C++ EvaluateStaticExchange.
-func evaluateStaticExchange(pos *position, m move) (int, bool) {
+// evaluateStaticExchange returns the SEE score for m (positive = winning capture). It applies only the
+// capturing move to a lightweight bitboard board — no makeMove, so no Zobrist/castling/squares[]
+// bookkeeping — and scores the recapture sequence with evaluateSwapOff. Mirrors the C++
+// EvaluateStaticExchange, minus its gives-check byproduct: that flag was only ever consumed by a late
+// move pruning guard already gated on m.isQuiet(), and the flag is set only on non-quiet moves, so the
+// guard was vacuous (always true) — computing check here was dead work. Dropped in both the read site
+// and this producer; the search is bit-identical (bench signature unchanged).
+func evaluateStaticExchange(pos *position, m move) int {
 	c := pos.colorToMove
 	enemy := enemyOf(c)
 	from := m.from()
@@ -58,30 +60,11 @@ func evaluateStaticExchange(pos *position, m move) (int, bool) {
 	bb.pieces[pieceOnTo] ^= toBB
 	bb.colors[c] ^= toBB
 
-	// Check = the side that just moved now attacks the opposing king.
-	enemyKing := (bb.pieces[king] & bb.colors[enemy]).lsb()
-	isChecking := seeAttackersTo(&bb, enemyKing, c).isNotEmpty()
-
 	if promoted != noPiece {
 		return seeValues[captured] + seeValues[promoted] - seeValues[pawn] -
-			evaluateSwapOff(&bb, to, enemy, promoted), isChecking
+			evaluateSwapOff(&bb, to, enemy, promoted)
 	}
-	return seeValues[captured] - evaluateSwapOff(&bb, to, enemy, mover), isChecking
-}
-
-// seeAttackersTo returns the set of `color` pieces attacking `location` on the working board (using its
-// colour bitboards for occupancy). Used by evaluateStaticExchange for MakeMove-free check detection.
-func seeAttackersTo(bb *seeBoard, sq square, c color) bitboard {
-	occupied := bb.colors[white] | bb.colors[black]
-	pawnSrc := pawnAttacksWhite[sq]
-	if c == white {
-		pawnSrc = pawnAttacksBlack[sq]
-	}
-	result := pawnSrc & bb.pieces[pawn]
-	result |= (knightAttacks[sq] & bb.pieces[knight]) | (kingAttacks[sq] & bb.pieces[king])
-	result |= rookAttacks(occupied, sq) & (bb.pieces[rook] | bb.pieces[queen])
-	result |= bishopAttacks(occupied, sq) & (bb.pieces[bishop] | bb.pieces[queen])
-	return result & bb.colors[c]
+	return seeValues[captured] - evaluateSwapOff(&bb, to, enemy, mover)
 }
 
 // evaluateSwapOff simulates the full exchange sequence on location, starting with
