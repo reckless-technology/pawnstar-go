@@ -199,8 +199,8 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 		// Late move pruning (move-count pruning): at shallow depth in a null-window node not in check,
 		// once we are deep into the (SEE/history-sorted) move list, skip the remaining quiet moves —
-		// they almost never raise alpha. Captures, promotions and checking moves are never pruned.
-		if nullWindow && !inCheck && depth <= lmpMaxDepth && m.isQuiet() && !m.isChecking() && i >= lmpBase+depth*depth {
+		// they almost never raise alpha. Only quiet moves are eligible — captures and promotions are not quiet, so they never prune here.
+		if nullWindow && !inCheck && depth <= lmpMaxDepth && m.isQuiet() && i >= lmpBase+depth*depth {
 			ss.dbg.lateMovePrunes++
 			continue
 		}

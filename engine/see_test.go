@@ -6,11 +6,10 @@ import "testing"
 
 func TestSEE(t *testing.T) {
 	tests := []struct {
-		name         string
-		fen          string
-		move         move
-		wantScore    int
-		wantChecking bool
+		name      string
+		fen       string
+		move      move
+		wantScore int
 	}{
 		// ── C reference cases ─────────────────────────────────────────────────
 
@@ -39,9 +38,7 @@ func TestSEE(t *testing.T) {
 
 		{
 			// Simplest non-trivial case: attacker worth more than target, but no
-			// recapture is possible.  The king is placed on a8, not h8, because
-			// moving to d4 opens the c3–h8 diagonal — a king on h8 would trigger
-			// an unexpected isChecking=true.
+			// recapture is possible, so SEE is just the captured knight (+300).
 			name:      "bishop takes undefended knight",
 			fen:       "k7/8/8/8/3n4/2B5/8/K7 w - - 0 1",
 			move:      moveCapture(c3, d4, bishop, knight),
@@ -148,29 +145,19 @@ func TestSEE(t *testing.T) {
 			wantScore: 1300,
 		},
 		{
-			// Same promotion score (+1300), but the promoted queen on h8 attacks
-			// the black king on e5 along the h8–e5 diagonal (Δfile=−3, Δrank=−3),
-			// so isChecking must be true.  Verifies that the check flag is derived
-			// from the promoted piece's attack pattern, not the moving pawn's.
-			name:         "promotion: pawn captures rook, promotes to queen, gives check",
-			fen:          "7r/6P1/8/4k3/8/8/8/K7 w - - 0 1",
-			move:         movePromotion(g7, h8, queen, rook),
-			wantScore:    1300,
-			wantChecking: true,
+			// Same promotion, scored from the promoted queen: +1300 (rook captured,
+			// pawn spent, queen gained), undefended.
+			name:      "promotion: pawn captures rook, promotes to queen (from h-file)",
+			fen:       "7r/6P1/8/4k3/8/8/8/K7 w - - 0 1",
+			move:      movePromotion(g7, h8, queen, rook),
+			wantScore: 1300,
 		},
 
-		// ── Check detection ───────────────────────────────────────────────────
-
 		{
-			// Non-promotion check: after Ra1×a7 the rook attacks the king on h7
-			// along rank 7.  Score is simply the undefended pawn (+100).  Together
-			// with the promotion check case above, both paths through isChecking
-			// are exercised independently.
-			name:         "rook takes pawn, checks king on same rank",
-			fen:          "8/p6k/8/8/8/8/8/RK6 w - - 0 1",
-			move:         moveCapture(a1, a7, rook, pawn),
-			wantScore:    100,
-			wantChecking: true,
+			name:      "rook takes an undefended pawn on the same rank",
+			fen:       "8/p6k/8/8/8/8/8/RK6 w - - 0 1",
+			move:      moveCapture(a1, a7, rook, pawn),
+			wantScore: 100,
 		},
 
 		// ── Additional promotion cases ───────────────────────────────────────────
@@ -262,13 +249,12 @@ func TestSEE(t *testing.T) {
 			wantScore: 100,
 		},
 
-		// ── Losing capture that gives check ───────────────────────────────────
+		// ── Losing capture (queen for a king-defended pawn) ───────────────────
 		{
-			name:         "queen grabs a king-defended pawn, loses the queen but gives check",
-			fen:          "k7/p7/8/8/8/8/8/Q6K w - - 0 1",
-			move:         moveCapture(a1, a7, queen, pawn),
-			wantScore:    -800,
-			wantChecking: true,
+			name:      "queen grabs a king-defended pawn and loses the queen",
+			fen:       "k7/p7/8/8/8/8/8/Q6K w - - 0 1",
+			move:      moveCapture(a1, a7, queen, pawn),
+			wantScore: -800,
 		},
 
 		// ── Cross-color pawn recapture: two attackers vs one defender ─────────
@@ -285,12 +271,9 @@ func TestSEE(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := positionFromFen(tt.fen)
-			gotScore, gotChecking := evaluateStaticExchange(&pos, tt.move)
+			gotScore := evaluateStaticExchange(&pos, tt.move)
 			if gotScore != tt.wantScore {
 				t.Errorf("score: got %d, want %d", gotScore, tt.wantScore)
-			}
-			if gotChecking != tt.wantChecking {
-				t.Errorf("givesCheck: got %v, want %v", gotChecking, tt.wantChecking)
 			}
 		})
 	}
@@ -349,10 +332,9 @@ func seeReferenceSwapOff(bb seeBoard, sq square, color color, onSquare piece) in
 
 // seeReference computes SEE independently of evaluateStaticExchange (recursive negamax swap-off) and is
 // used only to cross-check it.
-func seeReference(pos *position, m move) (int, bool) {
+func seeReference(pos *position, m move) int {
 	child := *pos
 	child.makeMove(m)
-	isChecking := child.isInCheck()
 	captured := seeValues[m.captured()]
 	if m.kind() == epCapture {
 		captured = seeValues[pawn]
@@ -363,22 +345,22 @@ func seeReference(pos *position, m move) (int, bool) {
 		gain += seeValues[p] - seeValues[pawn]
 		landed = p
 	}
-	return gain - seeReferenceSwapOff(newSeeBoard(&child), m.to(), child.colorToMove, landed), isChecking
+	return gain - seeReferenceSwapOff(newSeeBoard(&child), m.to(), child.colorToMove, landed)
 }
 
 // crossCheckSee walks every capture/promotion in the depth-bounded move tree from pos and asserts the
-// fast evaluateStaticExchange matches the recursive seeReference — score AND give-check flag. Ports the
-// C++ CrossCheckSee: exercises en passant, promotion captures, and discovered/promotion/ep checks.
+// fast evaluateStaticExchange matches the recursive seeReference. Ports the C++ CrossCheckSee:
+// exercises en passant and promotion captures over ~1M positions.
 func crossCheckSee(t *testing.T, pos *position, depth int) int {
 	checks := 0
 	for _, m := range pos.generateLegalMoves() {
 		if m.captured() != noPiece || m.promoted() != noPiece {
 			checks++
-			fastScore, fastChk := evaluateStaticExchange(pos, m)
-			refScore, refChk := seeReference(pos, m)
-			if fastScore != refScore || fastChk != refChk {
-				t.Errorf("SEE mismatch on %s (fen %s): fast {%d,%v} ref {%d,%v}",
-					m.String(), pos.toFenString(), fastScore, fastChk, refScore, refChk)
+			fastScore := evaluateStaticExchange(pos, m)
+			refScore := seeReference(pos, m)
+			if fastScore != refScore {
+				t.Errorf("SEE mismatch on %s (fen %s): fast %d ref %d",
+					m.String(), pos.toFenString(), fastScore, refScore)
 			}
 		}
 		if depth > 0 {

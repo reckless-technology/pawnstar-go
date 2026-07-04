@@ -7,7 +7,7 @@ package engine
 //	12–14  moving piece
 //	15–17  captured piece (noPiece if non-capture)
 //	18–21  move type (moveType value)
-//	   22  gives-check flag
+//	   22  reserved (formerly gives-check; no longer computed)
 //	23–24  transposition node type (nodeType)
 //	25–32  transposition depth searched (int8)
 //	33–40  transposition age / generation (uint8)
@@ -27,7 +27,7 @@ const (
 	movePieceShift    = 12 // bits 12–14: moving piece
 	moveCapturedShift = 15 // bits 15–17: captured piece
 	moveTypeShift     = 18 // bits 18–21: move type
-	moveCheckShift    = 22 // bit 22:     gives-check flag
+	moveCheckShift    = 22 // bit 22:     reserved (was gives-check; no longer computed — the LMP guard it fed was vacuous)
 	moveNodeTypeShift = 23 // bits 23–24: TT node type
 	moveDepthShift    = 25 // bits 25–32: TT depth (int8)
 	moveAgeShift      = 33 // bits 33–40: TT age / generation (uint8)
@@ -41,7 +41,6 @@ const (
 	moveFromToMask   = 0xFFF    // bits 0–11: from+to (history-table index)
 	moveIdentityMask = 0x3FFFFF // bits 0–21: to/from/piece/captured/type (move identity)
 
-	moveCheckBit   = int64(1) << moveCheckShift             // bit 22
 	moveAgeMask    = int64(moveByteMask) << moveAgeShift    // bits 33–40
 	moveScoreMask  = ^((int64(1) << moveScoreShift) - 1)    // bits 41–63
 	moveTTDataMask = ^((int64(1) << moveNodeTypeShift) - 1) // bits 23–63 (node type, depth, age, score)
@@ -147,15 +146,6 @@ func moveFromBits(b uint64) move { return move(int64(b)) }
 // isQuiet reports whether the move is neither a capture nor a promotion (mirrors the C++
 // Move::IsQuiet). Pawn pushes and castling count as quiet. Used by late-move pruning.
 func (m move) isQuiet() bool { return m.captured() == noPiece && m.promoted() == noPiece }
-
-// isChecking reports whether the move is flagged as giving check (bit 22). The flag is set during move
-// ordering for captures/promotions from the SEE check test; late-move pruning uses it to never prune a
-// checking move. Mirrors the C++ Move::IsChecking.
-func (m move) isChecking() bool { return int64(m)&moveCheckBit != 0 }
-
-// withCheck returns a copy of m with the gives-check flag (bit 22) set. Mirrors the C++
-// Move::GivesCheck (which mutates in place; move values here are copied, so this returns the update).
-func (m move) withCheck() move { return move(int64(m) | moveCheckBit) }
 
 // pieceTo returns a (piece, to-square) index in [0, contKeys) used to key the countermove and
 // continuation-history tables. moveNone maps to 0 (a harmless slot). Mirrors the C++ Move::piece_to,

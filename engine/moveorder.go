@@ -19,10 +19,7 @@ func (ss *searchState) scoreAndSortMoves(moves []move, ply int, prevMove move) {
 		var sort int
 		switch {
 		case !m.isQuiet(): // capture or promotion: order by static exchange evaluation
-			see, isChecking := evaluateStaticExchange(pos, m)
-			if isChecking { // carry the checking status out of ordering so LMP never prunes it
-				m = m.withCheck()
-			}
+			see := evaluateStaticExchange(pos, m)
 			if see >= 0 {
 				sort = winningCaptureBase + see
 			} else {
