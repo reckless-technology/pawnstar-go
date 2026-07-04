@@ -104,8 +104,7 @@ func (ss *searchState) resetForSearch() {
 	ss.seldepth = 0
 	ss.accStack = ss.accStack[:1]
 	ss.accValid = ss.accValid[:1]
-	rootBoard := ss.posStack[0].nnueBoard()
-	game.nnue.Refresh(&ss.accStack[0], &rootBoard)
+	game.nnue.Refresh(&ss.accStack[0], ss.posStack[0].nnueBoard())
 	ss.accValid[0] = true
 }
 
@@ -142,12 +141,15 @@ func (ss *searchState) currentAccumulator() *nnue.Accumulator {
 		k--
 	}
 	if k < d {
-		// Chain the board views forward so each position converts exactly once per catch-up sweep.
+		// Each posStack entry is passed to Update as a zero-copy nnue.Board view (nnueBoard), so no
+		// board is materialised — the ancestor and every intermediate position are read in place, the
+		// way C++ hands Update a Position const&. The views point into posStack, which is not appended
+		// to during this read-only sweep, so they stay valid; Update never mutates the boards it reads.
 		from := ss.posStack[k].nnueBoard()
 		for j := k + 1; j <= d; j++ {
 			to := ss.posStack[j].nnueBoard()
 			ss.accStack[j] = ss.accStack[j-1]
-			ss.game.nnue.Update(&ss.accStack[j], &from, &to)
+			ss.game.nnue.Update(&ss.accStack[j], from, to)
 			ss.accValid[j] = true
 			from = to
 		}

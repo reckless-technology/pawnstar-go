@@ -22,7 +22,7 @@ func BenchmarkNNUEEvaluateExact(b *testing.B) {
 	pos := positionFromFen(midgameFen)
 	board := pos.nnueBoard()
 	var acc nnue.Accumulator
-	net.Refresh(&acc, &board)
+	net.Refresh(&acc, board)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sink = net.EvaluateExact(&acc, int(pos.colorToMove))
@@ -36,7 +36,7 @@ func BenchmarkNNUEEvaluateInt8(b *testing.B) {
 	pos := positionFromFen(midgameFen)
 	board := pos.nnueBoard()
 	var acc nnue.Accumulator
-	net.Refresh(&acc, &board)
+	net.Refresh(&acc, board)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sink = net.EvaluateInt8(&acc, int(pos.colorToMove))
@@ -50,7 +50,7 @@ func BenchmarkNNUERefresh(b *testing.B) {
 	var acc nnue.Accumulator
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		net.Refresh(&acc, &board)
+		net.Refresh(&acc, board)
 	}
 }
 
@@ -61,11 +61,11 @@ func BenchmarkNNUEUpdate(b *testing.B) {
 	to.makeMove(to.generateLegalMoves()[0]) // a quiet-ish first move
 	fromBoard, toBoard := from.nnueBoard(), to.nnueBoard()
 	var acc nnue.Accumulator
-	net.Refresh(&acc, &fromBoard)
+	net.Refresh(&acc, fromBoard)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		net.Update(&acc, &fromBoard, &toBoard)
-		net.Update(&acc, &toBoard, &fromBoard) // and back, so acc is unchanged
+		net.Update(&acc, fromBoard, toBoard)
+		net.Update(&acc, toBoard, fromBoard) // and back, so acc is unchanged
 	}
 }
 
