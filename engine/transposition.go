@@ -2,6 +2,7 @@ package engine
 
 import (
 	"sync/atomic"
+	"unsafe"
 )
 
 // nodeType indicates the bound on the score stored in a transposition entry.
@@ -72,6 +73,14 @@ func (tt *transpositionTable) find(hash zobrist) (transposition, bool) {
 		return transposition{hash, moveFromBits(data)}, true
 	}
 	return transposition{}, false
+}
+
+// prefetch issues a hardware prefetch of the cell a future find(hash) will read, so the random-access,
+// cache-missing load overlaps the caller's intervening work (move legality, the child's search
+// prologue) instead of stalling find. A pure hint — it touches no state and cannot change a result, so
+// the bench signature is unaffected. Mirrors the C++ TranspositionTable::Prefetch.
+func (tt *transpositionTable) prefetch(hash zobrist) {
+	prefetchAddr(unsafe.Pointer(&tt.table[hash&tt.mask]))
 }
 
 // record writes a search result into the table under the replacement policy: overwrite when the slot

@@ -268,6 +268,10 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 		ss.dbg.epCaptureExtensions++
 	}
 	ss.playMove(m)
+	// Prefetch the child's TT cell now; the recursive searchAlphaBeta probes it only after its own
+	// prologue (draw checks, static eval), by which time the cache-missing line should be resident.
+	// Result-neutral hardware hint — the bench signature is unchanged. Mirrors the C++ SearchSingleMove.
+	ss.game.transpositionTable.prefetch(ss.currentPosition().hash)
 	isChecking := ss.currentPosition().isInCheck()
 	var score int
 	if beta > alpha+1 && moveIdx > 0 && !wasInCheck && !isChecking {
