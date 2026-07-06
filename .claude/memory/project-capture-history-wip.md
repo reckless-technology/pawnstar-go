@@ -1,8 +1,10 @@
 ---
 name: project-capture-history-wip
 description: "Ordering experiments 2026-07: capture-history v1+v2 REJECTED; BUTTERFLY HISTORY ADOPTED (+~7 Elo both TCs, probe -17.7%, golden now 6,888,983); probe protocol standing"
-metadata:
+metadata: 
+  node_type: memory
   type: project
+  originSessionId: 4f58b693-7492-4c16-97a8-ee8793ba8b86
 ---
 
 **CONCLUDED 2026-07-03: REJECTED and reverted.** Pooled result over two 10+0.1 runs (1000 + 1700 games):
@@ -84,3 +86,64 @@ changed; C++ BK sets were already broad enough (24/24 untouched). Cross-language
 both engines 6,888,983 with 667/667 identical per-position bestmove/node/diagnostic lines. The Go
 pieceTo() also adopted C++'s single-shift form (identity-preserving, test-pinned). Committed in both
 repos. The first strength feature landed since bit-parity was established.
+
+
+---
+
+**MODERN HISTORY UPDATE: SPRT PASSED +17 Elo 2026-07-05 — the node probe was a FALSE NEGATIVE.**
+**Result: TC 10+0.1, SPRT elo[0,5], 3295 games, 1200-1037-1058 (52.5%), Elo +17.2 ± 9.8, LOS 100%,
+LLR 2.96 → H1 ACCEPTED.** Candidate = modern history with malus, NO history-guided LMR
+(PAWNSTAR_MODERN_HISTORY=1, all other knobs default). Baseline = same binary flag-off (legacy ++).
+**KEY LESSON: the fixed-depth node probe REJECTED this (every ablation +4.8% to +13.7% nodes over
+legacy — see below) yet it WON at time control by ~+17 Elo.** The probe protocol assumes node-inflation
+⟹ weaker (true for the capture-history head-fakes), but it has a FALSE-NEGATIVE mode: a change that
+trades more-nodes-per-depth for better MOVE QUALITY looks bad on the node probe and still gains at TC
+because quality > depth here. Node probe is necessary-not-sufficient; TC SPRT is the arbiter. Do not
+kill an ordering change on the node probe alone again — if the mechanism plausibly improves move choice
+(not just redirects search), SPRT it. Claude initially recommended rejecting on the probe; the user's
+"SPRT anyway" was correct.
+
+Harness note (this env): fastchess ABSENT here; used **cutechess-cli** (/usr/local/bin) instead.
+Re-downloaded UHO_Lichess_4852_v1 (official-stockfish/books) → ~/pawnstar_nnue/openings.epd (2.6M pos).
+Candidate binary = wrapper `pawnstar-go-cand` that execs pawnstar-go with PAWNSTAR_MODERN_HISTORY=1
+(same codegen as baseline, one env flag). Log: ~/pawnstar_nnue/sprt_modern.log. cutechess -sprt syntax
+mirrors sprt.sh's fastchess args.
+
+The original BK-24 fixed-depth node ablation (all WORSE than legacy ++, which is why the probe was a
+false negative):
+
+    legacy ++ baseline .................. 6,060,317   (1.000)
+    modern bonus+gravity, NO malus ...... 6,414,135   (+5.8%)   <- gravity alone already hurts
+    modern +malus +malus-only LMR div256  6,348,987   (+4.8%)   <- best modern, still red
+    modern +malus ....................... 6,723,270   (+10.9%)
+    modern +malus +symmetric history-LMR  6,888,408   (+13.7%)  <- "deepen good" inflates
+
+Same at 64 MB TT (+9.0%), so not TT-size. Diagnostics (historyMalusApplied / historyLmrAdjustDeeper /
+historyLmrAdjustShallower) cracked why: (1) gravity's ±16384 cap COMPRESSES the discrimination legacy's
+unbounded counts give among frequently-good moves → worse ordering even with no malus; (2) malus adds
+tail-churn; (3) history-guided LMR can't rescue it — "reduce good less" inflates nodes, and "reduce bad
+more" has almost nothing to act on because legacy history only ever REWARDS, so the LMR'd tail quiets
+sit near-zero, not strongly-negative (lmrShallower fired only 4406× at div=256, 0× at div=16384). All
+ratios ≥ 1.048 ≫ the 1.02 red-flag line — which is exactly why the probe was a FALSE NEGATIVE here (the
+extra nodes buy better moves, invisible to a fixed-depth node count). ADOPT the +malus, NO-history-LMR
+config (the SPRT'd one). The no-malus and malus-only-LMR variants are node-cheaper and UNTESTED — worth
+a follow-up SPRT to see if they gain even more, but not required for adoption.
+
+**What was built (uncommitted, flag-gated OFF by default so bench stays golden 6,888,983):**
+`engine/historymodern.go` (bonus `min(depth²,400)`, gravity, malus, ablation env knobs
+PAWNSTAR_MODERN_HISTORY / _HIST_NO_MALUS / _HIST_LMR / _HIST_LMR_MALUS_ONLY / _HIST_LMR_DIV),
+`historyTable.counts` widened uint32→int32, `recordGood(ply,depth,prevMove,m,isCutoff,quietsTried)`,
+history-guided LMR block in searchalphabeta.go, 3 prototype dbgx counters, temp driver
+`engine/bkprobe_test.go` (BK-24 fixed-depth node+time probe, PROBE_HASH_MB knob).
+
+**ADOPTION (TODO — mirrors the butterfly-history workflow):** (1) make modern history the real path —
+remove the `modernHistory` env gate + the ablation knobs (_HIST_NO_MALUS/_HIST_LMR/_HIST_LMR_MALUS_ONLY/
+_HIST_LMR_DIV) and the history-guided-LMR block (it was OFF in the SPRT'd candidate); keep `recordGood`
+depth-weighted bonus + gravity + malus. (2) Golden signature **6,888,983 → 6,601,454** (bump
+benchGoldenNodes + all CLAUDE.md/README mentions + [[project-cross-engine-bit-parity]]). (3) Regenerate
+BK accepted sets (GEN_BK, -v + tee). (4) Decide on the 3 prototype dbgx counters (keep or drop; if kept,
+mirror in C++). (5) MIRROR in C++ Pawnstar (same recordGood change) to preserve bit-parity; re-verify
+both engines at the new signature with PAWNSTAR_BENCH_DEBUG line-for-line. (6) `make check`, commit both
+(Go push ok; C++ commit, push when told). Remove bkprobe_test.go + pawnstar-go-cand wrapper, or keep the
+probe driver. Optionally SPRT the node-cheaper no-malus variant first — it MIGHT gain more. Full names
+per [[feedback-full-names-not-abbreviations]].
