@@ -148,6 +148,12 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	bestScore := initialAlpha
 	hasRaisedAlpha := false
 
+	// quietsTried collects the quiet moves searched at this node (TT move included) so a later beta
+	// cutoff can penalise the ones that failed (the history malus in recordGood). Backed by a stack
+	// array to avoid a per-node heap allocation; capped at 64 (deeper is rare and the tail matters least).
+	var quietsBuffer [64]move
+	quietsTried := quietsBuffer[:0]
+
 	if isTransposition && !transpos.move.isNone() {
 		ss.dbg.tableMove++
 		pv.clear()
@@ -158,8 +164,11 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		if score >= beta {
 			ss.dbg.tableMoveBetaCutoffs++
 			ss.game.transpositionTable.record(pos.hash, transpos.move.withScore(score), int16(depth), nodeCut)
-			ss.recordGood(ply, prevMove, transpos.move, true)
+			ss.recordGood(ply, depth, prevMove, transpos.move, true, quietsTried)
 			return score
+		}
+		if transpos.move.isQuiet() {
+			quietsTried = append(quietsTried, transpos.move)
 		}
 		bestScore = score
 		bestMove = transpos.move
@@ -168,7 +177,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			alpha = score
 			hasRaisedAlpha = true
 			copyVariation(parentPV, pv, transpos.move) // capture the PV now, while pv holds THIS move's line
-			ss.recordGood(ply, prevMove, transpos.move, false)
+			ss.recordGood(ply, depth, prevMove, transpos.move, false, quietsTried)
 		}
 	}
 
@@ -221,6 +230,12 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			}
 		}
 
+		// Record this quiet move as tried before searching it, so a cutoff by a later sibling penalises
+		// it (the eventual cutoff move is excluded in recordGood).
+		if m.isQuiet() && len(quietsTried) < cap(quietsTried) {
+			quietsTried = append(quietsTried, m)
+		}
+
 		pv.clear()
 		score := searchSingleMove(ss, childDepth, ply, alpha, beta, m, &pv, i)
 		if score > alpha && childDepth < depth {
@@ -232,7 +247,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		}
 		if score >= beta {
 			ss.game.transpositionTable.record(pos.hash, m.withScore(score), int16(depth), nodeCut)
-			ss.recordGood(ply, prevMove, m, true)
+			ss.recordGood(ply, depth, prevMove, m, true, quietsTried)
 			ss.dbg.betaCutoffs++
 			return score
 		}
@@ -244,7 +259,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 				ss.dbg.pvChanged++
 				alpha = score
 				hasRaisedAlpha = true
-				ss.recordGood(ply, prevMove, m, false)
+				ss.recordGood(ply, depth, prevMove, m, false, quietsTried)
 				copyVariation(parentPV, pv, m)
 			}
 		}
@@ -253,7 +268,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	if hasRaisedAlpha {
 		ss.dbg.pvNodes++
 		ss.game.transpositionTable.record(pos.hash, bestMove.withScore(alpha), int16(depth), nodePV)
-		ss.recordGood(ply, prevMove, bestMove, false)
+		ss.recordGood(ply, depth, prevMove, bestMove, false, quietsTried)
 		// parentPV was already set, with the correct line, at the alpha-raise above (in the TT-move block
 		// or the move loop) — re-copying here with the now-stale pv would truncate the PV. Matches C++.
 	} else {
