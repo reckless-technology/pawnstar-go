@@ -63,16 +63,16 @@ func (ss *searchState) isCountermove(prevMove, m move) bool {
 	return ss.countermoves[prevMove.pieceTo()].equal(m)
 }
 
-// recordContinuationHistory rewards a quiet m that was good (raised alpha or cut) after prevMove.
-// Captures are ignored (they are ordered by SEE). The count saturates like the history table.
-func (ss *searchState) recordContinuationHistory(prevMove, m move) {
+// applyContinuationHistoryBonus credits (bonus > 0) or debits (bonus < 0) the 1-ply continuation-history
+// entry for playing m after prevMove, with the same gravity as the butterfly table. Non-quiet moves are
+// skipped (captures order by SEE).
+func (ss *searchState) applyContinuationHistoryBonus(prevMove, m move, bonus int32) {
 	if !m.isQuiet() {
 		return
 	}
-	idx := prevMove.pieceTo()*contKeys + m.pieceTo()
-	if ss.continuationHistory[idx] < 16384 {
-		ss.continuationHistory[idx]++
-	}
+	entry := int32(ss.continuationHistory[prevMove.pieceTo()*contKeys+m.pieceTo()])
+	applyGravity(&entry, bonus)
+	ss.continuationHistory[prevMove.pieceTo()*contKeys+m.pieceTo()] = int16(entry)
 }
 
 // recordCountermove records a quiet m that caused a beta cutoff as the countermove to prevMove.
@@ -83,13 +83,25 @@ func (ss *searchState) recordCountermove(prevMove, m move) {
 }
 
 // recordGood credits move m (which raised alpha, or caused a beta cutoff when isCutoff) into the
-// move-ordering heuristics: the main history and continuation history for any move; additionally, on a
-// beta cutoff, a quiet m becomes a killer at ply and the countermove to prevMove.
-func (ss *searchState) recordGood(ply int, prevMove, m move, isCutoff bool) {
-	ss.history.recordGoodMove(ss.currentPosition().colorToMove, m)
-	ss.recordContinuationHistory(prevMove, m)
-	if isCutoff && m.isQuiet() {
-		ss.updateKillers(ply, m)
-		ss.recordCountermove(prevMove, m)
+// move-ordering heuristics with a depth-weighted gravity bonus: the butterfly history and continuation
+// history for m. On a beta cutoff it additionally (a) debits every other quiet move that was searched at
+// this node but failed (the malus, over quietsTried) and (b) makes a quiet m the killer at ply and the
+// countermove to prevMove.
+func (ss *searchState) recordGood(ply, depth int, prevMove, m move, isCutoff bool, quietsTried []move) {
+	c := ss.currentPosition().colorToMove
+	bonus := historyBonus(depth)
+	ss.history.applyBonus(c, m, bonus)
+	ss.applyContinuationHistoryBonus(prevMove, m, bonus)
+	if isCutoff {
+		for _, quiet := range quietsTried {
+			if !quiet.equal(m) {
+				ss.history.applyBonus(c, quiet, -bonus)
+				ss.applyContinuationHistoryBonus(prevMove, quiet, -bonus)
+			}
+		}
+		if m.isQuiet() {
+			ss.updateKillers(ply, m)
+			ss.recordCountermove(prevMove, m)
+		}
 	}
 }
