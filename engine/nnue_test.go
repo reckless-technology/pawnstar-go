@@ -70,7 +70,7 @@ func TestNNUEReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open reference: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	checked, maxDiff := 0, 0
 	scanner := bufio.NewScanner(f)
@@ -125,7 +125,7 @@ func TestNNUEInt8(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open reference: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	checked, maxDev := 0, 0
 	scanner := bufio.NewScanner(f)

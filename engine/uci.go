@@ -159,6 +159,19 @@ func (game *Game) handleUciPosition(args []string) {
 	}
 }
 
+// goArgValue returns the integer value following the keyword at args[i], and whether one was present and
+// parseable. The bounds check is load-bearing, not defensive decoration: every `go` keyword that takes a
+// value reads args[i+1], so a truncated line (a bare `go wtime`, or a GUI that fumbles a clock update)
+// would panic on an out-of-range index — and a UCI engine that crashes mid-game forfeits it. A missing or
+// unparseable value is simply ignored, leaving the previous value in place.
+func goArgValue(args []string, i int) (int, bool) {
+	if i+1 >= len(args) {
+		return 0, false
+	}
+	v, err := strconv.Atoi(args[i+1])
+	return v, err == nil
+}
+
 // handleUciGo handles the "go" command, parsing the clock parameters and starting the search.
 func (game *Game) handleUciGo(args []string) {
 	tc := &game.timeControl
@@ -173,7 +186,7 @@ func (game *Game) handleUciGo(args []string) {
 		case "wtime":
 			if c == white {
 				tc.clockType = clockStandard
-				if v, err := strconv.Atoi(args[i+1]); err == nil {
+				if v, ok := goArgValue(args, i); ok {
 					tc.timeRemaining = time.Duration(v) * time.Millisecond
 				}
 			}
@@ -181,39 +194,39 @@ func (game *Game) handleUciGo(args []string) {
 		case "btime":
 			if c == black {
 				tc.clockType = clockStandard
-				if v, err := strconv.Atoi(args[i+1]); err == nil {
+				if v, ok := goArgValue(args, i); ok {
 					tc.timeRemaining = time.Duration(v) * time.Millisecond
 				}
 			}
 			i++
 		case "winc":
 			if c == white {
-				if v, err := strconv.Atoi(args[i+1]); err == nil {
+				if v, ok := goArgValue(args, i); ok {
 					tc.increment = time.Duration(v) * time.Millisecond
 				}
 			}
 			i++
 		case "binc":
 			if c == black {
-				if v, err := strconv.Atoi(args[i+1]); err == nil {
+				if v, ok := goArgValue(args, i); ok {
 					tc.increment = time.Duration(v) * time.Millisecond
 				}
 			}
 			i++
 		case "movestogo":
-			if v, err := strconv.Atoi(args[i+1]); err == nil {
+			if v, ok := goArgValue(args, i); ok {
 				tc.numMovesRemaining = v
 			}
 			i++
 		case "depth":
 			tc.clockType = clockFixedDepth
-			if v, err := strconv.Atoi(args[i+1]); err == nil {
+			if v, ok := goArgValue(args, i); ok {
 				tc.depth = v
 			}
 			i++
 		case "movetime":
 			tc.clockType = clockFixedTime
-			if v, err := strconv.Atoi(args[i+1]); err == nil {
+			if v, ok := goArgValue(args, i); ok {
 				tc.timeRemaining = time.Duration(v) * time.Millisecond
 			}
 			i++
@@ -225,12 +238,13 @@ func (game *Game) handleUciGo(args []string) {
 			game.isPondering.Store(true)
 		case "nodes":
 			tc.clockType = clockInfinite // node-limited; the periodic check ends it at maxNodes
-			if v, err := strconv.Atoi(args[i+1]); err == nil {
+			if v, ok := goArgValue(args, i); ok {
 				tc.maxNodes = v
 			}
 			i++
 		case "searchmoves":
-			// The rest of the args are UCI moves to restrict the root search to.
+			// The rest of the args are UCI moves to restrict the root search to. args[i+1:] is safe for any
+			// i < len(args) (an empty tail yields an empty slice), so no bounds check is needed here.
 			tc.searchMoves = append(tc.searchMoves, args[i+1:]...)
 			i = len(args)
 		}

@@ -200,7 +200,6 @@ func TestPerft(t *testing.T) {
 			if tc.depth > maxDepth {
 				continue
 			}
-			tc := tc
 			t.Run(fmt.Sprintf("%03d/d%d", i+1, tc.depth), func(t *testing.T) {
 				pos := positionFromFen(fen)
 				start := time.Now()
@@ -261,7 +260,6 @@ func TestPerftExtra(t *testing.T) {
 			if tc.depth > maxDepth {
 				continue
 			}
-			tc := tc
 			t.Run(fmt.Sprintf("%03d/d%d", i+1, tc.depth), func(t *testing.T) {
 				pos := positionFromFen(fen)
 				got := perftHashCheck(t, pos, tc.depth)

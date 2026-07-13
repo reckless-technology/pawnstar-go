@@ -9,6 +9,15 @@
 GO ?= go
 export GOEXPERIMENT := simd
 
+# The NNUE kernels here are AVX2 (archsimd 256-bit + the hand-written dot in dot_amd64.s), selected by
+# BUILD TAG, not by a runtime CPU check — so a simd binary would SIGILL on a pre-Haswell amd64 CPU at the
+# first eval. GOAMD64=v3 (Haswell baseline: AVX2/BMI2/FMA) makes that requirement explicit: the Go runtime
+# then refuses to start on an unsupported CPU with a clear diagnostic instead of dying on an illegal
+# instruction mid-search. Codegen-only — the engine is integer-only, so results are unchanged (the golden
+# bench signature is asserted by the UCI test). Applies to this simd build only; a plain `go build` (the
+# scalar-fallback path, no GOEXPERIMENT) does not set it and still runs anywhere.
+export GOAMD64 := v3
+
 BINARY := pawnstar-go
 PKG    := ./...
 
@@ -41,10 +50,15 @@ test:
 test-short:
 	$(GO) test -short $(PKG)
 
-# Focused correctness gate: movegen (perft), SEE, Bratko-Kopec, NNUE, the opening book, Lazy SMP,
-# the race detector over the concurrency tests, chess-clock timing, and the UCI protocol regression
-# (drives the built binary; includes the golden bench signature). Use `make test-short` for a fast pass.
-check: perft see bk nnue book lazysmp race timing test-uci
+# Full correctness gate. `test` runs the WHOLE suite first — this is load-bearing: the focused targets
+# below are a union of `-run` regexes, so on their own they silently skip any test they don't match. That
+# is not hypothetical: TestNnueBoardLayout (the hard contract guarding the unsafe position->nnue.Board
+# reinterpret) and TestOutputDotInt8Asm (the asm bit-identity gate) matched NO regex here and never ran,
+# so a `position` field reorder would have corrupted every eval with the gate still green. Depending on
+# `test` makes the gate closed by construction — a newly added test cannot be missed. The focused targets
+# are kept after it for verbose, diagnosable output on the specific invariants.
+# Use `make test-short` for a fast pass.
+check: test perft see bk nnue book lazysmp race timing test-uci
 
 perft:
 	$(GO) test $(PKG) -run TestPerft -v
@@ -58,9 +72,12 @@ bk:
 see:
 	$(GO) test $(PKG) -run TestSEE -v
 
-# NNUE gates: int16 reference (0 cp vs C++), int8 search eval (<=40 cp, scalar==SIMD), lazy accumulator.
+# NNUE gates: int16 reference (0 cp vs C++), int8 search eval (<=40 cp, scalar==SIMD), lazy accumulator,
+# the unsafe position->nnue.Board layout contract (TestNnueBoardLayout), and the hand-written AVX2/NEON
+# output-dot bit-identity gate (TestOutputDotInt8Asm, in the nnue package).
+# The regex is case-sensitive: `TestNNUE` alone matches NEITHER TestNnueBoardLayout NOR TestOutputDotInt8Asm.
 nnue:
-	$(GO) test $(PKG) -run TestNNUE -v
+	$(GO) test $(PKG) -run 'TestNNUE|TestNnue|TestOutputDot' -v
 
 # Opening-book gate (questionable-move filtering).
 book:

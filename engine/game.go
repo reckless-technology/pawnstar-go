@@ -73,6 +73,12 @@ func (game *Game) newGameFromFen(fen string) {
 	game.nodeCount = 0
 	game.isCancelPending.Store(false)
 	game.timeControl = newTimeControl()
+	// Seed the clock origin. A real search re-arms it in armClock (via startThinking), but callers that
+	// invoke searchRootNode directly — bench, and the fixed-depth tests — never go through armClock, and a
+	// zero origin means "the Unix epoch": elapsedSinceSearchStart then reports decades, which prints garbage
+	// `time`/`nps` and (on a clockStandard search) would trip the soft-budget early-exit on the first
+	// iteration. Sane default here; harmless when armClock overwrites it.
+	game.searchStartNanos.Store(time.Now().UnixNano())
 }
 
 // currentPosition returns a pointer to the current (last) position on the stack.

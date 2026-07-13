@@ -76,7 +76,7 @@ bits 41–63   score (signed 23-bit)
 
 `move.equal`/`isNone` mask to the identity bits (0–21), so the score and TT metadata never affect identity. `move(0)` is the null sentinel (`moveNone()`). `String()` outputs UCI long-algebraic notation (`e2e4`, `e7e8q`). Bits 23–63 are dual-purpose: a move-ordering sort score (`withScore`/`score`, bits 41–63) during search, or packed `{score, depth, nodeType, age}` metadata inside a transposition entry (`withTTData`/`setTTAge`). A move is only ever one or the other, so the spare bits are shared — which lets a TT cell be exactly two 64-bit words for the lockless table.
 
-Move lists use a **stack-resident `moveList`** (a fixed `[256]move` array + count; [engine/movegen.go](engine/movegen.go)): the hot paths (`perft`, `searchAlphaBeta`, `searchQuiescent`) declare a local `var ml moveList` and call `generateLegalMovesInto`/`generateLegalCapturesInto`, so move generation is **allocation-free** (escape analysis keeps `ml` on the stack). Cold callers (UCI setup, opening book, tests) use the slice-returning `generateLegalMoves`/`generateLegalCaptures` wrappers, which copy into a right-sized heap slice. This replaced a per-node `make([]move, 0, 64)` that heap-allocated on every node.
+Move lists use a **stack-resident `moveList`** (a fixed `[256]move` array + count; [engine/movegen.go](engine/movegen.go)): the hot paths (`perft`, `searchAlphaBeta`, `searchQuiescent`) declare a local `var ml moveList` and call `generateLegalMovesInto`/`generateLegalCapturesInto`, so move generation is **allocation-free** (escape analysis keeps `ml` on the stack). Cold callers (UCI setup, opening book, tests) use the slice-returning `generateLegalMoves` wrapper, which copies into a right-sized heap slice. This replaced a per-node `make([]move, 0, 64)` that heap-allocated on every node.
 
 ### Attack generation
 
@@ -90,7 +90,7 @@ Move lists use a **stack-resident `moveList`** (a fixed `[256]move` array + coun
 
 ### Move generation
 
-[engine/movegen.go](engine/movegen.go) implements fully legal move generation. `generateLegalMoves` and `generateLegalCaptures` are the entry points.
+[engine/movegen.go](engine/movegen.go) implements fully legal move generation. `generateLegalMovesInto` and `generateLegalCapturesInto` are the entry points (with `generateLegalMoves` as the slice-returning wrapper for cold callers).
 
 #### Pin computation
 

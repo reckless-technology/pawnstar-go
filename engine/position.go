@@ -103,12 +103,43 @@ func (pos *position) isAttacked(sq square, by color) bool {
 	return pos.attacksTo(sq, by).isNotEmpty()
 }
 
-// positionFromFen constructs a position from a FEN string.
+// positionFromFen constructs a position from a FEN string, falling back to the start position if the FEN
+// does not describe a position the engine can represent.
+//
+// Malformed input must not panic: the UCI layer feeds untrusted GUI input straight in here, and an engine
+// that crashes mid-game forfeits it. Two inputs used to kill it — a bare `position fen` (empty string), and
+// any FEN missing a king (e.g. `position fen 8/8`). The second is the sharper one: kingSquare() on an empty
+// king bitboard returns 64, which indexes one past every 64-entry attack table, so attacksTo panics here at
+// construction and move generation would panic later for the same reason. A position without both kings is
+// not legal chess and is not representable, so reject it outright rather than carry a landmine forward.
 func positionFromFen(fen string) position {
-	pos := position{}
-	fields := strings.Fields(fen)
+	pos := positionFromFenFields(strings.Fields(fen))
+	if !pos.hasBothKings() {
+		pos = positionFromFenFields(strings.Fields(startFen))
+	}
+	return pos
+}
 
-	// Pieces
+// hasBothKings reports whether the position has a king for each side — the minimum for it to be a legal,
+// representable chess position (see positionFromFen).
+func (pos *position) hasBothKings() bool {
+	kings := pos.pieces[king]
+	return (kings & pos.colors[white]).isNotEmpty() && (kings & pos.colors[black]).isNotEmpty()
+}
+
+// positionFromFenFields parses the whitespace-split fields of a FEN. It tolerates any truncation (every
+// field past the board is optional and length-guarded) and returns a kingless position for input it cannot
+// parse, which positionFromFen treats as "invalid, use the start position".
+func positionFromFenFields(fields []string) position {
+	pos := position{}
+	if len(fields) == 0 {
+		return pos // no board field: kingless, so the caller falls back to the start position
+	}
+
+	// Pieces. The board field is untrusted, so every placement is validated: an unrecognised piece letter, or
+	// a rank/file that has run off the board, aborts the parse and returns a kingless position (which
+	// positionFromFen rejects in favour of the start position). Without this, `position fen garbage` walked
+	// x past 7 and indexed a 64-entry table out of range.
 	y, x := 7, 0
 	for _, ch := range fields[0] {
 		switch ch {
@@ -120,6 +151,9 @@ func positionFromFen(fen string) position {
 		default:
 			c := white
 			idx := strings.IndexRune("PNBRQKpnbrqk", ch)
+			if idx < 0 || x > 7 || y < 0 {
+				return position{} // unparseable board
+			}
 			if idx >= 6 {
 				idx -= 6
 				c = black
@@ -159,7 +193,11 @@ func positionFromFen(fen string) position {
 
 	pos.hash = pos.computeHash()
 	c := pos.colorToMove
-	pos.checkers = pos.attacksTo(pos.kingSquare(c), enemyOf(c))
+	// Guarded: kingSquare() on an empty king bitboard is 64, and attacksTo would index past its 64-entry
+	// tables. positionFromFen discards any kingless result anyway, so leaving checkers empty here is fine.
+	if pos.hasBothKings() {
+		pos.checkers = pos.attacksTo(pos.kingSquare(c), enemyOf(c))
+	}
 	return pos
 }
 
@@ -232,7 +270,7 @@ func (pos *position) toFenString() string {
 	} else {
 		sb.WriteString(pos.epSquare.toString())
 	}
-	sb.WriteString(fmt.Sprintf(" %d %d", pos.halfMove, int(pos.fullMove)+1))
+	fmt.Fprintf(&sb, " %d %d", pos.halfMove, int(pos.fullMove)+1)
 	return sb.String()
 }
 

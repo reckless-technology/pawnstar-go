@@ -1,0 +1,24 @@
+version: "2"
+
+# Deliberately conservative linter set.
+#
+# This engine is kept BIT-IDENTICAL with the C++ (pawnstar) and Rust (pawnstar-rs) ports — the 16-position
+# `bench` node total (6,601,454) is a hard, tested cross-engine signature. That makes any linter which nudges
+# a rewrite of the search / eval / movegen / TT hot paths a liability rather than a help: a well-meant
+# "cleanup" there can silently change the search tree and break parity for zero strength gain.
+#
+# So this enables CORRECTNESS, DEAD CODE and HYGIENE only. Deliberately NOT enabled: gocritic, prealloc,
+# unconvert, perfsprint and the other perf/style linters — their individual suggestions are reasonable, but
+# each one is a parity risk with no upside.
+#
+# HARD RULE: any lint fix touching engine code must be re-gated by `bench` == 6,601,454 before commit.
+linters:
+  default: none
+  enable:
+    - govet # correctness (also run standalone in the gofmt+vet job)
+    - staticcheck # SA correctness checks + simplifications
+    - unused # dead code — this is what caught the unused generateLegalCaptures
+    - ineffassign # assignments that are never read
+    - errcheck # unchecked errors (the fmt.Print* family is excluded by default, so UCI output is fine)
+    - copyloopvar # `x := x` loop-variable copies, redundant since Go 1.22
+    - misspell # this repo is extremely comment-dense

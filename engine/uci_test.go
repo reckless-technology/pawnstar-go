@@ -74,7 +74,7 @@ func engineBinary(t *testing.T) string {
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if uciBinDir != "" {
-		os.RemoveAll(uciBinDir)
+		_ = os.RemoveAll(uciBinDir)
 	}
 	os.Exit(code)
 }
@@ -326,6 +326,79 @@ func TestUCIProtocol(t *testing.T) {
 			t.Errorf("ponder: no valid 'bestmove <uci>' after ponderhit; got:\n%s", strings.Join(out, "\n"))
 		}
 	})
+
+	// 7) Ponder on a position whose search RESOLVES ON ITS OWN (a forced mate ends iterative deepening
+	// early). This is the case the Ponder sub-test above deliberately avoids ("it must not resolve on its
+	// own this fast") — and it is exactly the case that was broken: searchRootNode set isCancelPending to
+	// join the Lazy SMP helpers, which made searchEntry's ponder-wait guard (`!isCancelPending`) always
+	// false, so the engine emitted bestmove while still pondering. UCI forbids that, and it also advanced
+	// the engine's own posStack for a move the GUI never confirmed. Regression test for that bug.
+	t.Run("PonderForcedMate", func(t *testing.T) {
+		e.send("position fen 6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1") // Ra1-a8# — mate in 1
+		e.send("go ponder")
+		time.Sleep(500 * time.Millisecond) // the mate is found in ~20ms; a buggy engine answers immediately
+		e.send("isready")
+		out, ok := e.readUntil(reReadyok, 10*time.Second)
+		if !ok {
+			t.Fatalf("ponderForcedMate: no readyok while pondering")
+		}
+		if anyLineMatches(out, reBestmove) {
+			t.Fatalf("ponderForcedMate: bestmove emitted while pondering (UCI violation); got:\n%s",
+				strings.Join(out, "\n"))
+		}
+		// It must still answer once the GUI resolves the ponder — a fix that simply never released would hang.
+		e.send("ponderhit")
+		if _, ok := e.readUntil(reBestmove, 30*time.Second); !ok {
+			t.Fatalf("ponderForcedMate: no bestmove within timeout after ponderhit")
+		}
+	})
+}
+
+// TestUCIMalformedInput drives the engine with truncated and garbage UCI lines. A UCI engine that panics on
+// a malformed line loses the game on the spot, so the bar is absolute: it must survive every one of these
+// and still be responsive afterwards. Each of these used to panic:
+//
+//	"go wtime" (and every other keyword taking a value) — unguarded args[i+1] index
+//	"position fen"                                      — empty FEN, fields[0] on an empty slice
+//	"position fen 8/8"                                  — kingless: kingSquare() == 64 indexes past the tables
+//	"position fen garbage"                              — board parse walked x/y off the board
+func TestUCIMalformedInput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("UCI subprocess test skipped in -short mode")
+	}
+	malformed := []string{
+		"go wtime", "go btime", "go winc", "go binc", "go movestogo", "go depth", "go movetime", "go nodes",
+		"go searchmoves", "go", "go wtime abc", "go depth -5",
+		"position", "position fen", "position fen 8/8", "position fen garbage", "position fen ///////",
+		"position fen 99999999/99999999 w", "position fen 8/8 w - -", "position startpos moves",
+		"position startpos moves zzzz", "position fen rnbq w KQkq e",
+		"setoption name", "setoption name Hash value", "setoption", "ponderhit", "stop",
+	}
+	e := startEngine(t)
+	defer e.close()
+	e.send("uci")
+	if _, ok := e.readUntil(reUciok, 10*time.Second); !ok {
+		t.Fatalf("malformed: no uciok on handshake")
+	}
+	for _, cmd := range malformed {
+		e.send(cmd)
+		e.send("isready")
+		// If the engine panicked, its stdout closes and readUntil returns matched=false — which is precisely
+		// the failure we are guarding against.
+		if _, ok := e.readUntil(reReadyok, 10*time.Second); !ok {
+			t.Fatalf("malformed: engine died or hung on %q (no readyok) — it must tolerate any input", cmd)
+		}
+	}
+	// Still fully functional after all that garbage: a real search must still produce a legal bestmove.
+	e.send("position startpos")
+	e.send("go depth 6")
+	out, ok := e.readUntil(reBestmove, 30*time.Second)
+	if !ok {
+		t.Fatalf("malformed: no bestmove after recovering from malformed input")
+	}
+	if !anyLineMatches(out, reBestmoveMv) {
+		t.Errorf("malformed: expected a legal 'bestmove <uci>' after recovery; got:\n%s", strings.Join(out, "\n"))
+	}
 }
 
 // benchGoldenNodes is the expected `bench` node total — the cross-engine bit-parity signature (the C++
