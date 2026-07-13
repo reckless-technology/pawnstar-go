@@ -50,15 +50,23 @@ test:
 test-short:
 	$(GO) test -short $(PKG)
 
-# Full correctness gate. `test` runs the WHOLE suite first — this is load-bearing: the focused targets
-# below are a union of `-run` regexes, so on their own they silently skip any test they don't match. That
-# is not hypothetical: TestNnueBoardLayout (the hard contract guarding the unsafe position->nnue.Board
-# reinterpret) and TestOutputDotInt8Asm (the asm bit-identity gate) matched NO regex here and never ran,
-# so a `position` field reorder would have corrupted every eval with the gate still green. Depending on
-# `test` makes the gate closed by construction — a newly added test cannot be missed. The focused targets
-# are kept after it for verbose, diagnosable output on the specific invariants.
+# Full correctness gate: the WHOLE suite, plus the race-detector pass (the only thing a plain `go test`
+# does not cover).
+#
+# `test` is what makes the gate closed BY CONSTRUCTION. It used to be a union of the focused `-run` regexes
+# below, which silently skipped any test matching none of them — and two load-bearing gates were being
+# skipped exactly that way: TestNnueBoardLayout (the hard contract guarding the unsafe position->nnue.Board
+# reinterpret; a field reorder would corrupt every eval) and TestOutputDotInt8Asm (the asm bit-identity
+# gate), because `-run TestNNUE` is case-sensitive and matches neither. Never gate on a regex union.
+#
+# The focused targets are deliberately NOT prerequisites here. Every one of them is a strict SUBSET of
+# `test` (same tests, just verbose), so including them only multiplied the work: CI runs
+# `make -j"$(nproc)" check`, which runs prerequisites in PARALLEL, so `test` + 9 focused targets meant ten
+# concurrent `go test` processes fighting over the runner's cores — enough for the full-suite run to blow
+# go test's default 10-minute per-package timeout. They remain as standalone targets for verbose,
+# diagnosable output on a specific invariant (`make perft`, `make bk`, ...).
 # Use `make test-short` for a fast pass.
-check: test perft see bk nnue book lazysmp race timing test-uci
+check: test race
 
 perft:
 	$(GO) test $(PKG) -run TestPerft -v
