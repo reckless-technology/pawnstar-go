@@ -15,6 +15,8 @@ package engine
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -401,38 +403,60 @@ func TestUCIMalformedInput(t *testing.T) {
 		"position startpos moves zzzz", "position fen rnbq w KQkq e",
 		"setoption name", "setoption name Hash value", "setoption", "ponderhit", "stop",
 	}
-	e := startEngine(t)
-	defer e.close()
-	e.send("uci")
-	if _, ok := e.readUntil(reUciok, 10*time.Second); !ok {
-		t.Fatalf("malformed: no uciok on handshake")
-	}
+	// Each command gets a FRESH process, with the whole script piped in and stdin then closed.
+	//
+	// This deliberately avoids an interactive stop/isready handshake, which is what the first version of this
+	// test did — and it was a coin flip, not a test. Several of these lines legitimately start an UNBOUNDED
+	// search (a bare `go` inherits clockInfinite from the preceding `go nodes`), and the engine runs pinned to
+	// GOMAXPROCS=1. Racing an unbounded search on a loaded CI box (the whole suite plus the race-detector pass
+	// run concurrently) has two failure modes I hit: the engine can be blocked WRITING stdout — nothing drains
+	// it between sends, so the pipe fills — and a blocked writer cannot read `stop` or `isready`, so the
+	// handshake never completes; and stopThinking() blocks the UCI loop until the search actually winds down.
+	// Neither is an engine bug. Piping the full script and reading to EOF has neither hazard: `quit` exits in
+	// ~20ms even mid-infinite-search, and the process cannot block on stdout because we read it to the end.
+	bin := engineBinary(t)
 	for _, cmd := range malformed {
-		e.send(cmd)
-		// Several of these legitimately START A SEARCH — a bare `go` is an infinite one. The engine runs
-		// pinned to GOMAXPROCS=1 (see startEngine), so a search left running competes with the UCI goroutine
-		// for that single P, and on a loaded machine (CI runs `make -j$(nproc) check`, so the whole suite and
-		// the race-detector pass are hammering the box) the isready round-trip below can miss its deadline.
-		// That is a property of the harness, not a bug in the engine, so stop any search first rather than
-		// racing it. `stop` is a no-op when nothing is running.
-		e.send("stop")
-		e.send("isready")
-		// If the engine panicked, its stdout closes and readUntil returns matched=false — which is precisely
-		// the failure we are guarding against.
-		if _, ok := e.readUntil(reReadyok, 30*time.Second); !ok {
-			t.Fatalf("malformed: engine died or hung on %q (no readyok) — it must tolerate any input", cmd)
+		t.Run(cmd, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			proc := exec.CommandContext(ctx, bin)
+			proc.Env = append(os.Environ(), "GOMAXPROCS=1", "PAWNSTAR_THREADS=1")
+			proc.Stdin = strings.NewReader("uci\nisready\n" + cmd + "\nquit\n")
+			out, err := proc.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("engine HUNG on %q (no exit within 60s)", cmd)
+			}
+			if bytes.Contains(out, []byte("panic:")) || bytes.Contains(out, []byte("index out of range")) {
+				t.Fatalf("engine PANICKED on %q — it must tolerate any input:\n%s", cmd, out)
+			}
+			if err != nil {
+				t.Fatalf("engine exited non-zero on %q: %v\n%s", cmd, err, out)
+			}
+		})
+	}
+
+	// Still fully functional after garbage: a real (BOUNDED — no race) search must produce a legal bestmove.
+	t.Run("recovers", func(t *testing.T) {
+		e := startEngine(t)
+		defer e.close()
+		e.send("uci")
+		if _, ok := e.readUntil(reUciok, 30*time.Second); !ok {
+			t.Fatalf("recovers: no uciok")
 		}
-	}
-	// Still fully functional after all that garbage: a real search must still produce a legal bestmove.
-	e.send("position startpos")
-	e.send("go depth 6")
-	out, ok := e.readUntil(reBestmove, 30*time.Second)
-	if !ok {
-		t.Fatalf("malformed: no bestmove after recovering from malformed input")
-	}
-	if !anyLineMatches(out, reBestmoveMv) {
-		t.Errorf("malformed: expected a legal 'bestmove <uci>' after recovery; got:\n%s", strings.Join(out, "\n"))
-	}
+		for _, cmd := range malformed {
+			e.send(cmd)
+		}
+		e.send("stop")
+		e.send("position startpos") // resets the position stack AND the time control (newTimeControl)
+		e.send("go depth 6")        // bounded: cannot outlive the deadline the way an inherited clockInfinite can
+		out, ok := e.readUntil(reBestmove, 60*time.Second)
+		if !ok {
+			t.Fatalf("recovers: no bestmove after malformed input")
+		}
+		if !anyLineMatches(out, reBestmoveMv) {
+			t.Errorf("recovers: expected a legal 'bestmove <uci>'; got:\n%s", strings.Join(out, "\n"))
+		}
+	})
 }
 
 // benchGoldenNodes is the expected `bench` node total — the cross-engine bit-parity signature (the C++
