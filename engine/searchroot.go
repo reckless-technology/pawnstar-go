@@ -108,11 +108,26 @@ func searchRootNode(game *Game) move {
 		}(i, append([]move(nil), moves...), bestMove)
 	}
 
+	// isCancelPending is doing double duty here: it is both "the GUI told us to stop" (set by stopThinking /
+	// the hard-deadline poll) and, below, "the main thread is done, helpers wind up". Those are NOT the same
+	// thing, and conflating them silently broke pondering: searchEntry's ponder-wait is gated on
+	// !isCancelPending, so leaving the flag set on a search that ended on its own made that guard always
+	// false and the engine emitted `bestmove` while still pondering — a UCI violation (and it advanced the
+	// engine's own posStack for a move the GUI never confirmed). So: remember whether the cancel was
+	// externally driven, use the flag to join the helpers, then restore it if the search simply finished.
+	externallyCancelled := game.isCancelPending.Load()
+
 	bestMove = iterativeDeepen(ss, moves, bestMove, 0)
 	game.nodeCount = ss.nodeCount // main-thread node total (used by `bench`)
 
+	if !externallyCancelled {
+		externallyCancelled = game.isCancelPending.Load() // a stop/timeout may have landed during the search
+	}
 	game.isCancelPending.Store(true) // main thread is done; signal helpers to stop
 	helpers.Wait()
+	if !externallyCancelled {
+		game.isCancelPending.Store(false) // finished on its own — don't masquerade as a GUI stop
+	}
 	return bestMove
 }
 

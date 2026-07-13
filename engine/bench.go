@@ -64,6 +64,13 @@ func (game *Game) runBench(depth int) {
 		game.timeControl.clockType = clockFixedDepth
 		game.timeControl.depth = depth
 		game.isCancelPending.Store(false)
+		// bench calls searchRootNode directly, bypassing startThinking (and therefore armClock), so nothing
+		// else sets the clock origin. Left at 0 it means "the Unix epoch", making elapsedSinceSearchStart
+		// report ~56 years: the `info` lines print a garbage `time` and `nps 0`, and — because the currmove
+		// gate is `elapsed > 3s` — every root move at every depth emits an `info ... currmove` line (5,270 of
+		// them on the default bench), all written to stdout from inside the timed region, which understates
+		// the reported nps. Printing only; node counts and the golden signature are unaffected.
+		game.searchStartNanos.Store(time.Now().UnixNano())
 		if debug {
 			dbgxClear()
 		}

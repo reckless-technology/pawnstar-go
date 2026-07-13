@@ -61,6 +61,52 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+  # Static analysis beyond vet: staticcheck (incl. dead code), errcheck, ineffassign, copyloopvar, misspell.
+  # The linter set is deliberately conservative — see .golangci.yml for why (bit-parity).
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false # no go.sum / external deps to cache
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12
+
+  # The scalar-fallback build: GOEXPERIMENT is cleared, so the generic (non-SIMD, non-NEON) kernels compile.
+  # This is the ONLY job that compiles kernels_generic.go / dot_generic.go / prefetch_generic.go at all — every
+  # other job builds amd64+simd or arm64. README advertises "a plain `go build` on any other target falls back
+  # to bit-identical scalar kernels"; asserting the golden bench signature here is what turns that claim into a
+  # tested invariant. GOAMD64 is left at the v1 default on purpose: the fallback must run on ANY amd64 CPU.
+  scalar:
+    name: scalar fallback (no simd)
+    runs-on: ubuntu-latest
+    env:
+      GOEXPERIMENT: "" # override the workflow-level simd
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false # no go.sum / external deps to cache
+      - name: Build (scalar kernels)
+        run: |
+          go build ./...
+          go build -o pawnstar-go-scalar .
+      - name: Test
+        run: go test ./engine/ -short
+      - name: Bench signature must equal the SIMD golden (kernels are bit-identical)
+        run: |
+          nodes=$(printf 'bench\nquit\n' | ./pawnstar-go-scalar | grep -E '^[0-9]+ nodes' | awk '{print $1}')
+          echo "scalar bench: $nodes nodes"
+          [ "$nodes" = "6601454" ] || {
+            echo "::error::scalar bench $nodes != golden 6601454 — the scalar kernels diverged from SIMD"
+            exit 1
+          }
+
   # ---------------------------------------------------------------------------------------------------------
   # Build artifacts: a native engine binary per OS plus a docs bundle and source archive, all versioned from
   # the git commit count (hence the full-history checkouts). Binaries upload only after that platform's build

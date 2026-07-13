@@ -45,13 +45,6 @@ func (pos *position) generateLegalMoves() []move {
 	return append([]move(nil), ml.slice()...)
 }
 
-// generateLegalCaptures returns captures and promotions as a freshly allocated slice (cold callers).
-func (pos *position) generateLegalCaptures() []move {
-	var ml moveList
-	pos.generateMovesInto(&ml, pos.colorToMove, false)
-	return append([]move(nil), ml.slice()...)
-}
-
 // Used for castling legality detection.
 const (
 	f1g1bb   bitboard = bitboard(1)<<f1 | bitboard(1)<<g1

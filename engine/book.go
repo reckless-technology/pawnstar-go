@@ -18,8 +18,8 @@ var (
 	embeddedBookMoves map[zobrist][]move
 )
 
-// newOpeningBook returns the hash→moves index for the embedded book (engine/book.txt, compiled in via
-// go:embed), so the engine always has a book with no external file to ship. Each line is a sequence of
+// newOpeningBook returns the hash→moves index for the embedded book (engine/book.txt, compiled in with a
+// `go:embed` directive), so the engine always has a book with no external file to ship. Each line is a sequence of
 // moves from the starting position; for every prefix of a line, the next move is recorded as a candidate
 // for that position's hash. Parsing replays every line with full legal move generation (~10 ms), so the
 // index is built once and shared read-only by every Game — clear() drops a game's reference instead of

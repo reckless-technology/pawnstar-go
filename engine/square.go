@@ -16,8 +16,13 @@ func (s square) rank() uint8 { return uint8(s) >> 3 }
 // toString returns the square name in algebraic notation, e.g. "e4".
 func (s square) toString() string { return string([]byte{'a' + byte(s.file()), '1' + byte(s.rank())}) }
 
-// squareFromString parses an algebraic square name such as "e4".
+// squareFromString parses an algebraic square name such as "e4". Its only caller is the en-passant field of
+// positionFromFen, which is untrusted GUI input, so a short string must not panic: anything that is not two
+// characters yields noSquare (i.e. "no en-passant target"), the same as a "-" field.
 func squareFromString(str string) square {
+	if len(str) < 2 {
+		return noSquare
+	}
 	f := int(str[0]|0x20) - 'a'
 	r := int(str[1]) - '1'
 	return squareXY(f, r)
