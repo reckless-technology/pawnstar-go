@@ -155,10 +155,37 @@ func (e *uciEngine) readUntil(re *regexp.Regexp, timeout time.Duration) (lines [
 	}
 }
 
-// close shuts the engine down (quit + wait), tolerating an already-exited process.
+// close shuts the engine down (quit + drain + wait), tolerating an already-exited or wedged process.
+//
+// The drain is mandatory, not tidiness. Cmd.StdoutPipe's contract is explicit: "it is incorrect to call
+// Wait before all reads from the pipe have completed." The stdout pump goroutine blocks on `e.lines <- ...`
+// once that buffered channel fills, which stops draining the engine's stdout, which blocks the ENGINE on a
+// full pipe, which means it never exits, which means Wait() blocks forever — a three-way deadlock that
+// wedges the whole package until go test's 10-minute timeout kills it. The window is easy to hit: any test
+// that stops reading while a search is still emitting `info` lines (a failed assertion, or simply a slow
+// CI runner) leaves output in flight at teardown.
+//
+// So: ask it to quit, close stdin, drain stdout to EOF so the pump can finish and the engine can exit, and
+// only then Wait. If the engine ignores `quit` (or is hung), kill it rather than wedge the suite.
+// Errors are deliberately ignored — the process may already be gone, and close() runs from a defer, where
+// t.Fatalf would fire on the wrong goroutine.
 func (e *uciEngine) close() {
-	e.send("quit")
+	_, _ = io.WriteString(e.stdin, "quit\n")
 	_ = e.stdin.Close()
+
+	drained := make(chan struct{})
+	go func() {
+		for range e.lines { // to EOF: lets the pump goroutine return and the engine flush and exit
+		}
+		close(drained)
+	}()
+
+	select {
+	case <-drained:
+	case <-time.After(10 * time.Second):
+		_ = e.cmd.Process.Kill() // ignored quit / hung: killing closes stdout, so the drain above completes
+		<-drained
+	}
 	_ = e.cmd.Wait()
 }
 
@@ -382,10 +409,17 @@ func TestUCIMalformedInput(t *testing.T) {
 	}
 	for _, cmd := range malformed {
 		e.send(cmd)
+		// Several of these legitimately START A SEARCH — a bare `go` is an infinite one. The engine runs
+		// pinned to GOMAXPROCS=1 (see startEngine), so a search left running competes with the UCI goroutine
+		// for that single P, and on a loaded machine (CI runs `make -j$(nproc) check`, so the whole suite and
+		// the race-detector pass are hammering the box) the isready round-trip below can miss its deadline.
+		// That is a property of the harness, not a bug in the engine, so stop any search first rather than
+		// racing it. `stop` is a no-op when nothing is running.
+		e.send("stop")
 		e.send("isready")
 		// If the engine panicked, its stdout closes and readUntil returns matched=false — which is precisely
 		// the failure we are guarding against.
-		if _, ok := e.readUntil(reReadyok, 10*time.Second); !ok {
+		if _, ok := e.readUntil(reReadyok, 30*time.Second); !ok {
 			t.Fatalf("malformed: engine died or hung on %q (no readyok) — it must tolerate any input", cmd)
 		}
 	}
