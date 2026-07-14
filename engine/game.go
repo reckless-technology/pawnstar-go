@@ -28,7 +28,14 @@ type Game struct {
 	wg                 sync.WaitGroup     // waited on by stopThinking to join the search goroutine
 	posStack           []position         // game history + current search path
 	isCancelPending    atomic.Bool        // set true to signal all search goroutines to stop
-	mainSearchState    *searchState       // main thread's search state, reused across searches (resetForSearch per go)
+	// isStopRequested means specifically "the GUI asked us to stop" (`stop`/`quit`, or a hard-deadline
+	// expiry) — as distinct from isCancelPending, which ALSO means "the main thread is done, helpers wind
+	// up" and is therefore set by the search itself at the end of every root search. Conflating the two is
+	// what broke pondering: the ponder-wait in searchEntry cannot key off isCancelPending, because a search
+	// that finished on its own leaves it set. Only the UCI goroutine ever writes this flag; the search
+	// goroutines never do, so it cannot be clobbered by a search that ends concurrently with a `stop`.
+	isStopRequested atomic.Bool
+	mainSearchState *searchState // main thread's search state, reused across searches (resetForSearch per go)
 	// Pondering + the live clock. isPondering suppresses the hard/soft time stops while a `go ponder`
 	// search runs. searchStartNanos (soft-budget origin) and hardDeadlineNanos are atomics because
 	// `ponderhit` (UCI goroutine) mutates them while the search goroutines read them every node; the
@@ -113,6 +120,7 @@ func (game *Game) playMoveString(s string) move {
 // caller (handleUciGo) so armClock arms no hard deadline for a ponder search.
 func (game *Game) startThinking() {
 	game.stopThinking()
+	game.isStopRequested.Store(false) // fresh search: the previous stop (if any) is resolved
 	game.isCancelPending.Store(false)
 	game.armClock()
 	game.wg.Add(1)
@@ -122,8 +130,12 @@ func (game *Game) startThinking() {
 	}()
 }
 
-// stopThinking signals the search goroutine to halt and blocks until it exits.
+// stopThinking signals the search goroutine to halt and blocks until it exits. It sets isStopRequested as
+// well as isCancelPending: the latter aborts the search, the former is what releases a ponder-wait (and,
+// unlike isCancelPending, is never written by a search goroutine, so a search finishing concurrently
+// cannot clobber it).
 func (game *Game) stopThinking() {
+	game.isStopRequested.Store(true)
 	game.isCancelPending.Store(true)
 	game.wg.Wait()
 	game.isCancelPending.Store(false)
@@ -136,7 +148,11 @@ func (game *Game) stopThinking() {
 // cancel flag. For a normal search isPondering is false, so the wait is a no-op. Mirrors SearchThreadEntry.
 func (game *Game) searchEntry() {
 	m := searchRootNode(game)
-	for game.isPondering.Load() && !game.isCancelPending.Load() {
+	// Wait for the GUI to resolve the ponder. This keys off isStopRequested, NOT isCancelPending: the root
+	// search sets isCancelPending at the end of EVERY search (to wind up the Lazy SMP helpers), so gating on
+	// it made this loop dead code and the engine answered while still pondering. ponderhit clears
+	// isPondering; stop/quit sets isStopRequested. Both are written only by the UCI goroutine.
+	for game.isPondering.Load() && !game.isStopRequested.Load() {
 		time.Sleep(time.Millisecond)
 	}
 	if m.isNone() {
