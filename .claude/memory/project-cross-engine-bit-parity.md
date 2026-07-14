@@ -14,3 +14,30 @@ pawnstar-go (Go, `/home/jonny/work/pawnstar-go`) is a faithful port of pawnstar 
 **Verified through depth 12 on arm64 (2026-07-02):** `bench 12` totals 4,231,499 in both engines with `PAWNSTAR_BENCH_DEBUG=1` output **identical line-for-line** (per-position bestmove + nodes + every non-zero DEBUGX diagnostic counter, 664 normalized lines); and all 24 BK positions via UCI at `go depth 12` (Clear Hash per position, Threads 1, Hash 64) matched on depth-reached/bestmove/score/nodes — 6,133,129 total nodes both, including the pos-1 mate-in-3 early stop at depth 4. Relative speed on Apple Silicon at those identical trees: Go ~0.95× C++ (round range 0.89–0.98).
 
 **How to apply:** After any change touching search, move generation, eval, or the TT, run `bench` in **all three** engines and confirm the current golden signature — 6,601,454 (and equal per-position counts via `PAWNSTAR_BENCH_DEBUG=1`, present in Go and C++). Changes often need mirroring across all three repos; the mechanical acceptance test for a mirror is "bench matches the reference per-position table exactly" (a subtly-wrong port cannot reproduce 16 depth-13 node counts). **Bench parity does NOT cover lint: after any C++/Rust edit run the formatter or CI fails on it — C++ `clang-format-18 --dry-run -Werror src/*.h src/*.cpp test/*.cpp tools/*.cpp` (CI pins v18; if not installed, grab the binary from the PyPI `clang-format==18.1.8` wheel — it's a zip), Rust `cargo fmt --check`, Go `gofmt -l` + `go vet` (2026-07-05 the mirror agents shipped bit-correct but unformatted code and the C++ clang-format + Rust cargo-fmt CI jobs failed). NOTE pawnstar-go and pawnstar-rs are PRIVATE repos (unauthenticated GitHub Actions API returns 404 — can't observe their CI without a token); pawnstar (C++) is public.** Go: direct push to main is fine ([[feedback-direct-push-main-pawnstar-go]]); C++ and Rust: confirm per task, and commit ≠ push (the user says "push" separately). BK accepted-move sets are per-engine and blessed independently (Go depths 7–8, C++/Rust depths 8–11) — a strength change shifts some and each engine's set is regenerated separately. See [[project-capture-history-wip]] (the +17 Elo modern-history change 2026-07-05), [[feedback-root-cause-not-benign]] and [[reference-pawnstar-perf-measurement]].
+
+
+---
+
+**UCI ROBUSTNESS + PONDER FIXES LANDED IN ALL THREE (2026-07-13/14).** Not search changes — bench stayed
+6,601,454 with byte-identical per-position counts AND DEBUGX counters across Go/C++/Rust. What was wrong:
+(1) **Malformed FEN crashed C++ (SIGSEGV, + ASan-confirmed OOB *writes* = silent memory corruption) and
+Rust (panic)**: a KINGLESS position is unrepresentable — kingSquare() on an empty king bitboard returns 64,
+one past every 64-entry attack table. Fix in all three: parse into a fallible helper, and if !hasBothKings()
+fall back to the start position; validate each placement (unknown letter / x>7 / y<0 aborts); guard the
+checkers computation; make square-from-string total. No-op for valid FENs — that is what preserved parity.
+(2) **All three emitted `bestmove` WHILE PONDERING** (UCI violation + desynced their own position stack).
+
+**THE DESIGN LESSON (worth remembering): don't overload one flag.** `isCancelPending` meant BOTH "GUI said
+stop" AND "main thread done, helpers wind up" — and the root search sets it at the end of EVERY search, so
+the ponder-wait keyed on it was dead code. The tempting fix — save/restore the flag around the helper join —
+is RACY: a `stop` landing during the join is clobbered by the restore, nothing then clears isPondering, so
+the ponder-wait spins while stopThinking blocks in join → **PERMANENT HANG. Measured 6 hangs / 72 runs.** I
+shipped that racy version to Go before catching it. Correct fix, now in all three: a dedicated
+`isStopRequested` written ONLY by the UCI thread (stopThinking sets, startThinking clears), never by a search
+thread; the ponder-wait keys off it; searchRootNode keeps its plain unconditional store(true). 0 hangs / 72.
+
+**CI (gh IS NOW INSTALLED — use it; go/rs are private so the unauthenticated API 404s, but gh works):**
+after ANY signature change, check CI in ALL THREE repos. pawnstar-rs CI was **RED for three commits** and
+nobody noticed: its workflow hardcoded a SECOND copy of the bench signature (`test "$nodes" = "6888983"`)
+that drifted when GOLDEN_TOTAL was re-blessed to 6,601,454. Now derived from GOLDEN_TOTAL — one source of
+truth. Lesson: grep for the OLD signature across .github/ too, not just source/tests.
