@@ -3,7 +3,7 @@ package engine
 import (
 	"bufio"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"sync"
 )
@@ -68,12 +68,12 @@ func (book *openingBook) clear() {
 
 // getMove returns a randomly chosen book move for hash, or moveNone if the
 // position is not in the book.  Random selection gives variety across games.
-func (b openingBook) getMove(hash zobrist) move {
-	candidates := b.moves[hash]
+func (book *openingBook) getMove(hash zobrist) move {
+	candidates := book.moves[hash]
 	if len(candidates) == 0 {
 		return moveNone()
 	}
-	return candidates[rand.Intn(len(candidates))]
+	return candidates[rand.IntN(len(candidates))]
 }
 
 // bookFindMove returns the legal move in pos matching the UCI string s,

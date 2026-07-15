@@ -1,5 +1,7 @@
 package engine
 
+import "slices"
+
 // maxMoves bounds a moveList's fixed backing array. The maximum number of legal moves in any
 // legal chess position is 218; 256 gives headroom and keeps the array a power-of-two size
 // (mirrors the C++ engine's MoveList capacity).
@@ -42,7 +44,7 @@ func (pos *position) generateLegalCapturesInto(ml *moveList) {
 func (pos *position) generateLegalMoves() []move {
 	var ml moveList
 	pos.generateMovesInto(&ml, pos.colorToMove, true)
-	return append([]move(nil), ml.slice()...)
+	return slices.Clone(ml.slice())
 }
 
 // Used for castling legality detection.

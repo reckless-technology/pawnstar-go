@@ -7,6 +7,7 @@ package engine
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -89,12 +90,7 @@ func searchRootNode(game *Game) move {
 	// applies time management, and returns the move — while helper threads deepen the shared TT to
 	// accelerate it, desynchronised by the per-thread iteration-skip schedule. Each helper gets its own
 	// searchState, a private throwaway diagnostics struct, and its own copy of the move list.
-	nThreads := game.threadCount
-	if nThreads < 1 {
-		nThreads = 1
-	} else if nThreads > maxSearchThreads {
-		nThreads = maxSearchThreads
-	}
+	nThreads := min(max(game.threadCount, 1), maxSearchThreads) // same clamp as SetThreads / the UCI Threads option
 	var helpers sync.WaitGroup
 	for i := 1; i < nThreads; i++ {
 		helpers.Add(1)
@@ -105,7 +101,7 @@ func searchRootNode(game *Game) move {
 			helper := newSearchStateFromGame(game)
 			helper.dbg = &debugX{} // helper diagnostics are discarded; keep them off the global dbgx
 			iterativeDeepen(helper, helperMoves, seed, threadID)
-		}(i, append([]move(nil), moves...), bestMove)
+		}(i, slices.Clone(moves), bestMove)
 	}
 
 	bestMove = iterativeDeepen(ss, moves, bestMove, 0)
@@ -242,7 +238,7 @@ func allSame(moves []move, best move) bool {
 // scoreInstabilityThresh centipawns of best's score.
 func allScoreStable(moves []move, best move) bool {
 	for _, m := range moves {
-		if absInt(m.score()-best.score()) > scoreInstabilityThresh {
+		if abs(m.score()-best.score()) > scoreInstabilityThresh {
 			return false
 		}
 	}

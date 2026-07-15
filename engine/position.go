@@ -268,7 +268,7 @@ func (pos *position) toFenString() string {
 	if pos.epSquare == noSquare {
 		sb.WriteByte('-')
 	} else {
-		sb.WriteString(pos.epSquare.toString())
+		sb.WriteString(pos.epSquare.String())
 	}
 	fmt.Fprintf(&sb, " %d %d", pos.halfMove, int(pos.fullMove)+1)
 	return sb.String()

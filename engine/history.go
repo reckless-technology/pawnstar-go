@@ -29,17 +29,13 @@ const (
 // historyBonus is the depth-weighted magnitude credited to a good move (and debited from the quiets
 // that failed before it). Quadratic in depth, clamped to maxHistoryBonus.
 func historyBonus(depth int) int32 {
-	if depth < 1 {
-		depth = 1
-	}
-	bonus := int32(depth * depth)
-	if bonus > maxHistoryBonus {
-		bonus = maxHistoryBonus
-	}
-	return bonus
+	depth = max(depth, 1)
+	return min(int32(depth*depth), maxHistoryBonus)
 }
 
-func absInt32(x int32) int32 {
+// abs returns the absolute value of x. Generic over the signed integer types the engine uses (history
+// bonuses are int32; sort-score and window arithmetic are int).
+func abs[T ~int | ~int32 | ~int64](x T) T {
 	if x < 0 {
 		return -x
 	}
@@ -48,7 +44,7 @@ func absInt32(x int32) int32 {
 
 // applyGravity nudges *entry by bonus with a gravity term that keeps it within ±historyMax.
 func applyGravity(entry *int32, bonus int32) {
-	*entry += bonus - (*entry)*absInt32(bonus)/historyMax
+	*entry += bonus - (*entry)*abs(bonus)/historyMax
 }
 
 // applyBonus credits (bonus > 0) or debits (bonus < 0) the butterfly-history entry for m by side c.

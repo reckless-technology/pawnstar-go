@@ -188,11 +188,11 @@ func TestNNUEIncremental(t *testing.T) {
 	for _, fen := range fens {
 		game.newGameFromFen(fen)
 		ss := newSearchStateFromGame(game)
-		if msg := findAccMismatch(game.nnue, ss, depth); msg != "" {
+		if msg := findAccMismatch(game.network, ss, depth); msg != "" {
 			t.Errorf("fen %q (per-node): %s", fen, msg)
 		}
 		ss = newSearchStateFromGame(game)
-		if msg := findDeepCatchUpMismatch(game.nnue, ss, depth); msg != "" {
+		if msg := findDeepCatchUpMismatch(game.network, ss, depth); msg != "" {
 			t.Errorf("fen %q (deep catch-up): %s", fen, msg)
 		}
 	}

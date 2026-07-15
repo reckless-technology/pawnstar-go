@@ -14,12 +14,11 @@ const (
 	nodePV                  // PV-node: score is exact within the search window.
 )
 
-// transposition is a single cached search result.  The move carries the search score, depth, node
-// type and generation packed into its spare bits (see move.go), so an entry is just a Zobrist hash
-// plus a 64-bit move — the two words the lockless table stores.
+// transposition is a single cached search result: the best move, with the search score, depth, node
+// type and generation packed into its spare bits (see move.go). find has already validated the hash
+// (via the XOR key check), so the caller never needs it back — the move alone is the result.
 type transposition struct {
-	hash zobrist // Zobrist hash of the stored position.
-	move move    // best move, with score/depth/nodeType/age packed into its spare bits.
+	move move // best move, with score/depth/nodeType/age packed into its spare bits.
 }
 
 // depth returns the depth the stored result was searched to.
@@ -52,10 +51,7 @@ type transpositionTable struct {
 // entry count is rounded up to the next power of 2 so hash & mask can index instead of a modulo.
 func newTranspositionTable(megabytes int) transpositionTable {
 	const entrySize = 16 // bytes per atomicEntry (two 64-bit words)
-	n := (megabytes * 1024 * 1024) / entrySize
-	if n < 1 {
-		n = 1
-	}
+	n := max((megabytes*1024*1024)/entrySize, 1)
 	var count zobrist
 	for count = 1; count < zobrist(n); count <<= 1 {
 	}
@@ -70,7 +66,7 @@ func (tt *transpositionTable) find(hash zobrist) (transposition, bool) {
 	data := e.data.Load()
 	key := e.key.Load()
 	if key^data == uint64(hash) {
-		return transposition{hash, moveFromBits(data)}, true
+		return transposition{moveFromBits(data)}, true
 	}
 	return transposition{}, false
 }
@@ -88,15 +84,15 @@ func (tt *transpositionTable) prefetch(hash zobrist) {
 // the new node is a PV node.  m must carry the search score in its score field (via move.withScore).
 // Lockless read-decide-write: a concurrent writer to the same cell resolves to last-writer-wins, and
 // the XOR-encoded key keeps each stored pair self-consistent.
-func (tt *transpositionTable) record(hash zobrist, m move, depth int16, nt nodeType) {
+func (tt *transpositionTable) record(hash zobrist, m move, depth int, nt nodeType) {
 	e := &tt.table[hash&tt.mask]
 	curKey := e.key.Load()
 	curData := e.data.Load()
 	cur := moveFromBits(curData)
 	isEmpty := curKey == 0 && curData == 0
 	isOld := cur.ttAge() != tt.currentAge
-	if isEmpty || isOld || cur.ttDepth() <= int(depth) || nt == nodePV {
-		packed := m.withTTData(m.score(), int(depth), nt).setTTAge(tt.currentAge)
+	if isEmpty || isOld || cur.ttDepth() <= depth || nt == nodePV {
+		packed := m.withTTData(m.score(), depth, nt).setTTAge(tt.currentAge)
 		data := packed.bits()
 		e.key.Store(uint64(hash) ^ data)
 		e.data.Store(data)
@@ -124,10 +120,7 @@ func (tt *transpositionTable) clear() {
 // It samples the first min(len, 1000) cells — positions hash uniformly, so the prefix is representative
 // — rather than scanning the whole table, so it is cheap enough to call on every info line.
 func (tt *transpositionTable) hashfull() int {
-	sample := len(tt.table)
-	if sample > 1000 {
-		sample = 1000
-	}
+	sample := min(len(tt.table), 1000)
 	if sample == 0 {
 		return 0
 	}

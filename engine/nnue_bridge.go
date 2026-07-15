@@ -6,7 +6,7 @@ package engine
 // piece codes), so this file is the only place the two vocabularies meet.
 
 import (
-	"fmt"
+	"errors"
 	"unsafe"
 
 	"pawnstar-go/engine/nnue"
@@ -60,9 +60,9 @@ func clampEvalToBand(score int) int {
 func (game *Game) EnableNNUE() error {
 	net := nnue.Embedded()
 	if net == nil {
-		return fmt.Errorf("nnue: embedded net unavailable")
+		return errors.New("nnue: embedded net unavailable")
 	}
-	game.nnue = net
+	game.network = net
 	game.evalTable.clear() // cached scores are net-dependent
 	return nil
 }
@@ -75,7 +75,7 @@ func (game *Game) LoadNNUEFile(path string) error {
 	if err != nil {
 		return err
 	}
-	game.nnue = net
+	game.network = net
 	game.evalTable.clear() // cached scores are net-dependent
 	return nil
 }

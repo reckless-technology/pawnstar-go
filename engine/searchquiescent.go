@@ -9,9 +9,7 @@ package engine
 // same depth (no depth decrement) so that all evasions are considered.
 func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 	ss.dbg.quiescentCalls++
-	if ply > ss.seldepth {
-		ss.seldepth = ply
-	}
+	ss.seldepth = max(ss.seldepth, ply)
 	if ply >= maxPly {
 		ss.dbg.quiescentMaxPly++
 		return evaluatePosition(ss)
