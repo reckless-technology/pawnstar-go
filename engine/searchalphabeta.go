@@ -31,9 +31,7 @@ import "time"
 func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *variation, prevMove move) int {
 	ss.nodeCount++
 	ss.dbg.alphaBetaCalls++
-	if ply > ss.seldepth {
-		ss.seldepth = ply
-	}
+	ss.seldepth = max(ss.seldepth, ply)
 	// Poll the hard deadline (and the `go nodes` limit) every 2048 nodes: between polls the search
 	// cannot stop, so a coarse interval (the former 64k) let a node-heavy batch overrun the deadline and
 	// forfeit on time. 2048 keeps the overrun sub-millisecond while the clock read stays negligible.
@@ -116,7 +114,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		// Reverse futility pruning (static null move): at shallow depth, if we are far enough above
 		// beta that even conceding rfpMargin per ply still leaves us at/above beta, assume a quiet
 		// move holds the advantage and cut. Disabled in the mate zone so it cannot mask a forced mate.
-		if depth <= rfpMaxDepth && absInt(beta) < winThreshold && evalScore-rfpMargin*depth >= beta {
+		if depth <= rfpMaxDepth && abs(beta) < winThreshold && evalScore-rfpMargin*depth >= beta {
 			ss.dbg.reverseFutilityPrunes++
 			return evalScore
 		}
@@ -163,7 +161,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		}
 		if score >= beta {
 			ss.dbg.tableMoveBetaCutoffs++
-			ss.game.transpositionTable.record(pos.hash, transpos.move.withScore(score), int16(depth), nodeCut)
+			ss.game.transpositionTable.record(pos.hash, transpos.move.withScore(score), depth, nodeCut)
 			ss.recordGood(ply, depth, prevMove, transpos.move, true, quietsTried)
 			return score
 		}
@@ -246,7 +244,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			return searchCancelledScore
 		}
 		if score >= beta {
-			ss.game.transpositionTable.record(pos.hash, m.withScore(score), int16(depth), nodeCut)
+			ss.game.transpositionTable.record(pos.hash, m.withScore(score), depth, nodeCut)
 			ss.recordGood(ply, depth, prevMove, m, true, quietsTried)
 			ss.dbg.betaCutoffs++
 			return score
@@ -267,13 +265,13 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 
 	if hasRaisedAlpha {
 		ss.dbg.pvNodes++
-		ss.game.transpositionTable.record(pos.hash, bestMove.withScore(alpha), int16(depth), nodePV)
+		ss.game.transpositionTable.record(pos.hash, bestMove.withScore(alpha), depth, nodePV)
 		ss.recordGood(ply, depth, prevMove, bestMove, false, quietsTried)
 		// parentPV was already set, with the correct line, at the alpha-raise above (in the TT-move block
 		// or the move loop) — re-copying here with the now-stale pv would truncate the PV. Matches C++.
 	} else {
 		ss.dbg.allNodes++
-		ss.game.transpositionTable.record(pos.hash, bestMove.withScore(bestScore), int16(depth), nodeAll)
+		ss.game.transpositionTable.record(pos.hash, bestMove.withScore(bestScore), depth, nodeAll)
 	}
 	return bestScore
 }

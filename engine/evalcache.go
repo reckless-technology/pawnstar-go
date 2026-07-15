@@ -6,10 +6,6 @@ package engine
 
 import "sync/atomic"
 
-// hashNotFoundScore is returned by evalHashTable.find when there is no cached entry for the queried
-// hash; it is outside the range of any real score.
-const hashNotFoundScore = -2345678
-
 // evalHashEntry is one lockless slot in the evaluation cache: a single 64-bit atomic packing the top
 // 48 bits of the position hash (a key check) in the high bits and a 16-bit score in the low bits —
 // (hash & 0xFFFF_FFFF_FFFF_0000) | uint16(int16(score)). A load or store is atomic with no torn value
@@ -39,13 +35,14 @@ func newEvalHashTable(count int) evalHashTable {
 	return evalHashTable{entries: make([]evalHashEntry, i), mask: zobrist(i) - 1}
 }
 
-// find returns the cached score for hash, or hashNotFoundScore on a miss.
-func (t *evalHashTable) find(hash zobrist) int {
+// find returns the cached score for hash and true, or (0, false) on a miss (comma-ok, mirroring
+// transpositionTable.find — the caller distinguishes a miss by ok, not by a sentinel score).
+func (t *evalHashTable) find(hash zobrist) (int, bool) {
 	entry := t.entries[hash&t.mask].Load()
 	if entry>>16 != uint64(hash)>>16 {
-		return hashNotFoundScore
+		return 0, false
 	}
-	return int(int16(uint16(entry)))
+	return int(int16(uint16(entry))), true
 }
 
 // record stores score for hash, overwriting any existing entry.

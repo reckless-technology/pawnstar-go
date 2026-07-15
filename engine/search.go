@@ -104,7 +104,7 @@ func (ss *searchState) resetForSearch() {
 	ss.seldepth = 0
 	ss.accStack = ss.accStack[:1]
 	ss.accValid = ss.accValid[:1]
-	game.nnue.Refresh(&ss.accStack[0], ss.posStack[0].nnueBoard())
+	game.network.Refresh(&ss.accStack[0], ss.posStack[0].nnueBoard())
 	ss.accValid[0] = true
 }
 
@@ -149,7 +149,7 @@ func (ss *searchState) currentAccumulator() *nnue.Accumulator {
 		for j := k + 1; j <= d; j++ {
 			to := ss.posStack[j].nnueBoard()
 			ss.accStack[j] = ss.accStack[j-1]
-			ss.game.nnue.Update(&ss.accStack[j], from, to)
+			ss.game.network.Update(&ss.accStack[j], from, to)
 			ss.accValid[j] = true
 			from = to
 		}
@@ -291,12 +291,4 @@ func searchSingleMove(ss *searchState, depth, ply, alpha, beta int, m move, pv *
 	}
 	ss.undoMove()
 	return score
-}
-
-// absInt returns the absolute value of x.
-func absInt(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
 }

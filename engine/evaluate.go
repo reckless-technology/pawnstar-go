@@ -38,13 +38,12 @@ func evaluatePositionNonDraw(ss *searchState) int {
 	ss.dbg.evalCalls++
 	pos := ss.currentPosition()
 
-	hashScore := ss.game.evalTable.find(pos.hash)
-	if hashScore != hashNotFoundScore {
+	if hashScore, ok := ss.game.evalTable.find(pos.hash); ok {
 		ss.dbg.evalHashHits++
 		return scaleByRule50(hashScore, int(pos.halfMove))
 	}
 
-	score := clampEvalToBand(ss.game.nnue.EvaluateInt8(ss.currentAccumulator(), int(pos.colorToMove)))
+	score := clampEvalToBand(ss.game.network.EvaluateInt8(ss.currentAccumulator(), int(pos.colorToMove)))
 	ss.game.evalTable.record(pos.hash, score)
 	return scaleByRule50(score, int(pos.halfMove))
 }

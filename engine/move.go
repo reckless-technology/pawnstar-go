@@ -27,7 +27,7 @@ const (
 	movePieceShift    = 12 // bits 12–14: moving piece
 	moveCapturedShift = 15 // bits 15–17: captured piece
 	moveTypeShift     = 18 // bits 18–21: move type
-	moveCheckShift    = 22 // bit 22:     reserved (was gives-check; no longer computed — the LMP guard it fed was vacuous)
+	// bit 22 is reserved (was a gives-check flag; no longer computed — the LMP guard it fed was vacuous).
 	moveNodeTypeShift = 23 // bits 23–24: TT node type
 	moveDepthShift    = 25 // bits 25–32: TT depth (int8)
 	moveAgeShift      = 33 // bits 33–40: TT age / generation (uint8)
@@ -50,16 +50,16 @@ const (
 type moveType uint8
 
 const (
-	nonCapture      moveType = iota
-	capture         moveType = iota
-	promotionKnight moveType = iota
-	promotionBishop moveType = iota
-	promotionRook   moveType = iota
-	promotionQueen  moveType = iota
-	pawnSinglePush  moveType = iota
-	pawnDoublePush  moveType = iota
-	epCapture       moveType = iota
-	castling        moveType = iota
+	nonCapture moveType = iota
+	capture
+	promotionKnight
+	promotionBishop
+	promotionRook
+	promotionQueen
+	pawnSinglePush
+	pawnDoublePush
+	epCapture
+	castling
 )
 
 // constructMove encodes all move fields into a move value.
@@ -209,9 +209,9 @@ func (m move) String() string {
 	if m.isNone() {
 		return "0000"
 	}
-	s := m.from().toString() + m.to().toString()
+	s := m.from().String() + m.to().String()
 	if m.promoted() != noPiece {
-		s += m.promoted().toString()
+		s += m.promoted().String()
 	}
 	return s
 }
@@ -221,12 +221,12 @@ func (m move) GoString() string {
 	if m == moveNone() {
 		return "NONE"
 	}
-	s := m.piece().toString() + m.from().toString() + m.to().toString()
+	s := m.piece().String() + m.from().String() + m.to().String()
 	if m.captured() != noPiece {
-		s += "x" + m.captured().toString()
+		s += "x" + m.captured().String()
 	}
 	if m.promoted() != noPiece {
-		s += "=" + m.promoted().toString()
+		s += "=" + m.promoted().String()
 	}
 	return s
 }

@@ -16,29 +16,26 @@ func (ss *searchState) scoreAndSortMoves(moves []move, ply int, prevMove move) {
 	killer0 := ss.killers[ply][0]
 	killer1 := ss.killers[ply][1]
 	for i, m := range moves {
-		var sort int
+		var sortScore int
 		switch {
 		case !m.isQuiet(): // capture or promotion: order by static exchange evaluation
 			see := evaluateStaticExchange(pos, m)
 			if see >= 0 {
-				sort = winningCaptureBase + see
+				sortScore = winningCaptureBase + see
 			} else {
-				sort = see // losing captures sort below quiet moves
+				sortScore = see // losing captures sort below quiet moves
 			}
 		case killer0.equal(m):
-			sort = killerScore0
+			sortScore = killerScore0
 		case killer1.equal(m):
-			sort = killerScore1
+			sortScore = killerScore1
 		case ss.isCountermove(prevMove, m):
-			sort = countermoveScore
+			sortScore = countermoveScore
 		default: // quiet move: main history + continuation history, clamped below the countermove
 			h := int(ss.history.count(pos.colorToMove, m)) + ss.contHistScore(prevMove, m)
-			if h > maxQuietScore {
-				h = maxQuietScore
-			}
-			sort = h
+			sortScore = min(h, maxQuietScore)
 		}
-		moves[i] = m.withScore(sort)
+		moves[i] = m.withScore(sortScore)
 	}
 	sortMoves(moves)
 }

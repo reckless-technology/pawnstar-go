@@ -69,14 +69,14 @@ const (
 type direction uint8
 
 const (
-	north     direction = iota
-	northeast direction = iota
-	east      direction = iota
-	southeast direction = iota
-	south     direction = iota
-	southwest direction = iota
-	west      direction = iota
-	northwest direction = iota
+	north direction = iota
+	northeast
+	east
+	southeast
+	south
+	southwest
+	west
+	northwest
 )
 
 // color is the side to move: white (0) or black (1).
@@ -85,7 +85,7 @@ type color uint8
 
 const (
 	white color = iota
-	black color = iota
+	black
 )
 
 // enemyOf returns the opposing color.
@@ -100,15 +100,15 @@ type piece uint8
 
 const (
 	noPiece piece = iota
-	pawn    piece = iota
-	knight  piece = iota
-	bishop  piece = iota
-	rook    piece = iota
-	queen   piece = iota
-	king    piece = iota
+	pawn
+	knight
+	bishop
+	rook
+	queen
+	king
 )
 
-// toString returns the piece type's lowercase FEN letter (a space for noPiece).
-func (p piece) toString() string {
+// String returns the piece type's lowercase FEN letter (a space for noPiece).
+func (p piece) String() string {
 	return string(" pnbrqk"[p])
 }

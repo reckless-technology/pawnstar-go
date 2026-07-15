@@ -83,7 +83,7 @@ func (game *Game) handleUciSetOption(fields []string) {
 		}
 	case "threads":
 		if n, err := strconv.Atoi(value); err == nil {
-			game.threadCount = min(max(n, 1), maxSearchThreads)
+			game.SetThreads(n) // clamps to [1, maxSearchThreads]
 			fmt.Printf("info string Threads set to %d\n", game.threadCount)
 		}
 	case "hash":
