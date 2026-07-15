@@ -1,9 +1,22 @@
 package engine
 
 import (
+	"math/bits"
 	"sync/atomic"
 	"unsafe"
 )
+
+// roundUpToPow2 returns the smallest power of two that is >= n (and 1 for n <= 1). The lockless TT and
+// eval cache size their backing arrays this way so an index is a single `hash & (size-1)` mask instead
+// of a modulo. This size directly determines which slot each hash lands in, hence node counts — so it
+// must match the previous shift-until-large-enough loop exactly (it does: for n in [1, 5] it yields
+// 1,2,4,4,8, the same sequence).
+func roundUpToPow2(n int) int {
+	if n <= 1 {
+		return 1
+	}
+	return 1 << bits.Len(uint(n-1))
+}
 
 // nodeType indicates the bound on the score stored in a transposition entry.
 type nodeType uint8
@@ -51,10 +64,7 @@ type transpositionTable struct {
 // entry count is rounded up to the next power of 2 so hash & mask can index instead of a modulo.
 func newTranspositionTable(megabytes int) transpositionTable {
 	const entrySize = 16 // bytes per atomicEntry (two 64-bit words)
-	n := max((megabytes*1024*1024)/entrySize, 1)
-	var count zobrist
-	for count = 1; count < zobrist(n); count <<= 1 {
-	}
+	count := zobrist(roundUpToPow2((megabytes * 1024 * 1024) / entrySize))
 	return transpositionTable{table: make([]atomicEntry, count), mask: count - 1}
 }
 

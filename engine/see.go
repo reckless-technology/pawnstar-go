@@ -92,54 +92,13 @@ func evaluateSwapOff(bb *seeBoard, sq square, c color, pieceOnSquare piece) int 
 	var scores [32]int
 	ply := 0
 	for ; ply < 32; ply++ {
-		attackingPieces := bb.colors[c]
-		var capturingPiece piece
-		var attackers, bishopTargets, rookTargets bitboard
-
-		attackers = pawnSrc[c] & attackingPieces & bb.pieces[pawn]
-		if attackers.isNotEmpty() {
-			capturingPiece = pawn
-			goto AttackFound
+		capturingPiece, attackers := bb.leastValuableAttacker(sq, c, occupied, pawnSrc[c], knightTargets, kingTargets)
+		if capturingPiece == noPiece {
+			scores[ply] = 0 // no more attackers for this side
+			break
 		}
 
-		attackers = knightTargets & attackingPieces & bb.pieces[knight]
-		if attackers.isNotEmpty() {
-			capturingPiece = knight
-			goto AttackFound
-		}
-
-		bishopTargets = bishopAttacks(occupied, sq)
-		attackers = bishopTargets & attackingPieces & bb.pieces[bishop]
-		if attackers.isNotEmpty() {
-			capturingPiece = bishop
-			goto AttackFound
-		}
-
-		rookTargets = rookAttacks(occupied, sq)
-		attackers = rookTargets & attackingPieces & bb.pieces[rook]
-		if attackers.isNotEmpty() {
-			capturingPiece = rook
-			goto AttackFound
-		}
-
-		attackers = (bishopTargets | rookTargets) & attackingPieces & bb.pieces[queen]
-		if attackers.isNotEmpty() {
-			capturingPiece = queen
-			goto AttackFound
-		}
-
-		attackers = kingTargets & attackingPieces & bb.pieces[king]
-		if attackers.isNotEmpty() {
-			capturingPiece = king
-			goto AttackFound
-		}
-
-		// No more attackers for this side.
-		scores[ply] = 0
-		break
-
-	AttackFound:
-		// Use only the least-valuable attacker (LSB of attackers).
+		// Capture with the least-valuable attacker (LSB of attackers).
 		attacker := attackers & (-attackers)
 		enemy := enemyOf(c)
 		bb.pieces[pieceOnSquare] ^= sqBB
@@ -167,4 +126,35 @@ func evaluateSwapOff(bb *seeBoard, sq square, c color, pieceOnSquare piece) int 
 		}
 	}
 	return scores[0]
+}
+
+// leastValuableAttacker returns the cheapest piece of colour c that attacks sq in the swap-off board,
+// and the bitboard of those attackers (the caller takes its least-significant bit as the specific
+// attacker). It probes piece types in ascending value — pawn, knight, bishop, rook, queen, king — so
+// the first hit is the least valuable, and returns (noPiece, 0) when c has no attacker left. The sliding
+// targets are computed against the live `occupied` (updated as pieces leave the exchange) so X-rays open
+// up correctly; pawnSources is the pre-selected pawn-attack-source set for colour c (pawnSrc[c]).
+func (bb *seeBoard) leastValuableAttacker(sq square, c color, occupied, pawnSources, knightTargets, kingTargets bitboard) (piece, bitboard) {
+	own := bb.colors[c]
+	if a := pawnSources & own & bb.pieces[pawn]; a.isNotEmpty() {
+		return pawn, a
+	}
+	if a := knightTargets & own & bb.pieces[knight]; a.isNotEmpty() {
+		return knight, a
+	}
+	bishopTargets := bishopAttacks(occupied, sq)
+	if a := bishopTargets & own & bb.pieces[bishop]; a.isNotEmpty() {
+		return bishop, a
+	}
+	rookTargets := rookAttacks(occupied, sq)
+	if a := rookTargets & own & bb.pieces[rook]; a.isNotEmpty() {
+		return rook, a
+	}
+	if a := (bishopTargets | rookTargets) & own & bb.pieces[queen]; a.isNotEmpty() {
+		return queen, a
+	}
+	if a := kingTargets & own & bb.pieces[king]; a.isNotEmpty() {
+		return king, a
+	}
+	return noPiece, 0
 }

@@ -29,10 +29,8 @@ const evalCacheClampMax = 30000
 
 // newEvalHashTable allocates an evaluation cache with count slots (rounded up to a power of 2).
 func newEvalHashTable(count int) evalHashTable {
-	var i int
-	for i = 1; i < count; i <<= 1 {
-	}
-	return evalHashTable{entries: make([]evalHashEntry, i), mask: zobrist(i) - 1}
+	size := roundUpToPow2(count)
+	return evalHashTable{entries: make([]evalHashEntry, size), mask: zobrist(size) - 1}
 }
 
 // find returns the cached score for hash and true, or (0, false) on a miss (comma-ok, mirroring
