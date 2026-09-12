@@ -108,12 +108,15 @@ jobs:
           }
 
   # ---------------------------------------------------------------------------------------------------------
-  # Build artifacts: a native engine binary per OS plus a docs bundle and source archive, all versioned from
-  # the git commit count (hence the full-history checkouts). Binaries upload only after that platform's build
-  # AND test pass (the upload is a later step, so a failed build/test ends the job first); each binary job is
-  # self-contained — it builds the versioned binary (pawnstar-go_<major>_<minor>_<build>) and runs the tests
-  # on its own runner. Download everything from the run's "Artifacts" section; the Release workflow promotes
-  # the artifacts of a fully green run into a GitHub Release without rebuilding anything.
+  # Build artifacts: a native engine binary for Linux and Windows plus a docs bundle and source archive, all
+  # versioned from the git commit count (hence the full-history checkouts). Binaries upload only after that
+  # platform's build AND test pass (the upload is a later step, so a failed build/test ends the job first);
+  # each binary job is self-contained — it builds the versioned binary (pawnstar-go_<major>_<minor>_<build>)
+  # and runs the tests on its own runner. Download everything from the run's "Artifacts" section; the Release
+  # workflow promotes the artifacts of a fully green run into a GitHub Release, rebuilding nothing but the
+  # macOS arm64 binary. No macOS job here: a hosted macOS minute bills ten Linux minutes on a private repo, so
+  # the arm64 build and its tests run at release time instead (release.yml), at the promoted commit, and the
+  # release refuses to publish if they fail.
   # ---------------------------------------------------------------------------------------------------------
 
   # Linux x86-64 (AVX2 SIMD kernels, via the make wrapper).
@@ -141,30 +144,6 @@ jobs:
         with:
           name: pawnstar-go-linux-amd64
           path: pawnstar-go_[0-9]*_[0-9]*_[0-9]* # the versioned binary, not the pawnstar-go symlink
-          if-no-files-found: error
-
-  # macOS arm64 (Apple Silicon). amd64-only files (archsimd + the AVX2 asm) are build-tag-excluded here;
-  # arm64 builds the hand-written NEON NNUE kernels (engine/nnue/kernels_arm64.s + dot_arm64.s) — no AVX2 check.
-  artifact-macos:
-    name: artifact (macos arm64)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false # no go.sum / external deps to cache
-      - name: Build versioned binary
-        run: make build
-      - name: Test
-        run: make -j"$(sysctl -n hw.logicalcpu)" check
-      - name: Upload engine binary
-        uses: actions/upload-artifact@v6
-        with:
-          name: pawnstar-go-macos-arm64
-          path: pawnstar-go_[0-9]*_[0-9]*_[0-9]*
           if-no-files-found: error
 
   # Windows x86-64 (AVX2 SIMD kernels). No `make` on the runner, so build/test with go directly (bash shell
