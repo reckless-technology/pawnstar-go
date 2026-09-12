@@ -171,7 +171,7 @@ jobs:
   # for the git build-number + ldflags). Keep MAJOR/MINOR here in sync with engine/version.go + the Makefile.
   artifact-windows:
     name: artifact (windows amd64)
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64]
     defaults:
       run:
         shell: bash
