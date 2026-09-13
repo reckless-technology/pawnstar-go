@@ -69,10 +69,11 @@ jobs:
   #    artifact — the steps the per-push CI job ran before macOS moved here. amd64-only files (archsimd + the
   #    AVX2 asm) are build-tag-excluded; arm64 builds the hand-written NEON NNUE kernels
   #    (engine/nnue/kernels_arm64.s + dot_arm64.s) — no AVX2 check.
+  #    Runs on the org's Apple-silicon runner (reckless-ci-mac-1), not a hosted macos-latest runner.
   macos:
     name: build + test (macos arm64)
     needs: resolve
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       # Full history so `git rev-list --count HEAD` yields the true build number for the version-named binary.
       - uses: actions/checkout@v5
