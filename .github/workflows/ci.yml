@@ -18,12 +18,17 @@ env:
   GOEXPERIMENT: simd
 
 jobs:
+  # Every Linux job below runs on the org's self-hosted runners ([self-hosted, Linux, X64]:
+  # reckless-ci-lin-0 and reckless-ci-lin-1), not hosted ubuntu-latest. setup-go fetches the toolchain
+  # go.mod pins into each runner's tool cache. The two machines are not identical hardware - lin-1 is an
+  # older 2-core Haswell - which is what the AVX2 gate in the build jobs is for.
+
   # Primary build + test gate on Linux via the `make` wrapper (which sets GOEXPERIMENT=simd). `make check`
   # runs perft, SEE, Bratko-Kopec, the NNUE gates, chess-clock timing, and the UCI-protocol test — including
   # the bench determinism signature.
   build-test:
     name: build + test (make check)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       # Full history (not a shallow clone) so `git rev-list --count HEAD` yields the true build number.
       - uses: actions/checkout@v5
@@ -35,7 +40,8 @@ jobs:
           cache: false # no go.sum / external deps to cache
       - name: Check runner has AVX2
         # The engine emits 256-bit AVX2 (NNUE SIMD kernels), so the test binaries need an AVX2 CPU.
-        # GitHub-hosted x86-64 runners do; fail fast with a clear message if one ever doesn't.
+        # The self-hosted Linux runners are not identical hardware, so this gate is what stops a runner
+        # that lacks AVX2 from reporting a green build it never actually ran.
         run: |
           grep -q avx2 /proc/cpuinfo \
             || { echo "::error::runner CPU lacks AVX2 — cannot run the SIMD engine"; exit 1; }
@@ -45,7 +51,7 @@ jobs:
   # Style gate: the tree must be gofmt-clean and vet-clean.
   format:
     name: gofmt + vet
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -65,7 +71,7 @@ jobs:
   # The linter set is deliberately conservative — see .golangci.yml for why (bit-parity).
   lint:
     name: golangci-lint
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -83,7 +89,7 @@ jobs:
   # tested invariant. GOAMD64 is left at the v1 default on purpose: the fallback must run on ANY amd64 CPU.
   scalar:
     name: scalar fallback (no simd)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     env:
       GOEXPERIMENT: "" # override the workflow-level simd
     steps:
@@ -122,7 +128,7 @@ jobs:
   # Linux x86-64 (AVX2 SIMD kernels, via the make wrapper).
   artifact-linux:
     name: artifact (linux amd64)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -183,7 +189,7 @@ jobs:
   # never released. Keep MAJOR/MINOR in sync with engine/version.go + the Makefile.
   artifact-docs:
     name: artifact (docs + source)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
         with:
