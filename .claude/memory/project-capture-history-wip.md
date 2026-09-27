@@ -146,4 +146,4 @@ mirror in C++). (5) MIRROR in C++ Pawnstar (same recordGood change) to preserve 
 both engines at the new signature with PAWNSTAR_BENCH_DEBUG line-for-line. (6) `make check`, commit both
 (Go push ok; C++ commit, push when told). Remove bkprobe_test.go + pawnstar-go-cand wrapper, or keep the
 probe driver. Optionally SPRT the node-cheaper no-malus variant first — it MIGHT gain more. Full names
-per [[feedback-full-names-not-abbreviations]].
+per the organisation's `reckless-working-practice` skill (`reckless-technology/claude-skills`, skill `reckless-working-practice`).

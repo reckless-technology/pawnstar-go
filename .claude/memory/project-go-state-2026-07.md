@@ -21,4 +21,4 @@ metadata:
 
 **NEXT STEP the user is switching for:** hand-write **arm64/NEON** NNUE kernels — macOS currently runs the scalar path and is the remaining slow spot. Full plan, C++-comparison, integration, and gates in [[project-go-nnue-arm64-neon]]; kernel layout in [[reference-go-nnue-kernel-layout]]. On the Mac you can finally **run/benchmark arm64 natively** (I was on amd64 Linux and could only cross-compile-check).
 
-Working style reminders: direct push to `main` is fine for pawnstar-go ([[feedback-direct-push-main-pawnstar-go]]); C++ repo confirm per task; don't hand-wave divergences ([[feedback-root-cause-not-benign]]).
+Working style reminders: direct push to `main` is fine for pawnstar-go ([[feedback-direct-push-main-pawnstar-go]]); C++ repo confirm per task; don't hand-wave divergences (now in `reckless-technology/claude-skills`, skill `reckless-working-practice`).
