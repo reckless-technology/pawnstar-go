@@ -285,3 +285,12 @@ The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direc
 ### Search diagnostics
 
 [engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, the pruning/reduction techniques (check extensions, IIR, RFP, LMP, qsearch SEE prunes, the three LMR tiers), draw detection, and killer move beta cutoffs. The search reaches them through `searchState.dbg`: the main thread points at the global `dbgx`, each helper thread at a throwaway, so the counters neither race nor contend under Lazy SMP (helper counts are discarded). Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect single-threaded search behaviour. Counters accumulate across searches unless explicitly reset.
+
+## License
+
+pawnstar-go is free software, licensed under the **GNU General Public License, version 3** (GPLv3). You may
+redistribute and/or modify it under the terms of that license; it comes with **no warranty**. See the
+[LICENSE](LICENSE) file for the full text, or <https://www.gnu.org/licenses/gpl-3.0.html>.
+
+The NNUE network ([engine/nnue/pawnstar-v12.bin](engine/nnue/pawnstar-v12.bin)) is the one
+[Pawnstar](https://github.com/reckless-technology/pawnstar) ships, under the same license.
