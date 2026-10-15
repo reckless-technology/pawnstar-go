@@ -36,6 +36,45 @@ Run with `GOEXPERIMENT=simd` (or `make test`) to exercise the SIMD kernels; `mak
 
 Perft (move generation only) runs at approximately **200 Mnps** single-threaded (start position, amd64 dev machine) and is core-count-independent now that move generation is allocation-free. The NNUE evaluator used in real search is slower per node but far stronger — when first ported it measured **+572 Elo** over the engine's former handcrafted evaluation in a fixed-depth self-play SPRT (146W/3L/5D); that handcrafted eval has since been removed. The C++ original reaches ~540 Mnps on the same machine — a raw move-gen gap of ~2.7×, attributable to compiler codegen rather than algorithm (PEXT vs magic bitboards measured near-identical in the C++ engine's own testing). In real NNUE search the Go↔C++ speed gap is much smaller than that raw move-gen gap — search nps is dominated by evaluation, where the SIMD kernels are close to the C++ hot path. Over the 24 Bratko-Kopec positions at depth 10 (single-threaded, bit-identical search trees) the Go engine runs ~1.06 Mnps versus the C++ engine's ~1.77 Mnps — **~1.66× slower** on the amd64 machine. On **arm64 (Apple Silicon)**, after the hand-written NEON kernels, the gap is essentially closed: the 16-position `bench` (identical 7,007,401-node trees — the pre-butterfly signature — interleaved) runs at **~1.14 Mnps vs C++ ~1.15–1.19 Mnps — parity (~0.98×)**, up 6.0× from ~190k nps when arm64 was fully scalar.
 
+## Versions and releases
+
+The version is `MAJOR.MINOR.BUILD`, from git alone, the rule all of reckless-technology's projects follow:
+
+- `MAJOR.MINOR` is the nearest annotated tag `vMAJOR.MINOR` reachable from the commit built (a *version mark*, made by
+  hand on `main`);
+- `BUILD` is the number of commits since that tag, the tagged commit itself being 0.
+
+`tools/version.sh` works it out (`git describe --tags --match 'v*.*' --exclude 'v*.*.*'`). The `Makefile` links it into
+the binary (`-ldflags "-X pawnstar-go/engine.version=..."`) and names the binary `pawnstar-go_MAJOR_MINOR_BUILD`. The
+engine reports it: `id name Pawnstar-Go 1.0.0`. Nothing in the tree holds a version to edit. A tree with no mark
+reachable (a source tarball, a shallow clone, a fork without the tags), or a plain `go build` with no ldflags, reports
+`0.0.0`.
+
+`.github/workflows/release.yml` makes a release:
+
+- **Pushing a mark** (`git tag -a v1.1 -m "Pawnstar-Go 1.1" && git push origin v1.1`) releases `1.1.0`.
+- **Running it by hand** on `main` (`gh workflow run release.yml --ref main`) releases `main`'s head as
+  `MAJOR.MINOR.BUILD`. `-f dry_run=true`, from any branch, builds, tests and signs the macOS binary but publishes
+  nothing.
+
+It refuses a mark that isn't `vMAJOR.MINOR`, a commit not on `main`, and a version already released. Each platform is
+built and tested from nothing on the organisation's self-hosted runners: `make check` on Linux and macOS, with the
+golden bench signature, and `go test ./...` on Windows. Each shipped binary must report the version. The workflow
+creates the release `vMAJOR.MINOR.BUILD` and its tag itself. It never runs for a pull request.
+
+| File | What it is |
+|---|---|
+| `pawnstar-go-<version>-windows-amd64.exe` | the engine (AVX2), Authenticode-signed through SSL.com eSigner (Jonathan Reckless) |
+| `pawnstar-go-<version>-macos-arm64.zip` | the engine for Apple silicon, signed with a Developer ID (hardened runtime) and notarised by Apple |
+| `pawnstar-go-<version>-linux-amd64` | the engine for Linux (AVX2) |
+| `pawnstar-go-<version>-source.tar.gz`, `-docs.zip` | the source at the commit, and the documentation bundle (`make source-archive`, `make docs-bundle`) |
+
+The macOS engine ships in a zip because a bare binary can't carry a stapled notarisation ticket: Gatekeeper looks its
+ticket up online, and the zip keeps the executable bit through a browser's download. The signing runs from
+`tools/sign-macos.sh` and `tools/sign-windows.ps1`, with the organisation's signing secrets (the same ones as its other
+apps). The Windows binary is signed only in a run that publishes, since every signing spends the eSigner account's
+allowance. A publishing run that would ship an unsigned binary fails.
+
 ## Architecture
 
 ### Board representation

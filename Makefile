@@ -21,18 +21,15 @@ export GOAMD64 := v3
 BINARY := pawnstar-go
 PKG    := ./...
 
-# Version, mirroring the C++ engine: MAJOR.MINOR are edited by hand (keep in sync with engine/version.go),
-# BUILD is the git commit count (globally reproducible; 0 outside a git checkout). The build number is baked
-# into the binary via -ldflags so the UCI `id name` reports "Pawnstar-Go MAJOR.MINOR.BUILD", and the built
-# binary is named pawnstar-go_MAJOR_MINOR_BUILD with a `pawnstar-go` symlink to it (like C++'s pawnstar).
-MAJOR := 0
-MINOR := 1
-BUILD := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
-VERSION := $(MAJOR).$(MINOR).$(BUILD)
-VERSIONED := $(BINARY)_$(MAJOR)_$(MINOR)_$(BUILD)
-LDFLAGS := -X pawnstar-go/engine.versionBuild=$(BUILD)
+# Version, MAJOR.MINOR.BUILD, from git alone (tools/version.sh): the nearest annotated vMAJOR.MINOR tag and the
+# commits since it; 0.0.0 with no such tag reachable. Linked into the binary via -ldflags so the UCI `id name` reports
+# "Pawnstar-Go MAJOR.MINOR.BUILD" (engine/version.go), and the built binary is named pawnstar-go_MAJOR_MINOR_BUILD with
+# a `pawnstar-go` symlink to it (like C++'s pawnstar). Nothing here is edited to release: tag main and push the tag.
+VERSION := $(shell tools/version.sh)
+VERSIONED := $(BINARY)_$(subst .,_,$(VERSION))
+LDFLAGS := -X pawnstar-go/engine.version=$(VERSION)
 
-.PHONY: all build test test-short check perft search bk see nnue book lazysmp race timing test-uci bench baseline vet fmt clean
+.PHONY: all build test test-short check perft search bk see nnue book lazysmp race timing test-uci bench baseline vet fmt clean docs-bundle source-archive
 
 all: build
 
@@ -119,6 +116,24 @@ vet:
 
 fmt:
 	$(GO) fmt ./...
+
+# The documentation bundle a release ships, pawnstar-go-<version>-docs.zip: the markdown docs plus `go doc -all` for the
+# engine and engine/nnue packages, each twice - *-api.txt (the exported API) and *-internals.txt (-u, every documented
+# internal function and type).
+docs-bundle:
+	rm -rf docs-bundle && mkdir -p docs-bundle
+	cp README.md CLAUDE.md docs-bundle/
+	$(GO) doc -all ./engine > docs-bundle/engine-api.txt
+	$(GO) doc -all -u ./engine > docs-bundle/engine-internals.txt
+	$(GO) doc -all ./engine/nnue > docs-bundle/nnue-api.txt
+	$(GO) doc -all -u ./engine/nnue > docs-bundle/nnue-internals.txt
+	rm -f $(BINARY)-$(VERSION)-docs.zip
+	cd docs-bundle && zip -rq ../$(BINARY)-$(VERSION)-docs.zip .
+	rm -rf docs-bundle
+
+# The source a release ships, pawnstar-go-<version>-source.tar.gz: a clean `git archive` of HEAD (no .git).
+source-archive:
+	git archive --format=tar.gz --prefix=$(BINARY)-$(VERSION)/ -o $(BINARY)-$(VERSION)-source.tar.gz HEAD
 
 # Snapshot the current build as the SPRT baseline opponent (tools/sprt.sh BIN_B default).
 baseline: build

@@ -1,22 +1,13 @@
 package engine
 
-import "fmt"
+// version is the engine's version, MAJOR.MINOR.BUILD, reported to the UCI host as "id name Pawnstar-Go <version>".
+// It comes from git alone, the rule every reckless-technology project follows (tools/version.sh): MAJOR.MINOR is the
+// nearest annotated tag vMAJOR.MINOR reachable from the commit built, BUILD the number of commits since it. The
+// Makefile and the workflows inject it at link time, -ldflags "-X pawnstar-go/engine.version=<version>"; a plain
+// `go build` or `go test`, with no ldflags, reports 0.0.0. Nothing here is edited to release: tag main and push the tag.
+var version = "0.0.0"
 
-// Engine version, reported to the UCI host as "id name Pawnstar-Go <major>.<minor>.<build>" (mirrors the C++
-// engine's scheme). Major and minor are edited by hand here — keep them in sync with MAJOR/MINOR in the
-// Makefile, which names the built binary pawnstar-go_<major>_<minor>_<build>. The build number is the git
-// commit count (`git rev-list --count HEAD`), a globally-reproducible number identical for every clone at a
-// given commit; it is injected at link time via `-ldflags "-X pawnstar-go/engine.versionBuild=<n>"` (the
-// Makefile does this). It defaults to "0" for a plain `go build`/`go test` with no ldflags, matching the C++
-// PAWNSTAR_BUILD_NUMBER default.
-const (
-	versionMajor = 0
-	versionMinor = 1
-)
-
-var versionBuild = "0"
-
-// versionString returns the engine version as "major.minor.build" (e.g. "0.1.141").
+// versionString returns the engine version as "major.minor.build" (e.g. "1.0.5").
 func versionString() string {
-	return fmt.Sprintf("%d.%d.%s", versionMajor, versionMinor, versionBuild)
+	return version
 }

@@ -30,7 +30,7 @@ jobs:
     name: build + test (make check)
     runs-on: [self-hosted, Linux, X64]
     steps:
-      # Full history (not a shallow clone) so `git rev-list --count HEAD` yields the true build number.
+      # Full history and the tags (not a shallow clone): tools/version.sh derives the version from them.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -115,14 +115,13 @@ jobs:
 
   # ---------------------------------------------------------------------------------------------------------
   # Build artifacts: a native engine binary for Linux and Windows plus a docs bundle and source archive, all
-  # versioned from the git commit count (hence the full-history checkouts). Binaries upload only after that
-  # platform's build AND test pass (the upload is a later step, so a failed build/test ends the job first);
-  # each binary job is self-contained — it builds the versioned binary (pawnstar-go_<major>_<minor>_<build>)
-  # and runs the tests on its own runner. Download everything from the run's "Artifacts" section; the Release
-  # workflow promotes the artifacts of a fully green run into a GitHub Release, rebuilding nothing but the
-  # macOS arm64 binary. No macOS job here: a hosted macOS minute bills ten Linux minutes on a private repo, so
-  # the arm64 build and its tests run at release time instead (release.yml), at the promoted commit, and the
-  # release refuses to publish if they fail.
+  # versioned from the git tags by tools/version.sh (hence the full-history checkouts). Binaries upload only
+  # after that platform's build AND test pass (the upload is a later step, so a failed build/test ends the job
+  # first); each binary job is self-contained — it builds the versioned binary
+  # (pawnstar-go_<major>_<minor>_<build>) and runs the tests on its own runner. Download them from the run's
+  # "Artifacts" section, for a look at a commit's build. Releases are built by release.yml, from nothing, on a
+  # pushed vMAJOR.MINOR tag, and signed - none of these artifacts is released. No macOS job here: the arm64
+  # build and its tests run in release.yml, which refuses to publish if they fail.
   # ---------------------------------------------------------------------------------------------------------
 
   # Linux x86-64 (AVX2 SIMD kernels, via the make wrapper).
@@ -153,7 +152,7 @@ jobs:
           if-no-files-found: error
 
   # Windows x86-64 (AVX2 SIMD kernels). No `make` on the runner, so build/test with go directly (bash shell
-  # for the git build-number + ldflags). Keep MAJOR/MINOR here in sync with engine/version.go + the Makefile.
+  # for tools/version.sh and the ldflags, as the Makefile passes them).
   artifact-windows:
     name: artifact (windows amd64)
     runs-on: [self-hosted, Windows, X64]
@@ -170,8 +169,8 @@ jobs:
           cache: false # no go.sum / external deps to cache
       - name: Build versioned binary
         run: |
-          build=$(git rev-list --count HEAD)
-          go build -ldflags "-X pawnstar-go/engine.versionBuild=$build" -o "pawnstar-go_0_1_${build}.exe" .
+          version=$(tools/version.sh)
+          go build -ldflags "-X pawnstar-go/engine.version=$version" -o "pawnstar-go_${version//./_}.exe" .
       - name: Test
         run: go test ./...
       - name: Upload engine binary
@@ -181,12 +180,8 @@ jobs:
           path: pawnstar-go_*.exe
           if-no-files-found: error
 
-  # Documentation bundle + source archive, versioned like the binaries. The docs zip holds the markdown
-  # docs plus `go doc -all` for the engine and engine/nnue packages, each twice: *-api.txt (the exported
-  # API) and *-internals.txt (-u, every documented internal function/type). The source tar.gz is a clean
-  # `git archive` of the built commit (no .git). These need no test gate of their own: the Release
-  # workflow only promotes runs whose overall conclusion is success, so bundles from a red run are
-  # never released. Keep MAJOR/MINOR in sync with engine/version.go + the Makefile.
+  # Documentation bundle + source archive, versioned like the binaries, made as release.yml makes them
+  # (`make docs-bundle` and `make source-archive`; the Makefile says what the bundle holds).
   artifact-docs:
     name: artifact (docs + source)
     runs-on: [self-hosted, Linux, X64]
@@ -199,19 +194,9 @@ jobs:
           go-version-file: go.mod
           cache: false # no go.sum / external deps to cache
       - name: Generate docs bundle
-        run: |
-          ver="0.1.$(git rev-list --count HEAD)"
-          mkdir -p docs-bundle
-          cp README.md CLAUDE.md docs-bundle/
-          go doc -all ./engine > docs-bundle/engine-api.txt
-          go doc -all -u ./engine > docs-bundle/engine-internals.txt
-          go doc -all ./engine/nnue > docs-bundle/nnue-api.txt
-          go doc -all -u ./engine/nnue > docs-bundle/nnue-internals.txt
-          ( cd docs-bundle && zip -rq "../pawnstar-go-$ver-docs.zip" . )
+        run: make docs-bundle
       - name: Source archive
-        run: |
-          ver="0.1.$(git rev-list --count HEAD)"
-          git archive --format=tar.gz --prefix="pawnstar-go-$ver/" -o "pawnstar-go-$ver-source.tar.gz" HEAD
+        run: make source-archive
       - name: Upload docs bundle
         uses: actions/upload-artifact@v6
         with:
