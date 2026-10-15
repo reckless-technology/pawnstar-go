@@ -59,6 +59,10 @@ concurrency:
 env:
   GOEXPERIMENT: simd
   GOAMD64: v3
+  # Every test runs: the self-hosted runners keep Go's build and test cache between jobs, and a cached "ok" is a
+  # result from an earlier run, not this release's (-count=1 is the documented way to bypass it; GOFLAGS applies it
+  # only to commands that know the flag).
+  GOFLAGS: -count=1
 
 jobs:
   verify:
