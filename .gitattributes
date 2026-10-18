@@ -1,0 +1,7 @@
+# The shell scripts, the hooks and the Makefile are read by bash and make on every platform - on Windows by Git's bash
+# and by MSYS2's, whose bash refuses a carriage return at the end of `set -o pipefail`. A clone with core.autocrlf=true,
+# every Windows clone here, would otherwise write them CRLF, and `make` would link the version as an empty string. So
+# they stay LF in the working copy whatever the clone's setting; everything else follows the clone's own choice.
+*.sh text eol=lf
+.githooks/* text eol=lf
+Makefile text eol=lf

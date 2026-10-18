@@ -1,0 +1,4 @@
+{
+  // The Go extension: gopls for the code model, Delve for the launches in launch.json, golangci-lint as the linter.
+  "recommendations": ["golang.go"]
+}

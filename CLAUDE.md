@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Requires Go 1.26 or later (the amd64 NNUE SIMD kernels use the `simd/archsimd` package, gated behind `GOEXPERIMENT=simd`). arm64 uses hand-written NEON assembly instead, which needs no experiment.
 
+**Setting up a machine.** `tools/setup-dev.ps1` (Windows) and `tools/setup-dev.sh` (Linux, macOS) install what
+building, testing, linting and debugging need - Go, the newest 1.26.x (1.27 changed the `simd/archsimd` API the amd64
+kernels use), golangci-lint of CI's v2.12 line, gopls and dlv for VS Code's Go extension, and a C compiler for the race
+detector (build-essential, Xcode's command-line tools, or on Windows MSYS2's CLANG64 clang, which `go env -w CC` points
+cgo at) - plus the git hooks and the recommended VS Code extensions, checking each first, so they are safe to run again;
+`-Check` / `--check` only reports. In VS Code they are the `setup environment` and `check environment` tasks. On
+Windows, run the Makefile from Git Bash with `mingw32-make`, MSYS2's native make, which the script installs: MSYS2's
+own `make` is handed only the PATH when Git Bash starts it, and leaves Go without a temporary folder.
+
 ```bash
 make build                  # build with GOEXPERIMENT=simd (recommended) -> ./pawnstar-go
 make test                   # run all tests with SIMD enabled
