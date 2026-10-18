@@ -5,3 +5,9 @@
 *.sh text eol=lf
 .githooks/* text eol=lf
 Makefile text eol=lf
+
+# Data the engine embeds (go:embed) or a test reads byte for byte is checked out exactly as committed, with no
+# line-ending conversion: under autocrlf=true a Windows build would embed a CRLF book where Linux and macOS embed LF -
+# a byte-different binary for the same commit.
+engine/book.txt                     -text
+engine/testdata/nnue_reference.txt  -text
