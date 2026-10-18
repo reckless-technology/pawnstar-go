@@ -1,7 +1,7 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    // Delve through the Go extension, the same on Linux, macOS and Windows. The launch builds with the Makefile's
+    // GOEXPERIMENT=simd and GOAMD64=v3, so the debugged engine runs the SIMD kernels the release does. It runs in the
+    // integrated terminal: type UCI commands there (uci, position ..., go ..., bench).
     "version": "0.2.0",
     "configurations": [
         {
@@ -10,7 +10,8 @@
             "request": "launch",
             "mode": "auto",
             "cwd": "${workspaceFolder}",
-            "program": "${workspaceFolder}/main.go",
+            "program": "${workspaceFolder}",
+            "env": { "GOEXPERIMENT": "simd", "GOAMD64": "v3" },
             "console": "integratedTerminal"
         },
         {

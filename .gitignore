@@ -1,5 +1,8 @@
 pawnstar-go
+pawnstar-go.exe
 pawnstar-go_*
+# Delve's build of the debugged program (VS Code's Go launches)
+__debug_bin*
 pawnstar-go-baseline
 .claude/worktrees/
 # fastchess SPRT artifacts

@@ -1,0 +1,48 @@
+{
+  // The go commands the Makefile wraps, with its GOEXPERIMENT=simd and GOAMD64=v3, so they run the same on Linux,
+  // macOS and Windows (the Makefile itself needs a Unix shell). `make build` adds the version from the git tags; these
+  // builds report 0.0.0, which is all an editor build needs.
+  "version": "2.0.0",
+  "options": { "env": { "GOEXPERIMENT": "simd", "GOAMD64": "v3" } },
+  "tasks": [
+    {
+      "label": "go: build",
+      "type": "shell",
+      "command": "go",
+      "args": ["build", "-o", "pawnstar-go", "."],
+      "windows": { "args": ["build", "-o", "pawnstar-go.exe", "."] },
+      "problemMatcher": ["$go"],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "go: test (short)",
+      "type": "shell",
+      "command": "go",
+      "args": ["test", "-short", "./..."],
+      "problemMatcher": ["$go"],
+      "group": { "kind": "test", "isDefault": true }
+    },
+    {
+      "label": "go: test",
+      "type": "shell",
+      "command": "go",
+      "args": ["test", "./..."],
+      "problemMatcher": ["$go"],
+      "group": "test"
+    },
+    {
+      "label": "go: vet",
+      "type": "shell",
+      "command": "go",
+      "args": ["vet", "./..."],
+      "problemMatcher": ["$go"]
+    },
+    {
+      "label": "golangci-lint",
+      "type": "shell",
+      "command": "golangci-lint",
+      "args": ["run"],
+      "problemMatcher": ["$go"]
+    }
+  ]
+}
