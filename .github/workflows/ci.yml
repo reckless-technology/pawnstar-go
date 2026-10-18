@@ -12,7 +12,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# The NNUE archsimd package + the hand-written AVX2 kernel are gated behind GOEXPERIMENT=simd (Go 1.26+).
+# The NNUE archsimd package + the hand-written AVX2 kernel are gated behind GOEXPERIMENT=simd (Go 1.26.x: 1.27
+# changed the archsimd API, and setup-go takes go.mod's 1.26 line).
 # The Makefile exports it too, but set it here so the direct `go`/`gofmt` steps agree.
 env:
   GOEXPERIMENT: simd
@@ -152,7 +153,7 @@ jobs:
           if-no-files-found: error
 
   # Windows x86-64 (AVX2 SIMD kernels). No `make` on the runner, so build/test with go directly (bash shell
-  # for tools/version.sh and the ldflags, as the Makefile passes them).
+  # for tools/version.sh and the ldflags, as the Makefile passes them); the race pass, last, brings its own make.
   artifact-windows:
     name: artifact (windows amd64)
     runs-on: [self-hosted, Windows, X64]
@@ -173,6 +174,30 @@ jobs:
           go build -ldflags "-X pawnstar-go/engine.version=$version" -o "pawnstar-go_${version//./_}.exe" .
       - name: Test
         run: go test ./...
+      # The race pass the Linux jobs run in `make check`: `make race` itself, so the two share its -run regex. -race
+      # needs cgo and a C compiler, which the runner's Go lacks: MSYS2's CLANG64 clang, from an MSYS2 of this job's own
+      # that setup-msys2 installs and caches (release: true), leaving the runner's shared C:\msys64 as it is, with
+      # mingw32-make (MSYS2's native GNU make) to run the Makefile from this Git Bash shell. The target switches cgo on;
+      # CC names the compiler, and clang64\bin goes on the PATH for its tools and any runtime DLL the binaries load.
+      - name: MSYS2 CLANG64 (clang and make for the race pass)
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          release: true
+          update: false
+          install: >-
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-make
+      - name: Race detector (make race)
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          clang64="$(cygpath -u "$MSYS2_LOCATION")/clang64/bin"
+          export PATH="$clang64:$PATH"
+          CC="$(cygpath -m "$clang64/clang.exe")"
+          export CC
+          mingw32-make race
       - name: Upload engine binary
         uses: actions/upload-artifact@v6
         with:

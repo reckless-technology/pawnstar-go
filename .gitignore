@@ -12,3 +12,5 @@ pawnstar-go-*
 
 # Go test binaries left behind by `go test -cpuprofile`
 *.test
+# go test coverage profile (make cover)
+coverage.out

@@ -18,7 +18,7 @@ make build                # build with GOEXPERIMENT=simd -> ./pawnstar-go
 ./pawnstar-go             # interactive UCI session
 ```
 
-Requires Go 1.26 or later. The engine evaluates with an embedded **NNUE** network (the only evaluator). Its hot kernels are build-tag split, all bit-identical: on **amd64** they use `simd/archsimd` plus hand-written AVX2 assembly, gated behind `GOEXPERIMENT=simd` (the `Makefile` sets this); on **arm64** they use hand-written NEON assembly (no experiment needed). A plain `go build` on any other target falls back to bit-identical scalar kernels.
+Requires Go 1.26.x (not 1.27 or later: the experimental `simd/archsimd` API the amd64 kernels use changed in 1.27, and the code does not compile there; the newest gopls needs 1.27 to build, but `go install` fetches that toolchain for gopls alone and leaves the repo's Go as it is). On Windows the binaries carry `.exe` and `pawnstar-go.exe` is a copy of the versioned one rather than a symlink. The engine evaluates with an embedded **NNUE** network (the only evaluator). Its hot kernels are build-tag split, all bit-identical: on **amd64** they use `simd/archsimd` plus hand-written AVX2 assembly, gated behind `GOEXPERIMENT=simd` (the `Makefile` sets this); on **arm64** they use hand-written NEON assembly (no experiment needed). A plain `go build` on any other target falls back to bit-identical scalar kernels.
 
 Point any UCI-compatible GUI (Arena, Cute Chess, etc.) at the binary — no configuration needed. UCI option `EvalFile` (path to a PSN1 net, or `<embedded>` for the built-in one) loads an alternative network.
 
@@ -35,6 +35,7 @@ go test ./engine/ -run TestSEE -v                 # 24 SEE cases + TestSEECrossC
 go test ./engine/ -run TestOpeningBook -v         # opening-book '?' (questionable) move handling
 make test-uci                                     # UCI protocol as a process (handshake, seldepth, searchmoves, currmove, bench + golden signature)
 make race                                         # concurrency tests (Lazy SMP, ponder clock) under the race detector
+make cover                                        # statement coverage of the whole suite -> coverage.out (git-ignored); prints the total (~90 %)
 go test ./engine/ -run TestNNUEReference -v       # NNUE exact int16 eval == C++ 250-FEN reference (0 cp)
 go test ./engine/ -run TestNNUEInt8 -v            # search's int8 eval within 40 cp of int16 ref (also scalar == SIMD)
 go test ./engine/ -run TestNNUEIncremental -v     # lazy accumulator == full refresh (bit-identical)

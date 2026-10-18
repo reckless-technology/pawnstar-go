@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-Requires Go 1.26 or later (the amd64 NNUE SIMD kernels use the `simd/archsimd` package, gated behind `GOEXPERIMENT=simd`). arm64 uses hand-written NEON assembly instead, which needs no experiment.
+Requires Go 1.26.x - not 1.27 or later: the amd64 NNUE SIMD kernels use the experimental `simd/archsimd` package, gated behind `GOEXPERIMENT=simd`, and 1.27 changed its API (`LoadInt16x16Slice` became `LoadInt16x16`, `StoreSlice` became `Store`, the array forms gained an `Array` suffix), so the code does not compile there. arm64 uses hand-written NEON assembly instead, which needs no experiment. The newest gopls needs Go 1.27 to build, but `go install` fetches that toolchain into the module cache for gopls's own build and leaves the repo's Go at 1.26.
 
 **Setting up a machine.** `tools/setup-dev.ps1` (Windows) and `tools/setup-dev.sh` (Linux, macOS) install what
 building, testing, linting and debugging need - Go, the newest 1.26.x (1.27 changed the `simd/archsimd` API the amd64
@@ -19,8 +19,17 @@ own `make` is handed only the PATH when Git Bash starts it, and leaves Go withou
 make build                  # build with GOEXPERIMENT=simd (recommended) -> ./pawnstar-go
 make test                   # run all tests with SIMD enabled
 make test-short             # -short variant
+make cover                  # the whole suite's statement coverage -> coverage.out, the total printed last (~90 %)
 make baseline               # snapshot the current binary as ./pawnstar-go-baseline for SPRT
 ```
+
+`make build` names the binary `pawnstar-go_MAJOR_MINOR_BUILD` with `pawnstar-go` beside it, each with `go env GOEXE`'s
+suffix (`.exe` on Windows); `pawnstar-go` is a symlink on Linux and macOS and a copy on Windows, and the build deletes
+any other versioned binary it finds. `make race` switches cgo on itself (`-race` needs it); its C compiler is go's `CC`,
+which on Windows is the MSYS2 clang the setup script records with `go env -w`. `make cover` runs the full suite
+instrumented (`-coverpkg=./...`, so a package's tests count for the code they reach in another; the default `set` mode,
+since `atomic` slows it far more than it is worth) under a 45-minute timeout, and leaves `coverage.out` (git-ignored)
+for `go tool cover -html=coverage.out`.
 
 The `Makefile` sets `GOEXPERIMENT=simd` for you. Building directly still works — `GOEXPERIMENT=simd go build -o pawnstar-go .` — and a plain `go build` compiles too. The NNUE kernels are build-tag split three ways, all **bit-identical**: **amd64 + `goexperiment.simd`** → archsimd + hand-written AVX2 asm (the Makefile default); **arm64** → hand-written NEON asm (no experiment needed); **anything else** (plain amd64 `go build`, other arches) → scalar fallback. SIMD/NEON is roughly an order of magnitude faster than scalar on the hot paths (int8 output dot ~9.9× on Apple Silicon; accumulator update ~7×).
 

@@ -54,7 +54,7 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-# The NNUE archsimd package and the hand-written AVX2 kernel are gated behind GOEXPERIMENT=simd (Go 1.26+); the
+# The NNUE archsimd package and the hand-written AVX2 kernel are gated behind GOEXPERIMENT=simd (Go 1.26.x, not 1.27+); the
 # Makefile exports it, and the Windows job, which has no make, takes it from here. GOAMD64=v3 as the Makefile sets it.
 env:
   GOEXPERIMENT: simd

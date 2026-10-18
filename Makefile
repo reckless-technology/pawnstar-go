@@ -2,9 +2,13 @@
 #
 # The NNUE kernels use the experimental simd/archsimd package, which is gated behind
 # GOEXPERIMENT=simd. Every build/test MUST set it, so it is centralised here — always
-# build via `make`, not a bare `go build`. Requires Go 1.26+ (archsimd landed in 1.26).
+# build via `make`, not a bare `go build`. Requires Go 1.26.x, not 1.27 or later: archsimd landed in 1.26, and
+# 1.27 changed its API (LoadInt16x16Slice became LoadInt16x16, StoreSlice became Store, the array forms gained an
+# Array suffix), so this code does not compile there.
 #
-# GO defaults to whatever `go` is on PATH (the 1.26.4 toolchain in ~/.local/bin/go).
+# GO defaults to whatever `go` is on PATH (tools/setup-dev.* install the newest 1.26.x).
+#
+# On Windows run it from Git Bash with mingw32-make (MSYS2's native GNU make; CLAUDE.md says why not MSYS2's own).
 
 GO ?= go
 export GOEXPERIMENT := simd
@@ -24,20 +28,35 @@ PKG    := ./...
 # Version, MAJOR.MINOR.BUILD, from git alone (tools/version.sh): the nearest annotated vMAJOR.MINOR tag and the
 # commits since it; 0.0.0 with no such tag reachable. Linked into the binary via -ldflags so the UCI `id name` reports
 # "Pawnstar-Go MAJOR.MINOR.BUILD" (engine/version.go), and the built binary is named pawnstar-go_MAJOR_MINOR_BUILD with
-# a `pawnstar-go` symlink to it (like C++'s pawnstar). Nothing here is edited to release: tag main and push the tag.
+# a `pawnstar-go` symlink to it (like C++'s pawnstar; a copy on Windows, below). Nothing here is edited to release: tag main and push the tag.
+#
+# EXE is the target's executable suffix (go env GOEXE: .exe on Windows, empty elsewhere), on the versioned binary and
+# the alias alike - so the cleanup loop in `build`, which keeps only the file named exactly $(VERSIONED), keeps the
+# binary it just built. On Windows the alias is a copy: Git Bash's `ln -s` silently makes a copy anyway (MSYS's
+# default for symlinks), so copy outright and say so.
+EXE := $(shell $(GO) env GOEXE)
 VERSION := $(shell tools/version.sh)
-VERSIONED := $(BINARY)_$(subst .,_,$(VERSION))
+VERSIONED := $(BINARY)_$(subst .,_,$(VERSION))$(EXE)
+ALIAS := $(BINARY)$(EXE)
+BASELINE := $(BINARY)-baseline$(EXE)
 LDFLAGS := -X pawnstar-go/engine.version=$(VERSION)
+ifeq ($(OS),Windows_NT)
+ALIAS_CMD := cp
+ALIAS_KIND := a copy of
+else
+ALIAS_CMD := ln -s
+ALIAS_KIND := ->
+endif
 
-.PHONY: all build test test-short check perft search bk see nnue book lazysmp race timing test-uci bench baseline vet fmt clean docs-bundle source-archive
+.PHONY: all build test test-short check cover perft search bk see nnue book lazysmp race timing test-uci bench baseline vet fmt clean docs-bundle source-archive
 
 all: build
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(VERSIONED) .
-	@rm -f $(BINARY) && ln -s $(VERSIONED) $(BINARY)
+	@rm -f $(ALIAS) && $(ALIAS_CMD) $(VERSIONED) $(ALIAS)
 	@for f in $(BINARY)_[0-9]*_[0-9]*_[0-9]*; do [ "$$f" = "$(VERSIONED)" ] || rm -f "$$f"; done
-	@echo "built $(VERSIONED)  (pawnstar-go -> $(VERSIONED), version $(VERSION))"
+	@echo "built $(VERSIONED)  ($(ALIAS) $(ALIAS_KIND) $(VERSIONED), version $(VERSION))"
 
 # Full test suite (all packages; perft capped at depth 5, search to depth 9).
 test:
@@ -64,6 +83,15 @@ test-short:
 # diagnosable output on a specific invariant (`make perft`, `make bk`, ...).
 # Use `make test-short` for a fast pass.
 check: test race
+
+# Statement coverage of the whole suite: every package's tests counted against every package (-coverpkg), so code one
+# package exercises in another counts. The profile goes to coverage.out (git-ignored) and the last line printed is the
+# total (`go tool cover -html=coverage.out` for the annotated source). It keeps the default -covermode=set: atomic,
+# which a counting profile of the concurrent tests would need, slows the instrumented suite far more than its answer is
+# worth here. The timeout is for the instrumented full suite, which on a slow machine runs past go test's default ten
+# minutes (some 80 s on a 32-core desktop).
+cover:
+	$(GO) test $(PKG) -timeout 45m -coverpkg=$(PKG) -coverprofile=coverage.out && $(GO) tool cover -func=coverage.out | tail -1
 
 perft:
 	$(GO) test $(PKG) -run TestPerft -v
@@ -93,7 +121,11 @@ lazysmp:
 	$(GO) test $(PKG) -run TestLazySMP -v
 
 # The concurrency tests under the race detector — the data-race-freedom claims (lockless TT/eval
-# cache sharing, the ponder clock atomics) are only actually verified when -race is on.
+# cache sharing, the ponder clock atomics) are only actually verified when -race is on. -race needs cgo, which go turns
+# off where it finds no C compiler or the environment says CGO_ENABLED=0, so it is switched on here for this target.
+# The C compiler is go's CC: the system's cc on Linux and macOS; on Windows MSYS2's CLANG64 clang, which
+# tools/setup-dev.ps1 installs and records with `go env -w CC=...` (the Windows CI job passes CC itself).
+race: export CGO_ENABLED := 1
 race:
 	$(GO) test $(PKG) -race -run 'TestLazySMP|TestPonderRace|TestFixedTimeDeadlineFires' -v
 
@@ -137,9 +169,9 @@ source-archive:
 
 # Snapshot the current build as the SPRT baseline opponent (tools/sprt.sh BIN_B default).
 baseline: build
-	cp $(BINARY) pawnstar-go-baseline
-	@echo "baseline snapshot -> pawnstar-go-baseline"
+	cp $(ALIAS) $(BASELINE)
+	@echo "baseline snapshot -> $(BASELINE)"
 
 clean:
 	$(GO) clean
-	rm -f $(BINARY) $(BINARY)_[0-9]*_[0-9]*_[0-9]* pawnstar-go-baseline
+	rm -f $(ALIAS) $(BINARY)_[0-9]*_[0-9]*_[0-9]* $(BASELINE) coverage.out
