@@ -49,6 +49,46 @@ jobs:
       - name: Build + test
         run: make -j"$(nproc)" check
 
+  # Coverage gate: `make cover` runs the whole suite instrumented (-coverpkg=./..., so the engine, engine/nnue and the
+  # binary's main package are all counted) and fails when the total statement coverage is under the Makefile's
+  # COVER_MIN (90 %), the one place the threshold is written. The total and the functions short of 100 % go to the
+  # job summary.
+  coverage:
+    name: coverage (make cover, gate COVER_MIN)
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false # no go.sum / external deps to cache
+      - name: Check runner has AVX2
+        run: |
+          grep -q avx2 /proc/cpuinfo \
+            || { echo "::error::runner CPU lacks AVX2 — cannot run the SIMD engine"; exit 1; }
+      - name: Coverage (fails under COVER_MIN)
+        run: |
+          set -o pipefail
+          make cover 2>&1 | tee cover.log
+      - name: Job summary
+        if: always()
+        run: |
+          [ -f coverage.out ] || exit 0
+          {
+            echo '### Statement coverage'
+            echo
+            grep -E '^total statement coverage|under the' cover.log || true
+            echo
+            echo '<details><summary>Functions short of 100 %</summary>'
+            echo
+            echo '```'
+            go tool cover -func=coverage.out | grep -v '100.0%' || true
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Style gate: the tree must be gofmt-clean and vet-clean.
   format:
     name: gofmt + vet

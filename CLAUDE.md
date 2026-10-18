@@ -19,7 +19,7 @@ own `make` is handed only the PATH when Git Bash starts it, and leaves Go withou
 make build                  # build with GOEXPERIMENT=simd (recommended) -> ./pawnstar-go
 make test                   # run all tests with SIMD enabled
 make test-short             # -short variant
-make cover                  # the whole suite's statement coverage -> coverage.out, the total printed last (~90 %)
+make cover                  # the whole suite's statement coverage -> coverage.out; fails under COVER_MIN (90 %)
 make baseline               # snapshot the current binary as ./pawnstar-go-baseline for SPRT
 ```
 
@@ -29,7 +29,13 @@ any other versioned binary it finds. `make race` switches cgo on itself (`-race`
 which on Windows is the MSYS2 clang the setup script records with `go env -w`. `make cover` runs the full suite
 instrumented (`-coverpkg=./...`, so a package's tests count for the code they reach in another; the default `set` mode,
 since `atomic` slows it far more than it is worth) under a 45-minute timeout, and leaves `coverage.out` (git-ignored)
-for `go tool cover -html=coverage.out`.
+for `go tool cover -html=coverage.out`. The total is gated at `COVER_MIN` (90 %, a variable in the `Makefile` and the
+one place the number is written): under it `make cover` fails, and so does CI's `coverage` job, which runs it. The
+gated figure is `./...` whole - the engine, `engine/nnue` and the binary's `main` - since the repository has no Go
+developer tool a release does not ship (`tools/` holds shell and PowerShell scripts); test files are never counted.
+It stands near 99 %: the UCI dispatcher, the `go` parser, `setoption`, `bench` and `main` itself are driven in process
+(`engine/uci_inprocess_test.go`, `main_test.go`), since the subprocess UCI test is invisible to the profile. A new
+feature brings its tests with it rather than spending the margin.
 
 The `Makefile` sets `GOEXPERIMENT=simd` for you. Building directly still works — `GOEXPERIMENT=simd go build -o pawnstar-go .` — and a plain `go build` compiles too. The NNUE kernels are build-tag split three ways, all **bit-identical**: **amd64 + `goexperiment.simd`** → archsimd + hand-written AVX2 asm (the Makefile default); **arm64** → hand-written NEON asm (no experiment needed); **anything else** (plain amd64 `go build`, other arches) → scalar fallback. SIMD/NEON is roughly an order of magnitude faster than scalar on the hot paths (int8 output dot ~9.9× on Apple Silicon; accumulator update ~7×).
 

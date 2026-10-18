@@ -90,8 +90,22 @@ check: test race
 # which a counting profile of the concurrent tests would need, slows the instrumented suite far more than its answer is
 # worth here. The timeout is for the instrumented full suite, which on a slow machine runs past go test's default ten
 # minutes (some 80 s on a 32-core desktop).
+#
+# The total is gated: under COVER_MIN per cent the target fails, here and in CI's coverage job, which runs this target -
+# the one place the threshold is written (`make cover COVER_MIN=95` to try another). What is counted is ./... whole:
+# the engine, engine/nnue and the binary's main package, every statement a release ships. The repository has no Go
+# developer tools to leave out (tools/ holds shell and PowerShell scripts), and go never counts a _test.go file.
+COVER_MIN ?= 90
+
 cover:
-	$(GO) test $(PKG) -timeout 45m -coverpkg=$(PKG) -coverprofile=coverage.out && $(GO) tool cover -func=coverage.out | tail -1
+	$(GO) test $(PKG) -timeout 45m -coverpkg=$(PKG) -coverprofile=coverage.out
+	@$(GO) tool cover -func=coverage.out | awk -v min=$(COVER_MIN) ' \
+		/^total:/ { found = 1; total = $$NF; sub(/%/, "", total) } \
+		END { \
+			if (!found) { print "cover: no total line in go tool cover -func"; exit 1 } \
+			printf "total statement coverage %s%% (gate %s%%)\n", total, min; \
+			if (total + 0 < min + 0) { printf "cover: %s%% is under the %s%% gate\n", total, min; exit 1 } \
+		}'
 
 perft:
 	$(GO) test $(PKG) -run TestPerft -v
