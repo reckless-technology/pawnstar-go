@@ -68,3 +68,19 @@ stop the running search FIRST, as Rust's game_mut always did. Go/C++ setoption s
 (Rust's does) - GUIs never send it mid-search; left as is.
 Regression tests in each: an in-process watchdogged loop (go+stop, go ponder+stop, go+go, go+ucinewgame,
 go+quit; Threads 3) and binary loops (uci_test.sh in C++/Rust, uci_robustness_test.rs, uci_test.go).
+
+---
+
+**CASTLING ADVANCES THE FIFTY-MOVE CLOCK (Go, 2026-10-19, PR #13).** makeMove reset `halfMove` on
+castling - the reasoning was "castling is irreversible". Irreversibility matters to REPETITION alone, and
+the hash already carries it there (castling removes rights). FIDE Article 9.3 and FEN's halfmove clock
+reset only on a pawn move or a capture (en passant included), so castling now increments. Bench stayed
+6,601,454 with every per-position line and DEBUGX counter identical: the bench positions start at clock 0
+and no depth-13 line castles and then goes 20 plies with no pawn move or capture (scaleByRule50's first
+read). So a fix that leaves bench unchanged keeps parity, and the C++ and Rust engines need the same
+one-line change: **pawnstar-rs src/position.rs `MoveType::Castling` still sets reversible_move_count = 0**
+(seen 2026-10-19 at 16bc0ed), and the C++ engine was found doing the same. Tests:
+TestCastlingAdvancesFiftyMoveClock (fen_test.go), TestDrawByFiftyMovesAcrossCastling (draw_test.go).
+Still open in all three: the fifty-move draw is returned at clock >= 100 before the node checks for mate,
+where FIDE 9.3 lets a checkmate on the hundredth halfmove stand; and the uint8 clock wraps past 255 (a
+FEN clock over 255, or a GUI that never adjudicates).
