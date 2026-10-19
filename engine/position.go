@@ -20,7 +20,7 @@ type position struct {
 	checkers    bitboard       // pieces currently giving check to the side to move; refreshed by makeMove
 	hash        zobrist        // Zobrist hash; updated incrementally, recomputed from scratch only in positionFromFen
 	epSquare    square         // target square of the last double pawn push, or noSquare if none
-	halfMove    uint8          // half-move clock; reset on pawn moves and captures; draw at 100
+	halfMove    uint8          // half-move clock; reset on pawn moves and captures alone (not castling); draw at 100
 	fullMove    uint8          // full-move number stored 0-based (add 1 when writing FEN)
 	flags       uint8          // transient move flags; currently only flagNullMove
 	castling    castlingRights // which castling moves remain legal for each side
@@ -324,7 +324,10 @@ func (pos *position) makeMove(m move) {
 		pos.movePiece(c, pawn, from, to)
 
 	case castling:
-		pos.halfMove = 0
+		// Castling is irreversible, but it is neither a pawn move nor a capture, so it advances the fifty-move
+		// clock (FIDE Article 9.3; FEN's halfmove clock). Repetition needs no reset here: castling takes away the
+		// castler's rights, which are in the hash, so no position before it can repeat one after it.
+		pos.halfMove++
 		switch to {
 		case g1:
 			pos.movePiece(white, king, e1, g1)

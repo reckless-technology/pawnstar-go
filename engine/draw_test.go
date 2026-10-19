@@ -69,3 +69,43 @@ func TestDrawByFiftyMoves(t *testing.T) {
 		t.Fatal("fifty-move draw not reported at clock 100")
 	}
 }
+
+// TestDrawByFiftyMovesAcrossCastling pins the fifty-move draw through castling: castling is neither a pawn move
+// nor a capture (FIDE Article 9.3), so it takes the clock from 98 to 99 and the reply's castling to 100, a draw.
+// Then the search: a queen up at clock 99 with no pawn move or capture to play, castling reaches clock 100
+// and must score as the draw, where at clock 0 the same move scores the extra queen.
+func TestDrawByFiftyMovesAcrossCastling(t *testing.T) {
+	game := NewGame()
+	game.newGameFromFen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 98 60")
+	ss := newSearchStateFromGame(game)
+	playUCI(t, ss, "e1g1")
+	if ss.isDrawByFiftyMoves() {
+		t.Fatal("fifty-move draw reported at clock 99")
+	}
+	if got := ss.currentPosition().halfMove; got != 99 {
+		t.Fatalf("white's castling left the clock at %d, want 99", got)
+	}
+	playUCI(t, ss, "e8c8") // O-O-O: the white rook on f1 covers f8
+	if !ss.isDrawByFiftyMoves() {
+		t.Fatalf("fifty-move draw not reported after castling to clock %d", ss.currentPosition().halfMove)
+	}
+
+	castlingScore := func(clock string) int {
+		game := NewGame()
+		game.newGameFromFen("4k3/8/8/8/8/8/8/3QK2R w K - " + clock + " 80")
+		game.timeControl.clockType = clockFixedDepth
+		ss := newSearchStateFromGame(game)
+		m := bookFindMove(ss.currentPosition(), "e1g1")
+		if m.isNone() {
+			t.Fatal("e1g1 is not legal")
+		}
+		var pv variation
+		return searchSingleMove(ss, 4, 0, initialAlpha, initialBeta, m, &pv, 0)
+	}
+	if got := castlingScore("99"); got != drawScore {
+		t.Errorf("castling at clock 99 scores %d, want the fifty-move draw (%d)", got, drawScore)
+	}
+	if got := castlingScore("0"); got < 500 {
+		t.Errorf("castling at clock 0 scores %d, want the extra queen (over 500)", got)
+	}
+}

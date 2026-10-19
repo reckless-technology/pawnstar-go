@@ -6,8 +6,8 @@ import "pawnstar-go/engine/nnue"
 // single uint64 — the eval-cache packing trick. This halves the entry (8 B vs the 16 B a {hash, uint8}
 // struct occupies with padding), so the per-node repetition scan walks half as many cache lines. Repetition
 // compares only the top 56 bits, which is ample discrimination for a scan window of at most ~100 plies
-// (and safer than the eval cache's 48-bit key); the low byte carries the clock, where a zero marks an
-// irreversible-move boundary that stops the scan.
+// (and safer than the eval cache's 48-bit key); the low byte carries the clock, where a zero marks a pawn
+// move or capture, the boundary that stops the scan.
 type hashStackEntry zobrist
 
 // packHashStack builds an entry: hash in the top 56 bits, half-move clock in the low byte.
@@ -15,7 +15,7 @@ func packHashStack(hash zobrist, clock uint8) hashStackEntry {
 	return hashStackEntry((hash &^ 0xFF) | zobrist(clock))
 }
 
-// clock returns the packed half-move clock (0 marks an irreversible-move boundary).
+// clock returns the packed half-move clock (0 marks a pawn move or capture, where the repetition scan stops).
 func (e hashStackEntry) clock() uint8 { return uint8(e) }
 
 // sameHashAs reports whether two entries hold the same position (top 56 bits of the hash; clock ignored).
@@ -199,8 +199,11 @@ func (ss *searchState) isDrawByFiftyMoves() bool {
 // isDrawByRepetition reports whether the current position has appeared twice
 // before in the combined game + search history (three occurrences total).
 // The scan steps backwards in two-ply increments so only positions with the
-// same side to move are compared.  It stops early at an irreversible move
-// (halfMoveClock == 0) because repetitions cannot cross a pawn move or capture.
+// same side to move are compared.  It stops early at a pawn move or capture
+// (halfMoveClock == 0) because repetitions cannot cross one. Castling does not
+// reset the clock, so the scan runs on past it, which costs a few compares and
+// finds nothing: castling takes away rights the hash carries, so no position
+// before it matches one after it.
 // A minimum of five entries is required: positions 0, 2, and 4 would be the
 // earliest possible three-fold repetition.
 func (ss *searchState) isDrawByRepetition() bool {

@@ -103,7 +103,7 @@ The struct holds:
 - `checkers bitboard` — pieces currently giving check to the side to move (refreshed by `makeMove`)
 - `hash zobrist` — Zobrist hash, maintained incrementally (recomputed from scratch only in `positionFromFen`)
 - `epSquare square` — en-passant target square, or `noSquare`
-- `halfMove uint8` — half-move clock for the 50-move rule; `fullMove uint8` — full-move number (0-based)
+- `halfMove uint8` — half-move clock for the 50-move rule, reset by a pawn move or a capture (en passant included) and advanced by every other move, castling among them; `fullMove uint8` — full-move number (0-based)
 - `flags uint8` — transient move flags (currently only `flagNullMove`); `castling castlingRights` — remaining castling rights
 - `colorToMove color` — side to move as a direct field
 
@@ -204,7 +204,7 @@ searchState
 └── game                *Game             pointer to shared state (TT + eval cache, clock, cancel)
 ```
 
-`hashStackEntry` packs the Zobrist hash (top 56 bits) and the half-move clock (low 8 bits) into a **single `uint64`** — 8 bytes, versus 160 bytes for a full `position` — keeping the repetition scan cache-friendly. Repetition detection compares only the top 56 hash bits (ample for a scan window of at most ~100 plies); a zero clock byte marks an irreversible-move boundary that stops the scan. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. Only truly shared state — the lockless TT + eval cache, the read-only time control, and the atomic cancel flag — is reached through the `game *Game` pointer; the history/killers/countermove/continuation tables and the accumulator stack are all local to this `searchState`.
+`hashStackEntry` packs the Zobrist hash (top 56 bits) and the half-move clock (low 8 bits) into a **single `uint64`** — 8 bytes, versus 160 bytes for a full `position` — keeping the repetition scan cache-friendly. Repetition detection compares only the top 56 hash bits (ample for a scan window of at most ~100 plies); a zero clock byte marks a pawn move or capture, the boundary that stops the scan. Castling advances the clock, as FIDE's fifty-move rule and FEN's halfmove clock count it, so the scan runs on past a castling move and finds nothing there: castling takes away rights the hash carries. `newSearchStateFromGame(game)` builds the search state: it converts all entries in `game.posStack` to compact `hashStackEntry` records (preserving the full game history for three-fold repetition detection), then seeds `posStack` with just the current position. Only truly shared state — the lockless TT + eval cache, the read-only time control, and the atomic cancel flag — is reached through the `game *Game` pointer; the history/killers/countermove/continuation tables and the accumulator stack are all local to this `searchState`.
 
 #### Iterative deepening
 
