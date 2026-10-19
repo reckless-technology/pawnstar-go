@@ -397,7 +397,7 @@ func TestUCIMalformedInput(t *testing.T) {
 	}
 	malformed := []string{
 		"go wtime", "go btime", "go winc", "go binc", "go movestogo", "go depth", "go movetime", "go nodes",
-		"go searchmoves", "go", "go wtime abc", "go depth -5",
+		"go searchmoves", "go", "go wtime abc", "go depth -5", "go depth abc", "go nodes 12x", "go movetime soon",
 		"position", "position fen", "position fen 8/8", "position fen garbage", "position fen ///////",
 		"position fen 99999999/99999999 w", "position fen 8/8 w - -", "position startpos moves",
 		"position startpos moves zzzz", "position fen rnbq w KQkq e",
@@ -406,8 +406,9 @@ func TestUCIMalformedInput(t *testing.T) {
 	// Each command gets a FRESH process, with the whole script piped in and stdin then closed.
 	//
 	// This deliberately avoids an interactive stop/isready handshake, which is what the first version of this
-	// test did — and it was a coin flip, not a test. Several of these lines legitimately start an UNBOUNDED
-	// search (a bare `go` inherits clockInfinite from the preceding `go nodes`), and the engine runs pinned to
+	// test did — and it was a coin flip, not a test. Several of these lines legitimately start a long search
+	// (a bare `go` searches on the default five-minute clock; a truncated `go nodes` once meant an unbounded
+	// one, before a keyword with no value was ignored with it), and the engine runs pinned to
 	// GOMAXPROCS=1. Racing an unbounded search on a loaded CI box (the whole suite plus the race-detector pass
 	// run concurrently) has two failure modes I hit: the engine can be blocked WRITING stdout — nothing drains
 	// it between sends, so the pipe fills — and a blocked writer cannot read `stop` or `isready`, so the
@@ -455,6 +456,52 @@ func TestUCIMalformedInput(t *testing.T) {
 		}
 		if !anyLineMatches(out, reBestmoveMv) {
 			t.Errorf("recovers: expected a legal 'bestmove <uci>'; got:\n%s", strings.Join(out, "\n"))
+		}
+	})
+}
+
+// TestUCIStopAndQuitStraightAfterGo drives the binary with a `stop` or `quit` written straight after `go
+// infinite`, before the search goroutine has begun the root search. The root search used to clear the
+// cancel flag as it began, so such a stop was lost: the engine never answered `go infinite` + `stop` and
+// never exited on `go infinite` + `quit` — every attempt hung before the fix.
+func TestUCIStopAndQuitStraightAfterGo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("UCI subprocess test skipped in -short mode")
+	}
+	const setup = "setoption name OwnBook value false\nsetoption name Threads value 1\n"
+	t.Run("stop", func(t *testing.T) {
+		e := startEngine(t)
+		defer e.close()
+		e.send(strings.TrimSuffix(setup, "\n"))
+		e.send("isready")
+		if _, ok := e.readUntil(reReadyok, 30*time.Second); !ok {
+			t.Fatal("no readyok")
+		}
+		const stops = 300
+		for i := range stops {
+			e.send("position startpos\ngo infinite\nstop")
+			if _, ok := e.readUntil(reBestmove, 30*time.Second); !ok {
+				t.Fatalf("go infinite + stop at once: no bestmove on attempt %d of %d (the stop was lost)", i+1, stops)
+			}
+		}
+	})
+	t.Run("quit", func(t *testing.T) {
+		bin := engineBinary(t)
+		const quits = 20
+		for i := range quits {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			proc := exec.CommandContext(ctx, bin)
+			proc.Env = append(os.Environ(), "GOMAXPROCS=1", "PAWNSTAR_THREADS=1")
+			proc.Stdin = strings.NewReader(setup + "position startpos\ngo infinite\nquit\n")
+			out, err := proc.CombinedOutput()
+			hung := ctx.Err() != nil
+			cancel()
+			if hung {
+				t.Fatalf("go infinite + quit at once: the engine never exited on attempt %d of %d", i+1, quits)
+			}
+			if err != nil || !bytes.Contains(out, []byte("bestmove ")) {
+				t.Fatalf("go infinite + quit at once: exit %v, output:\n%s", err, out)
+			}
 		}
 	})
 }

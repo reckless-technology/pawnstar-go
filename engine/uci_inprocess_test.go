@@ -167,9 +167,35 @@ func TestUCIGoParsing(t *testing.T) {
 					t.Errorf("got %+v", *tc)
 				}
 			}},
-		{"non-numeric values are ignored", "position startpos", "go depth deep movestogo soon nodes many",
+		{"non-numeric values are ignored with their keywords", "position startpos",
+			"go depth deep movestogo soon nodes many movetime later",
 			func(t *testing.T, tc *timeControl) {
-				if tc.depth != 10 || tc.numMovesRemaining != 0 || tc.maxNodes != 0 {
+				if tc.clockType != clockStandard || tc.depth != 10 || tc.numMovesRemaining != 0 || tc.maxNodes != 0 ||
+					tc.timeRemaining != 5*time.Minute {
+					t.Errorf("got %+v", *tc)
+				}
+			}},
+		{"a malformed value does not swallow the rest of the line", "position startpos", "go movetime x depth 3",
+			func(t *testing.T, tc *timeControl) {
+				if tc.clockType != clockFixedDepth || tc.depth != 3 {
+					t.Errorf("got %+v", *tc)
+				}
+			}},
+		{"wtime with a malformed value keeps the default clock", "position startpos", "go wtime 12x",
+			func(t *testing.T, tc *timeControl) {
+				if tc.clockType != clockStandard || tc.timeRemaining != 5*time.Minute {
+					t.Errorf("got %+v", *tc)
+				}
+			}},
+		{"a truncated nodes is not an unbounded search", "position startpos", "go nodes",
+			func(t *testing.T, tc *timeControl) {
+				if tc.clockType != clockStandard || tc.maxNodes != 0 {
+					t.Errorf("got %+v", *tc)
+				}
+			}},
+		{"a leading plus is read", "position startpos", "go depth +4",
+			func(t *testing.T, tc *timeControl) {
+				if tc.clockType != clockFixedDepth || tc.depth != 4 {
 					t.Errorf("got %+v", *tc)
 				}
 			}},
@@ -284,6 +310,71 @@ func TestUCIPonderInProcess(t *testing.T) {
 	game := NewGame()
 	if out, _ := runUCI(t, game, "ponderhit"); out != "" {
 		t.Errorf("a ponderhit with no search printed %q", out)
+	}
+}
+
+// TestUCIStopRacesInProcess: every command that stops a search, sent the instant after `go` with no pause,
+// ends it with a move. The root search once cleared isCancelPending as it began, so a `stop` (or `quit`, a
+// new `go`, `ucinewgame`) that reached stopThinking before the search goroutine got that far was lost: the
+// search ran on and stopThinking waited in wg.Wait() for ever. Every iteration here hung before the fix, so
+// the loop runs on a goroutine of its own and a hang fails the test rather than wedging the package.
+func TestUCIStopRacesInProcess(t *testing.T) {
+	game := NewGame()
+	runUCI(t, game, "setoption name OwnBook value false", "setoption name Threads value 1")
+	cases := []struct {
+		name  string
+		lines []string // sent after `position startpos`, with no pause between them
+		want  int      // the position stack's length once they are handled and any search is joined
+	}{
+		{"go infinite + stop", []string{"go infinite", "stop"}, 2},
+		{"go ponder + stop", []string{"go ponder", "stop"}, 2},
+		{"go infinite + go depth 1", []string{"go infinite", "go depth 1"}, 3},
+		{"go infinite + ucinewgame", []string{"go infinite", "ucinewgame"}, 1},
+		{"go infinite + quit", []string{"go infinite", "quit"}, 2},
+	}
+	const iterations, helperIterations = 300, 100
+	answered := make([]int, len(cases))
+	helpersAnswered := 0
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		captureStdout(t, func() {
+			for range iterations {
+				for c, tc := range cases {
+					game.HandleCommand("position startpos")
+					for _, line := range tc.lines {
+						game.HandleCommand(line)
+					}
+					game.stopThinking() // joins the search (a no-op when a line above already did)
+					if len(game.posStack) == tc.want {
+						answered[c]++
+					}
+				}
+			}
+			// Lazy SMP: a stop that lands before the main search has launched its helpers, or while they run.
+			game.HandleCommand("setoption name Threads value 3")
+			for range helperIterations {
+				game.HandleCommand("position startpos")
+				game.HandleCommand("go infinite")
+				game.HandleCommand("stop")
+				if len(game.posStack) == 2 {
+					helpersAnswered++
+				}
+			}
+		})
+	}()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Minute):
+		t.Fatal("a stop sent at once after go was lost: the search never ended")
+	}
+	for c, tc := range cases {
+		if answered[c] != iterations {
+			t.Errorf("%s at once: %d/%d answered", tc.name, answered[c], iterations)
+		}
+	}
+	if helpersAnswered != helperIterations {
+		t.Errorf("Threads 3, go infinite + stop at once: %d/%d answered", helpersAnswered, helperIterations)
 	}
 }
 

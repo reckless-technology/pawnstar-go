@@ -24,8 +24,12 @@ import (
 //   - Either condition alone: exit if elapsed > ½ of budget.
 //   - Hard stop if elapsed > budget.
 func searchRootNode(game *Game) move {
-	game.ponderMove = moveNone()      // set below by the main thread's iterativeDeepen if the PV has a reply
-	game.isCancelPending.Store(false) // clear before the book/single-move returns so a ponder-wait sees no stale cancel
+	game.ponderMove = moveNone() // set below by the main thread's iterativeDeepen if the PV has a reply
+	// isCancelPending is NOT cleared here: whoever starts a search clears it before the search begins —
+	// startThinking before it launches the goroutine, newGameFromFen (and runBench) for the callers that run
+	// searchRootNode directly. Clearing it here, on the search goroutine, lost any `stop` or `quit` that
+	// reached stopThinking before the goroutine got this far: the search then started with no cancel, a
+	// `go infinite` never ended, and stopThinking blocked in wg.Wait() for ever.
 	searchMoves := game.timeControl.searchMoves
 	// Opening book — skipped when OwnBook is off, or when `go searchmoves` restricts the root.
 	if game.useOwnBook && len(searchMoves) == 0 {

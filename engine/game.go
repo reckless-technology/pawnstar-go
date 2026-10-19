@@ -121,6 +121,10 @@ func (game *Game) playMoveString(s string) move {
 func (game *Game) startThinking() {
 	game.stopThinking()
 	game.isStopRequested.Store(false) // fresh search: the previous stop (if any) is resolved
+	// The only place a search goroutine's cancel flag is cleared: before the `go` statement, which orders it
+	// before everything the goroutine does. No search goroutine ever clears it, so a `stop` arriving at any
+	// moment after this line — before the goroutine has begun, during the search, or after it has finished —
+	// is seen by the search or finds it already over.
 	game.isCancelPending.Store(false)
 	game.armClock()
 	game.wg.Add(1)

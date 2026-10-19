@@ -163,7 +163,8 @@ func (game *Game) handleUciPosition(args []string) {
 // parseable. The bounds check is load-bearing, not defensive decoration: every `go` keyword that takes a
 // value reads args[i+1], so a truncated line (a bare `go wtime`, or a GUI that fumbles a clock update)
 // would panic on an out-of-range index — and a UCI engine that crashes mid-game forfeits it. A missing or
-// unparseable value is simply ignored, leaving the previous value in place.
+// unparseable value is ignored together with its keyword (handleUciGo changes nothing for it), the rule the
+// C++ and Rust engines share: `go nodes abc` is a plain `go`, not an unbounded node-limited search.
 func goArgValue(args []string, i int) (int, bool) {
 	if i+1 >= len(args) {
 		return 0, false
@@ -174,6 +175,10 @@ func goArgValue(args []string, i int) (int, bool) {
 
 // handleUciGo handles the "go" command, parsing the clock parameters and starting the search.
 func (game *Game) handleUciGo(args []string) {
+	// Stop any running search before touching the clock it reads: a `go` that arrives while one runs would
+	// otherwise rewrite timeControl under it (the race detector caught `go infinite` + `go depth 1`). The Rust
+	// engine stops first for the same reason; startThinking's own stop is then a no-op.
+	game.stopThinking()
 	tc := &game.timeControl
 	tc.maxNodes = 0 // reset per-search limits (a bare `go` clears a previous nodes/searchmoves/movestogo/increment)
 	tc.searchMoves = nil
@@ -184,19 +189,15 @@ func (game *Game) handleUciGo(args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "wtime":
-			if c == white {
+			if v, ok := goArgValue(args, i); ok && c == white {
 				tc.clockType = clockStandard
-				if v, ok := goArgValue(args, i); ok {
-					tc.timeRemaining = time.Duration(v) * time.Millisecond
-				}
+				tc.timeRemaining = time.Duration(v) * time.Millisecond
 			}
 			i++
 		case "btime":
-			if c == black {
+			if v, ok := goArgValue(args, i); ok && c == black {
 				tc.clockType = clockStandard
-				if v, ok := goArgValue(args, i); ok {
-					tc.timeRemaining = time.Duration(v) * time.Millisecond
-				}
+				tc.timeRemaining = time.Duration(v) * time.Millisecond
 			}
 			i++
 		case "winc":
@@ -219,14 +220,14 @@ func (game *Game) handleUciGo(args []string) {
 			}
 			i++
 		case "depth":
-			tc.clockType = clockFixedDepth
 			if v, ok := goArgValue(args, i); ok {
+				tc.clockType = clockFixedDepth
 				tc.depth = v
 			}
 			i++
 		case "movetime":
-			tc.clockType = clockFixedTime
 			if v, ok := goArgValue(args, i); ok {
+				tc.clockType = clockFixedTime
 				tc.timeRemaining = time.Duration(v) * time.Millisecond
 			}
 			i++
@@ -237,8 +238,8 @@ func (game *Game) handleUciGo(args []string) {
 			// armClock (via startThinking) arms no hard deadline while this is set.
 			game.isPondering.Store(true)
 		case "nodes":
-			tc.clockType = clockInfinite // node-limited; the periodic check ends it at maxNodes
 			if v, ok := goArgValue(args, i); ok {
+				tc.clockType = clockInfinite // node-limited; the periodic check ends it at maxNodes
 				tc.maxNodes = v
 			}
 			i++

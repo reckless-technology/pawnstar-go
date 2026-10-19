@@ -41,3 +41,30 @@ after ANY signature change, check CI in ALL THREE repos. pawnstar-rs CI was **RE
 nobody noticed: its workflow hardcoded a SECOND copy of the bench signature (`test "$nodes" = "6888983"`)
 that drifted when GOLDEN_TOTAL was re-blessed to 6,601,454. Now derived from GOLDEN_TOTAL — one source of
 truth. Lesson: grep for the OLD signature across .github/ too, not just source/tests.
+
+---
+
+**LOST-STOP RACE + MALFORMED `go` VALUES, FIXED IN ALL THREE (2026-10-18).** Not search changes — bench
+stayed 6,601,454 with the identical per-position table in all three. (1) The root search
+(SearchRootNode / search_root_node / searchRootNode) cleared `isCancelPending` as it began, ON THE WORKER.
+`go infinite` + `stop` (or `quit`) written back to back reached stopThinking before the worker got there,
+so the stop was lost: the search ran on and stopThinking blocked in join/wg.Wait for ever. Measured through
+the binaries: **20/20 stops and 10/10 quits hung in EACH engine, Go included** (Go's coverage tests had
+never sent stop that fast; the C++/Rust coverage tests slept 100-300 ms after `go` to dodge it). Fix, the
+same in all three: the root search never clears the flag; only the code that STARTS a search clears it,
+before it starts it (startThinking before spawning; SetPosition/newGameFromFen/runBench for the direct
+callers — every direct caller already set the position first). Race-free because nothing on a search
+thread ever writes false: a stop landing before the worker starts, during, or after is seen or finds the
+search over; helpers inherit the flag. After: 0 hangs in 5,000 stops + 200 quits per engine. The rule
+generalises the ponder lesson above: a flag the UCI thread sets must never be cleared by a search thread.
+(2) C++ `go depth abc` reached std::stoi and terminated the engine; Rust read it as 0 (atoi); Go set the
+keyword's mode with a stale value (`go nodes abc` = an UNBOUNDED search). Now one rule in all three: a
+numeric UCI value must be a whole integer (C++ ParseInteger on from_chars, Rust parse_integer =
+str::parse::<i64>, Go strconv.Atoi); a malformed or missing value is ignored WITH its keyword (the line
+reads as a plain `go`), a numeric setoption is left as it was, bench keeps its default depth.
+(3) Go's -race run of the new test caught `go` rewriting timeControl while the PREVIOUS search still read
+it (`go infinite` + `go depth 1`): handleUciGo (and the C++ handle_go, handle_position, handle_bench) now
+stop the running search FIRST, as Rust's game_mut always did. Go/C++ setoption still don't stop first
+(Rust's does) - GUIs never send it mid-search; left as is.
+Regression tests in each: an in-process watchdogged loop (go+stop, go ponder+stop, go+go, go+ucinewgame,
+go+quit; Threads 3) and binary loops (uci_test.sh in C++/Rust, uci_robustness_test.rs, uci_test.go).
