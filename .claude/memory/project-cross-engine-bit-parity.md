@@ -81,6 +81,18 @@ read). So a fix that leaves bench unchanged keeps parity, and the C++ and Rust e
 one-line change: **pawnstar-rs src/position.rs `MoveType::Castling` still sets reversible_move_count = 0**
 (seen 2026-10-19 at 16bc0ed), and the C++ engine was found doing the same. Tests:
 TestCastlingAdvancesFiftyMoveClock (fen_test.go), TestDrawByFiftyMovesAcrossCastling (draw_test.go).
-Still open in all three: the fifty-move draw is returned at clock >= 100 before the node checks for mate,
-where FIDE 9.3 lets a checkmate on the hundredth halfmove stand; and the uint8 clock wraps past 255 (a
-FEN clock over 255, or a GUI that never adjudicates).
+Still open in all three: the uint8 clock wraps past 255 (a FEN clock over 255, or a GUI that never
+adjudicates).
+
+**CHECKMATE TAKES PRECEDENCE OVER THE FIFTY-MOVE DRAW (all three, 2026-10-19: pawnstar #20, Go #14, Rust
+#14).** The node returned the fifty-move draw at clock >= 100 before asking whether the side to move was
+mated; FIDE 5.1.1 (9.6.2 for the 75-move rule) lets a mate on the hundredth ply stand. Each engine now,
+at node entry after the material draw, tests the clock on its own: in check with no legal move ->
+checkmatedScore + ply (counting `checkmates`), else the draw; repetition after. Same point, same order in
+all three, so the trees stay one. Bench 6,601,454 and the stripped BENCH_DEBUG transcripts identical
+across the three (no bench line reaches clock 100). The eval's fifty-move test needed nothing: in the
+search it only sees positions the node already ruled on, or capture children at clock 0. Test FEN, shared
+with zenith and stoopid-chess: `6k1/5ppp/8/8/8/8/8/R5K1 w - - 99 80` (a1a8 mate 1; g1f1 at cp 0 before).
+zenith had the same bug (fixed, zenith #55); stoopid-chess never did (tests added, #12). The same PRs made
+the Windows binaries import system DLLs alone (C++ /MT, Rust +crt-static; Go was already kernel32 only),
+held by tools/windows-dependents.ps1 in CI and the release.
