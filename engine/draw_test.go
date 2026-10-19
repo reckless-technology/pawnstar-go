@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // playUCI plays the legal move matching UCI string s on the search state, failing the test if it is
 // not legal in the current position.
@@ -107,5 +110,45 @@ func TestDrawByFiftyMovesAcrossCastling(t *testing.T) {
 	}
 	if got := castlingScore("0"); got < 500 {
 		t.Errorf("castling at clock 0 scores %d, want the extra queen (over 500)", got)
+	}
+}
+
+// TestMateTakesPrecedenceOverFiftyMoves pins FIDE 5.1.1 over the fifty-move draw: a checkmate on the move that
+// completes the fifty stands. At clock 99 Ra8 is the hundredth ply and mates, so the search scores it mate in one
+// and plays it, where every other move draws. The reverse at the hundredth ply: a check that leaves a legal move
+// (with the f7 pawn gone, Ra8+ leaves the king f7) and a quiet move (Ra2) both still draw.
+func TestMateTakesPrecedenceOverFiftyMoves(t *testing.T) {
+	const mating = "6k1/5ppp/8/8/8/8/8/R5K1 w - - 99 80"
+	game := NewGame()
+	game.newGameFromFen(mating)
+	game.openingBook.clear()
+	game.timeControl.clockType = clockFixedDepth
+	game.timeControl.depth = 4
+	var best move
+	out := captureStdout(t, func() { best = searchRootNode(game) })
+	if best.String() != "a1a8" || !strings.Contains(out, "score mate 1 ") {
+		t.Errorf("clock 99: bestmove %s, want a1a8 scored mate 1; output:\n%s", best.String(), out)
+	}
+
+	moveScore := func(fen, uci string) int {
+		game := NewGame()
+		game.newGameFromFen(fen)
+		game.timeControl.clockType = clockFixedDepth
+		ss := newSearchStateFromGame(game)
+		m := bookFindMove(ss.currentPosition(), uci)
+		if m.isNone() {
+			t.Fatalf("%s is not legal in %s", uci, fen)
+		}
+		var pv variation
+		return searchSingleMove(ss, 4, 0, initialAlpha, initialBeta, m, &pv, 0)
+	}
+	if got, want := moveScore(mating, "a1a8"), -(checkmatedScore + 1); got != want {
+		t.Errorf("the mate on the 100th ply scores %d, want mate in one (%d)", got, want)
+	}
+	if got := moveScore("6k1/6pp/8/8/8/8/8/R5K1 w - - 99 80", "a1a8"); got != drawScore {
+		t.Errorf("a check on the 100th ply that leaves a legal move scores %d, want the draw (%d)", got, drawScore)
+	}
+	if got := moveScore(mating, "a1a2"); got != drawScore {
+		t.Errorf("a quiet move on the 100th ply scores %d, want the draw (%d)", got, drawScore)
 	}
 }

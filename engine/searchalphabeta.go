@@ -13,7 +13,8 @@ import "time"
 // it keys the countermove and continuation-history move-ordering heuristics.
 //
 // Techniques applied (in order):
-//   - Periodic time check every 65 536 nodes; draw detection (material, 50-move, repetition).
+//   - Periodic time check every 65 536 nodes; draw detection (material, 50-move, repetition), with a
+//     checkmate on the hundredth ply scored as mate, not the fifty-move draw (FIDE 5.1.1).
 //   - Check extension: a node in check is searched one ply deeper.
 //   - Transposition table lookup: Cut/All nodes prune; PV nodes extend depth by 1.
 //   - Internal iterative reduction: −1 ply at depth ≥ noTTReduceMinDepth when there is no TT move.
@@ -52,7 +53,23 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		ss.recordMaterialDraw(cat)
 		return drawScore
 	}
-	if ss.isDrawByFiftyMoves() || ss.isDrawByRepetition() {
+	if ss.isDrawByFiftyMoves() {
+		// Checkmate takes precedence over the fifty-move draw (FIDE 5.1.1; 9.6.2 says so of the 75-move
+		// rule): a mate delivered on the move that completes the fifty stands. So in check the clock draws
+		// only when the side to move has a legal move; with none it is mated, scored here at this ply as the
+		// move loop's own checkmate is. Out of check there can be no mate, and the clock draws whatever the
+		// moves. Mirrors the C++ Search.
+		if inCheck {
+			var evasions moveList
+			pos.generateLegalMovesInto(&evasions)
+			if evasions.count == 0 {
+				ss.dbg.checkmates++
+				return checkmatedScore + ply
+			}
+		}
+		return drawScore
+	}
+	if ss.isDrawByRepetition() {
 		return drawScore
 	}
 
