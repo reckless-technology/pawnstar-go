@@ -209,7 +209,7 @@ var (
 	reIdName       = regexp.MustCompile(`^id name Pawnstar`)
 	reThreadsOpt   = regexp.MustCompile(`option name Threads`)
 	rePonderOpt    = regexp.MustCompile(`option name Ponder`)
-	reInfoDepth    = regexp.MustCompile(`^info depth`)
+	reInfoSeldepth = regexp.MustCompile(`^info depth.* seldepth `)
 	reCurrmove     = regexp.MustCompile(`currmove [a-h][1-8][a-h][1-8].* currmovenumber [0-9]`)
 	reBestmoveA2A3 = regexp.MustCompile(`^bestmove a2a3`)
 	reSeldepth     = regexp.MustCompile(`.*info depth +([0-9]+).*seldepth +([0-9]+)`)
@@ -265,10 +265,11 @@ func TestUCIProtocol(t *testing.T) {
 		if !ok {
 			t.Fatalf("go depth 12: no bestmove within timeout")
 		}
-		// Last `info depth ...` line.
+		// The last iteration's summary line: once a search runs past the ~3 s currmove gate (a slow or
+		// loaded machine), `info depth N currmove ...` lines follow it and carry no seldepth.
 		var lastInfo string
 		for _, l := range out {
-			if reInfoDepth.MatchString(l) {
+			if reInfoSeldepth.MatchString(l) {
 				lastInfo = l
 			}
 		}
