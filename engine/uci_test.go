@@ -306,17 +306,20 @@ func TestUCIProtocol(t *testing.T) {
 		}
 	})
 
-	// 5) info currmove / currmovenumber: emitted once a search runs past the ~3s reporting gate. Use a
-	//    movetime well beyond the gate (6s) so there is a comfortable window of root iterations emitting it.
+	// 5) info currmove / currmovenumber: emitted as each root move begins, once a search has run past the ~3s
+	//    reporting gate. The search runs until the first such line (or the timeout), then stops. No fixed
+	//    movetime: a single root move can grow its node count several times over from one iteration to the
+	//    next, so on a slow machine (a small shared runner, a loaded one) it can straddle the whole of any fixed
+	//    window past the gate and leave nothing to report inside it.
 	t.Run("CurrMove", func(t *testing.T) {
 		e.send("position startpos")
-		e.send("go movetime 6000")
-		out, ok := e.readUntil(reBestmove, 30*time.Second)
-		if !ok {
-			t.Fatalf("go movetime 6000: no bestmove within timeout")
-		}
-		if !anyLineMatches(out, reCurrmove) {
+		e.send("go infinite")
+		if _, ok := e.readUntil(reCurrmove, 120*time.Second); !ok {
 			t.Errorf("currmove/currmovenumber not emitted on a long search")
+		}
+		e.send("stop")
+		if _, ok := e.readUntil(reBestmove, 30*time.Second); !ok {
+			t.Fatalf("currmove: no bestmove after stop")
 		}
 	})
 
