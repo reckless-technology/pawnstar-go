@@ -73,9 +73,13 @@ reachable (a source tarball, a shallow clone, a fork without the tags), or a pla
   nothing.
 
 It refuses a mark that isn't `vMAJOR.MINOR`, a commit not on `main`, and a version already released. Each platform is
-built and tested from nothing on the organisation's self-hosted runners: `make check` on Linux and macOS, with the
-golden bench signature, and `go test ./...` on Windows. Each shipped binary must report the version. The workflow
-creates the release `vMAJOR.MINOR.BUILD` and its tag itself. It never runs for a pull request.
+built and tested from nothing: `make check` on Linux and macOS, with the golden bench signature, and `go test ./...` on
+Windows. Each shipped binary must report the version. The workflow creates the release `vMAJOR.MINOR.BUILD` and its tag
+itself. It never runs for a pull request.
+
+Every job of the release and of CI (`.github/workflows/ci.yml`) runs on a GitHub-hosted runner, its image pinned by
+version - `ubuntu-24.04`, `windows-2025` and, for the release's Apple silicon build, `macos-15` - on a fresh machine
+that `actions/setup-go` gives the Go `go.mod` names.
 
 | File | What it is |
 |---|---|

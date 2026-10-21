@@ -19,17 +19,17 @@ env:
   GOEXPERIMENT: simd
 
 jobs:
-  # Every Linux job below runs on the org's self-hosted runners ([self-hosted, Linux, X64]:
-  # reckless-ci-lin-0 and reckless-ci-lin-1), not hosted ubuntu-latest. setup-go fetches the toolchain
-  # go.mod pins into each runner's tool cache. The two machines are not identical hardware - lin-1 is an
-  # older 2-core Haswell - which is what the AVX2 gate in the build jobs is for.
+  # Every job runs on a GitHub-hosted runner, free for a public repository, its image pinned by version (ubuntu-24.04,
+  # windows-2025) rather than -latest, so an image change is a change made here. Each job starts on a fresh machine:
+  # setup-go installs the Go go.mod pins, and the image carries the rest (make, gcc for the race pass's cgo, Git Bash).
+  # The hosted fleet's CPU model is not promised, which is what the AVX2 gate in the build jobs is for.
 
   # Primary build + test gate on Linux via the `make` wrapper (which sets GOEXPERIMENT=simd). `make check`
   # runs perft, SEE, Bratko-Kopec, the NNUE gates, chess-clock timing, and the UCI-protocol test — including
   # the bench determinism signature.
   build-test:
     name: build + test (make check)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       # Full history and the tags (not a shallow clone): tools/version.sh derives the version from them.
       - uses: actions/checkout@v5
@@ -41,8 +41,8 @@ jobs:
           cache: false # no go.sum / external deps to cache
       - name: Check runner has AVX2
         # The engine emits 256-bit AVX2 (NNUE SIMD kernels), so the test binaries need an AVX2 CPU.
-        # The self-hosted Linux runners are not identical hardware, so this gate is what stops a runner
-        # that lacks AVX2 from reporting a green build it never actually ran.
+        # The hosted runners' hardware is not promised, so this gate is what stops a runner that lacks
+        # AVX2 from reporting a green build it never actually ran.
         run: |
           grep -q avx2 /proc/cpuinfo \
             || { echo "::error::runner CPU lacks AVX2 — cannot run the SIMD engine"; exit 1; }
@@ -55,7 +55,7 @@ jobs:
   # job summary.
   coverage:
     name: coverage (make cover, gate COVER_MIN)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -92,7 +92,7 @@ jobs:
   # Style gate: the tree must be gofmt-clean and vet-clean.
   format:
     name: gofmt + vet
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -112,7 +112,7 @@ jobs:
   # The linter set is deliberately conservative — see .golangci.yml for why (bit-parity).
   lint:
     name: golangci-lint
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -130,7 +130,7 @@ jobs:
   # tested invariant. GOAMD64 is left at the v1 default on purpose: the fallback must run on ANY amd64 CPU.
   scalar:
     name: scalar fallback (no simd)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     env:
       GOEXPERIMENT: "" # override the workflow-level simd
     steps:
@@ -168,7 +168,7 @@ jobs:
   # Linux x86-64 (AVX2 SIMD kernels, via the make wrapper).
   artifact-linux:
     name: artifact (linux amd64)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -192,11 +192,11 @@ jobs:
           path: pawnstar-go_[0-9]*_[0-9]*_[0-9]* # the versioned binary, not the pawnstar-go symlink
           if-no-files-found: error
 
-  # Windows x86-64 (AVX2 SIMD kernels). No `make` on the runner, so build/test with go directly (bash shell
-  # for tools/version.sh and the ldflags, as the Makefile passes them); the race pass, last, brings its own make.
+  # Windows x86-64 (AVX2 SIMD kernels). Build and test with go directly (bash shell for tools/version.sh and
+  # the ldflags, as the Makefile passes them), as release.yml does; the race pass, last, brings its own make.
   artifact-windows:
     name: artifact (windows amd64)
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: windows-2025
     defaults:
       run:
         shell: bash
@@ -224,10 +224,11 @@ jobs:
       - name: Test
         run: go test ./...
       # The race pass the Linux jobs run in `make check`: `make race` itself, so the two share its -run regex. -race
-      # needs cgo and a C compiler, which the runner's Go lacks: MSYS2's CLANG64 clang, from an MSYS2 of this job's own
-      # that setup-msys2 installs and caches (release: true), leaving the runner's shared C:\msys64 as it is, with
-      # mingw32-make (MSYS2's native GNU make) to run the Makefile from this Git Bash shell. The target switches cgo on;
-      # CC names the compiler, and clang64\bin goes on the PATH for its tools and any runtime DLL the binaries load.
+      # needs cgo and a C compiler: MSYS2's CLANG64 clang, from an MSYS2 of this job's own that setup-msys2 installs and
+      # caches (release: true) rather than the image's C:\msys64, with mingw32-make (MSYS2's native GNU make) to run the
+      # Makefile from this Git Bash shell - the toolchain tools/setup-dev.ps1 gives a development machine. The target
+      # switches cgo on; CC names the compiler, and clang64\bin goes on the PATH for its tools and any runtime DLL the
+      # binaries load.
       - name: MSYS2 CLANG64 (clang and make for the race pass)
         id: msys2
         uses: msys2/setup-msys2@v2
@@ -258,7 +259,7 @@ jobs:
   # (`make docs-bundle` and `make source-archive`; the Makefile says what the bundle holds).
   artifact-docs:
     name: artifact (docs + source)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:

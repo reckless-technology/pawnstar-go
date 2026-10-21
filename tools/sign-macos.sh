@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Developer ID signing and notarisation for a macOS release, on a keychain of the job's own, so the runner keeps no
-# certificate between jobs. The organisation's apps sign the same way, with the same organisation secrets (vst-plugins'
-# tools/sign-mac.sh, which this mirrors; that repository is private, so the steps are written again here).
+# Developer ID signing and notarisation for a macOS release, on a keychain of the job's own, deleted when the job ends,
+# so no certificate outlives it. The organisation's apps sign the same way, with the same organisation secrets
+# (vst-plugins' tools/sign-mac.sh, which this mirrors; that repository is private, so the steps are written again here).
 #
 #   tools/sign-macos.sh open                     a keychain made from the secrets below, put first on the user's search
 #                                                list (macOS finds a certificate's issuer only in a keychain on it)
