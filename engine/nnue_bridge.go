@@ -56,26 +56,33 @@ func clampEvalToBand(score int) int {
 
 // EnableNNUE (re)installs the embedded NNUE network as this game's evaluator, replacing any net loaded
 // via EvalFile. NewGame already installs it, so this is only needed to revert to the embedded net.
-// Returns an error if the embedded net is unusable.
+//
+// Returns an error if the embedded net is unusable — which would mean the build itself is corrupt,
+// since the net is compiled in and its container's checks are made on it like any other. As in
+// LoadNNUEFile, that leaves the game with no evaluator rather than keeping whatever net was
+// installed before: a net asked for and not delivered is never silently substituted.
 func (game *Game) EnableNNUE() error {
 	net := nnue.Embedded()
+	game.network = net     // nil when even the embedded net is unusable: no substitution, by design
+	game.evalTable.clear() // cached scores are net-dependent
 	if net == nil {
 		return errors.New("nnue: embedded net unavailable")
 	}
-	game.network = net
-	game.evalTable.clear() // cached scores are net-dependent
 	return nil
 }
 
-// LoadNNUEFile loads an external PSN1 net from disk and installs it as this game's evaluator,
-// replacing the embedded net. Returns an error (leaving the current evaluator unchanged) if the file
-// is missing or incompatible with this build.
+// LoadNNUEFile loads an external RNNUE1 net from disk and installs it as this game's evaluator,
+// replacing the net installed before it.
+//
+// A refused net leaves the game with NO evaluator at all — not the net that was installed before,
+// and not the embedded one. That is deliberate and is the whole point of the container's checks: a
+// loader that keeps the previous net plays on with weights nobody asked for, and a match then
+// reports a plausible Elo for a net that never played a move. searchRootNode refuses to search
+// while no net is installed, so the failure is loud at every later `go` rather than silent. Call
+// EnableNNUE to come back to the embedded net deliberately.
 func (game *Game) LoadNNUEFile(path string) error {
 	net, err := nnue.LoadFile(path)
-	if err != nil {
-		return err
-	}
-	game.network = net
+	game.network = net     // nil on a refusal: no fallback, by design
 	game.evalTable.clear() // cached scores are net-dependent
-	return nil
+	return err
 }

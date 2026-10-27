@@ -11,3 +11,7 @@ Makefile text eol=lf
 # a byte-different binary for the same commit.
 engine/book.txt                     -text
 engine/testdata/nnue_reference.txt  -text
+engine/nnue/*.bin                   -text
+
+# The net is binary, so git's own content detection would leave it alone anyway; declaring it says so, and the
+# RNNUE1 container's payload CRC now makes a mangled checkout a loud refusal rather than a wrong evaluation.

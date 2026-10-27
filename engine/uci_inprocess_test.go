@@ -424,9 +424,14 @@ func TestUCISetOptionInProcess(t *testing.T) {
 			t.Errorf("EvalFile%q: output %q, embedded restored %v", value, out, game.network == embedded)
 		}
 	}
+	// A refused EvalFile reports why and leaves NO evaluator installed: the embedded net is not a
+	// fallback (see LoadNNUEFile). EnableNNUE puts it back, so the rest of this test can search.
 	out, _ = runUCI(t, game, "setoption name EvalFile value no/such/net.bin")
-	if !strings.Contains(out, `info string EvalFile "no/such/net.bin": `) || game.network != embedded {
-		t.Errorf("a missing EvalFile: output %q, embedded kept %v", out, game.network == embedded)
+	if !strings.Contains(out, `info string EvalFile "no/such/net.bin": `) || game.network != nil {
+		t.Errorf("a refused EvalFile: output %q, evaluator uninstalled %v", out, game.network == nil)
+	}
+	if err := game.EnableNNUE(); err != nil {
+		t.Fatalf("EnableNNUE after a refusal: %v", err)
 	}
 
 	out, _ = runUCI(t, game, "setoption name Threads value 3", "setoption name Threads value lots")

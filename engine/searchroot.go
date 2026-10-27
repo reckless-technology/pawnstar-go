@@ -7,6 +7,7 @@ package engine
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -25,6 +26,16 @@ import (
 //   - Hard stop if elapsed > budget.
 func searchRootNode(game *Game) move {
 	game.ponderMove = moveNone() // set below by the main thread's iterativeDeepen if the PV has a reply
+	// NNUE is the only evaluator, and a refused net leaves none installed — deliberately, so a net the
+	// engine was told to load and could not is never quietly replaced by the embedded one. Refuse the
+	// search loudly here, the single funnel every search passes through, rather than evaluating a node
+	// with no network: the caller emits `bestmove 0000`, which no harness can mistake for a played game.
+	if game.network == nil {
+		noNetworkRefusal := "info string NNUE: no net loaded (the last EvalFile was refused) — refusing to search"
+		fmt.Println(noNetworkRefusal)
+		fmt.Fprintln(os.Stderr, noNetworkRefusal)
+		return moveNone()
+	}
 	// isCancelPending is NOT cleared here: whoever starts a search clears it before the search begins —
 	// startThinking before it launches the goroutine, newGameFromFen (and runBench) for the callers that run
 	// searchRootNode directly. Clearing it here, on the search goroutine, lost any `stop` or `quit` that

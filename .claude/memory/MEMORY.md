@@ -8,6 +8,7 @@
 - [project-go-state-2026-07](project-go-state-2026-07.md) — handoff snapshot: pawnstar-go HEAD 9f04267, this session's commits, and where the arm64 work picks up
 - [project-capture-history-wip](project-capture-history-wip.md) — ordering experiments: capture-history v1/v2 rejected; butterfly history + MODERN HISTORY (depth-weighted bonus/malus+gravity, +17 Elo, golden 6,601,454) ADOPTED in all 3 engines; node-probe FALSE-NEGATIVE lesson; pre-SPRT probe protocol standing
 - [reference-staged-movegen-analysis](reference-staged-movegen-analysis.md) — staged movegen analysed and rejected (legal-gen setup paid twice; pseudo-legal moves cost to try-time; ~+3-4 Elo ceiling); shared-analysis-pass split is the one sound design if revisited
+- [reference-rnnue1-container-go](reference-rnnue1-container-go.md) — the shared RNNUE1 net container landed (2026-10-27); Go's hash/crc64 with crc64.ECMA ALREADY is CRC-64/XZ (adding init+final XOR gives the wrong value); the v12 net's fixed CRCs and header bytes for cross-port comparison; a refused net installs nil and the search refuses — no fallback; bench 6,601,454 unmoved
 - [reference-profile-ryzen-2026-07](reference-profile-ryzen-2026-07.md) — perf profile Go vs C++ on Ryzen 4500U: Go 1.53x slower, nnueBoard() conversion ~10% is the standout Go-only optimization lever
 
 - Naming, tee-the-test-output and root-cause-not-benign moved 2026-09-26 to `reckless-technology/claude-skills`, skill `reckless-working-practice` — they applied to every repo, not this one
