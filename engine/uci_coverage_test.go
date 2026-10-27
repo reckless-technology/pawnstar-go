@@ -222,26 +222,50 @@ func TestMovegenAllocationFree(t *testing.T) {
 	}
 }
 
-// TestLoadNNUEFileErrors: a missing or malformed EvalFile must return an error and leave the current
-// evaluator intact (the engine must still evaluate afterwards).
-func TestLoadNNUEFileErrors(t *testing.T) {
+// TestLoadNNUEFileRefusesWithoutFallingBack: a missing or refused EvalFile must return an error and
+// leave NO evaluator installed — not the net that was loaded before it, and not the embedded one. The
+// engine must then refuse to search loudly rather than play on with weights nobody asked for, which is
+// how a match once reported a plausible Elo for a net that never played a move. EnableNNUE is the
+// deliberate way back.
+func TestLoadNNUEFileRefusesWithoutFallingBack(t *testing.T) {
 	game := NewGame()
 	if err := game.LoadNNUEFile(filepath.Join(t.TempDir(), "does-not-exist.bin")); err == nil {
 		t.Error("LoadNNUEFile on a missing path: expected an error")
 	}
+	if game.network != nil {
+		t.Error("a missing EvalFile left an evaluator installed; a refusal must not fall back")
+	}
 	bad := filepath.Join(t.TempDir(), "garbage.bin")
-	if err := os.WriteFile(bad, []byte("not a PSN1 net"), 0o644); err != nil {
+	if err := os.WriteFile(bad, []byte("not an RNNUE1 net"), 0o644); err != nil {
 		t.Fatalf("write temp: %v", err)
 	}
 	if err := game.LoadNNUEFile(bad); err == nil {
 		t.Error("LoadNNUEFile on a malformed file: expected an error")
 	}
-	// The evaluator must still work (a bad load must not corrupt it): a real search returns a legal move.
+	if game.network != nil {
+		t.Error("a refused EvalFile left an evaluator installed; a refusal must not fall back")
+	}
+
+	// With no net installed the search refuses loudly and returns no move, rather than evaluating a
+	// node with no network (which would crash on the first `go`).
 	game.newGameFromFen(startFen)
 	game.timeControl.clockType = clockFixedDepth
 	game.timeControl.depth = 4
+	var refused move
+	out := captureStdout(t, func() { refused = searchRootNode(game) })
+	if !refused.isNone() {
+		t.Errorf("a search with no net installed returned %s, want no move", refused.String())
+	}
+	if !strings.Contains(out, "info string NNUE: no net loaded") {
+		t.Errorf("a search with no net installed printed %q, want a loud refusal", out)
+	}
+
+	// EnableNNUE is the deliberate way back to the embedded net, and the engine searches again.
+	if err := game.EnableNNUE(); err != nil {
+		t.Fatalf("EnableNNUE after a refusal: %v", err)
+	}
 	if m := searchRootNode(game); m.isNone() {
-		t.Error("engine cannot search after a failed EvalFile load")
+		t.Error("engine cannot search after EnableNNUE restored the embedded net")
 	}
 }
 

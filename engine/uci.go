@@ -6,6 +6,7 @@ package engine
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -66,8 +67,11 @@ func (game *Game) HandleCommand(line string) bool {
 }
 
 // handleUciSetOption processes "setoption name <Name> [value <Value>]". Supported options:
-//   - EvalFile (string): a path to a PSN1 net to load; "<embedded>", "default" or empty reload the
-//     embedded net. Names and values may contain spaces, so both are parsed span-wise.
+//   - EvalFile (string): a path to an RNNUE1 net to load; "<embedded>", "default" or empty reload the
+//     embedded net. Names and values may contain spaces, so both are parsed span-wise. A refused net
+//     leaves no evaluator installed (LoadNNUEFile: no fallback), and the refusal is printed on stderr
+//     as well as as an `info string`, so a match log carries the reason even when the harness drops
+//     info lines — which is how a wrong net went unnoticed for a whole match before.
 func (game *Game) handleUciSetOption(fields []string) {
 	name, value := parseSetOption(fields)
 	switch strings.ToLower(name) {
@@ -75,9 +79,11 @@ func (game *Game) handleUciSetOption(fields []string) {
 		if value == "" || value == "<embedded>" || strings.EqualFold(value, "default") {
 			if err := game.EnableNNUE(); err != nil {
 				fmt.Printf("info string %v\n", err)
+				fmt.Fprintf(os.Stderr, "%v\n", err)
 			}
 		} else if err := game.LoadNNUEFile(value); err != nil {
 			fmt.Printf("info string EvalFile %q: %v\n", value, err)
+			fmt.Fprintf(os.Stderr, "EvalFile %q: %v\n", value, err)
 		} else {
 			fmt.Printf("info string NNUE net loaded from %s\n", value)
 		}

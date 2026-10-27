@@ -1,8 +1,13 @@
 // Package nnue implements the engine's NNUE (Efficiently Updatable Neural Network) evaluation,
-// ported from the C++ Pawnstar engine (src/nnue.h): the loader for the stamped "PSN1" net format,
-// the lazily-updatable feature-transformer accumulator, the exact int16 SCReLU reference forward
-// pass (EvaluateExact — the correctness oracle), and the search's int8 fast path (EvaluateInt8),
-// with SIMD kernels (amd64 archsimd + AVX2 asm, arm64 NEON asm) selected by build tag.
+// ported from the C++ Pawnstar engine (src/nnue.h): the loader for the shared "RNNUE1" net
+// container, the lazily-updatable feature-transformer accumulator, the exact int16 SCReLU reference
+// forward pass (EvaluateExact — the correctness oracle), and the search's int8 fast path
+// (EvaluateInt8), with SIMD kernels (amd64 archsimd + AVX2 asm, arm64 NEON asm) selected by build tag.
+//
+// RNNUE1 is the one net container every reckless-technology chess engine shares, so a net trained
+// once loads in all of them (see the reckless-nnue skill). It replaced the engine-private 32-byte
+// "PSN1" header, which described the architecture but carried neither the king bucket map's contents
+// nor any integrity check — the two gaps that let a net load cleanly and then evaluate wrongly.
 //
 // Architecture (shipped net v12): Chess768 features (2 colours * 6 types * 64 squares) per
 // perspective, x kingBuckets king-square weight banks -> an hiddenSize int16 accumulator
@@ -17,30 +22,37 @@ package nnue
 import (
 	"encoding/binary"
 	"fmt"
+	"hash/crc64"
 	"math/bits"
 	"os"
 	"sync"
 )
 
+// The architecture this build is compiled for. Every one of these is written into the header by Stamp
+// and checked against the header by Load, so a net of another shape is refused rather than misread.
 const (
-	inputSize     = 768                     // features per perspective per bucket: 2 colours * 6 types * 64
-	kingBuckets   = 8                       // king-square weight banks
-	featureRows   = inputSize * kingBuckets // 6144 (bucket-major)
-	hiddenSize    = 1024                    // feature-transformer / accumulator width per perspective
-	qa            = 255                     // feature-transformer weight/activation scale (SCReLU clamp)
-	qb            = 64                      // output-layer weight scale
-	evalScale     = 400                     // maps raw network output to centipawns
-	int8Shift     = 9                       // SCReLU activation >> shift for the int8 output dot (C++ kInt8Shift)
-	maxEval       = 30000                   // eval clamp magnitude (matches C++ kMaxEvaluation)
-	rankFlip      = 0x38                    // XOR mask to flip a square's rank (a1<->a8)
-	formatVersion = 1                       // net header format version
-	headerBytes   = 32                      // stamped NetHeader size
+	featuresPerBucket = 768                             // features per perspective per bucket: 2 colours * 6 types * 64
+	kingBuckets       = 8                               // king-square weight banks
+	featureRows       = featuresPerBucket * kingBuckets // 6144 (bucket-major)
+	hiddenSize        = 1024                            // feature-transformer / accumulator width per perspective
+	outputBuckets     = 1                               // material output heads (1 = a single head, i.e. no output bucketing)
+	qa                = 255                             // feature-transformer weight/activation scale (SCReLU clamp)
+	qb                = 64                              // output-layer weight scale
+	evalScale         = 400                             // maps raw network output to centipawns
+	activationSCReLU  = 0                               // the activation code this engine implements: clamp(x, 0, QA), squared by the output dot
+	engineFlags       = 0                               // bit 0 = horizontal king mirroring, off in this engine; all other bits reserved zero
+	int8Shift         = 9                               // SCReLU activation >> shift for the int8 output dot (C++ kInt8Shift)
+	maxEval           = 30000                           // eval clamp magnitude (matches C++ kMaxEvaluation)
+	rankFlip          = 0x38                            // XOR mask to flip a square's rank (a1<->a8)
+	formatVersion     = 1                               // RNNUE1 container format version
+	headerBytes       = 64                              // RNNUE1 header size
 
-	numFeatureWeights = featureRows * hiddenSize // 6291456
-	numOutputWeights  = 2 * hiddenSize           // 2048
-	// Packed payload size: feature_weights + feature_bias + output_weights + output_bias, all int16.
-	payloadInt16 = numFeatureWeights + hiddenSize + numOutputWeights + 1
-	payloadBytes = payloadInt16 * 2
+	numFeatureWeights = featureRows * hiddenSize       // 6291456
+	numOutputWeights  = outputBuckets * 2 * hiddenSize // 2048: own perspective's half first, then the opponent's
+	// int16PayloadBytes covers feature_weights, feature_bias and output_weights; output_bias follows as
+	// int32[outputBuckets], so the payload is not a whole number of int16 values.
+	int16PayloadBytes = (numFeatureWeights + hiddenSize + numOutputWeights) * 2
+	payloadBytes      = int16PayloadBytes + outputBuckets*4 // 12589060 at this architecture
 
 	// Piece type codes in Board.Squares / Board.Pieces indices — identical to the engine's piece
 	// constants (and the C++ engine's): 0 = empty, then pawn..king.
@@ -48,12 +60,34 @@ const (
 	kingCode = 6
 )
 
-var magic = [4]byte{'P', 'S', 'N', '1'}
+// magic is the RNNUE1 container's eight-byte signature, the first field of every net header.
+var magic = [8]byte{'R', 'N', 'N', 'U', 'E', '1', 0, 0}
+
+// crcTable drives CRC-64/XZ (also called CRC-64/GO-ECMA): polynomial 0x42F0E1EBA9EA3693, reflected
+// (table constant 0xC96C5795D7870F42), init all ones, reflect in and out, final XOR all ones.
+//
+// Go's hash/crc64 with crc64.ECMA *is* CRC-64/XZ, with no adjustment: Update complements the running
+// value on entry and again on return, so the all-ones init and all-ones final XOR are already
+// applied, and the value it takes and returns is the post-XOR one (which is what lets Checksum and
+// Update compose for streaming). Adding an init and a final XOR of one's own double-complements
+// both: crc64.Update(^uint64(0), crcTable, []byte("123456789")) ^ ^uint64(0) is 0x2B9C7EE4E2780C8A,
+// where CRC-64/XZ's mandatory check value for those nine bytes is 0x995DC9BBDF1939FA.
+// TestCrc64XZCheckValue asserts the check value, and is the first thing the suite proves.
+var crcTable = crc64.MakeTable(crc64.ECMA)
+
+// crc64XZ returns the CRC-64/XZ of data.
+func crc64XZ(data []byte) uint64 { return crc64.Checksum(data, crcTable) }
 
 // kingBucketMap maps a king square (in the perspective's own orientation) to its weight bank.
 // File-pair (file/2) selects columns 0-3; board half (own ranks 1-4 vs advanced 5-8) adds 4.
-// MUST be byte-identical to the map in the C++ engine and the bullet trainer.
-var kingBucketMap = [64]int{
+// MUST be byte-identical to the map in the C++ engine, the Rust engine and the bullet trainer.
+//
+// The map's *contents* are part of the architecture, not just its length: a net trained against a
+// different map but the same kingBuckets would load cleanly under a header check and then read the
+// wrong weight bank at every evaluation. kingBucketMapCRC closes that, and is stamped into every
+// net's header — so changing an entry here is a format change, owed a format_version bump and a
+// re-stamp of every net.
+var kingBucketMap = [64]uint8{
 	0, 0, 1, 1, 2, 2, 3, 3,
 	0, 0, 1, 1, 2, 2, 3, 3,
 	0, 0, 1, 1, 2, 2, 3, 3,
@@ -63,6 +97,11 @@ var kingBucketMap = [64]int{
 	4, 4, 5, 5, 6, 6, 7, 7,
 	4, 4, 5, 5, 6, 6, 7, 7,
 }
+
+// kingBucketMapCRC is the CRC-64/XZ of this engine's own king bucket map — its 64 entries, one
+// uint8 each, in square order. It is taken over kingBucketMap itself, so there is no second
+// representation of the map that could drift away from the one the evaluator indexes.
+func kingBucketMapCRC() uint64 { return crc64XZ(kingBucketMap[:]) }
 
 // Board is the raw piece-placement view of a chess position that the evaluator consumes. The engine
 // builds one at the call boundary from its own position type (a plain value conversion), keeping
@@ -105,7 +144,7 @@ type Network struct {
 	featureWeights []int16 // [featureRows * hiddenSize], column-major: row*hidden + i; rows bucket-major
 	featureBias    []int16 // [hiddenSize]
 	outputWeights  []int16 // [2 * hiddenSize]: first hidden weight stm accumulator, next hidden weight the other
-	outputBias     int16   // in QA*QB units
+	outputBias     int32   // in QA*QB units (int32 in the container, as the shape with output buckets needs)
 	// outputWeightsI8 is outputWeights requantised to int8 range (values in [-127,127], stored int16 for the
 	// SIMD kernel): w8 = clamp(round(w / outputWScale), -127, 127). It drives the search's int8 output dot
 	// (EvaluateInt8); the int16 outputWeights stay the reference path (EvaluateExact). Mirrors the C++ engine.
@@ -117,6 +156,29 @@ type Network struct {
 	outputWScale       int // divisor mapping the int16 output weights into int8 range (>= 1); 1 when they already fit
 }
 
+// The RNNUE1 header's field offsets. Little-endian throughout; bytes 56..63 hold the CRC of 0..55,
+// so every field above it is covered by the header's own integrity check.
+const (
+	offsetMagic             = 0  // 8 bytes
+	offsetFormatVersion     = 8  // uint16
+	offsetHeaderBytes       = 10 // uint16
+	offsetFeaturesPerBucket = 12 // uint16
+	offsetKingBuckets       = 14 // uint16
+	offsetHiddenSize        = 16 // uint16
+	offsetOutputBuckets     = 18 // uint16
+	offsetFlags             = 20 // uint8
+	offsetActivation        = 21 // uint8
+	offsetQa                = 22 // uint16
+	offsetQb                = 24 // uint16
+	offsetEvalScale         = 26 // uint16
+	offsetReserved          = 28 // uint32, zero
+	offsetKingBucketMapCrc  = 32 // uint64
+	offsetPayloadBytes      = 40 // uint64
+	offsetPayloadCrc        = 48 // uint64
+	offsetHeaderCrc         = 56 // uint64, over bytes 0..55
+	headerCrcCoverage       = offsetHeaderCrc
+)
+
 // LoadFile reads a stamped net file from disk and loads it.
 func LoadFile(path string) (*Network, error) {
 	data, err := os.ReadFile(path)
@@ -126,50 +188,132 @@ func LoadFile(path string) (*Network, error) {
 	return Load(data)
 }
 
-// Load parses a stamped ("PSN1") net image. Every architecture field is validated against this
-// build's constants, so an incompatible or unstamped net is rejected rather than silently misread.
-// Trailing bytes after the packed payload (bullet padding) are ignored.
+// Load parses an RNNUE1 net image and makes the two checks every engine's loader must make, in this
+// order:
+//
+//  1. Header. The magic, then header_crc over bytes 0..55, then every architecture field against
+//     this build's own compile-time constants, then king_bucket_map_crc against the CRC of this
+//     engine's own map.
+//  2. Payload. payload_bytes against the bytes actually there, then payload_crc over them.
+//
+// Any mismatch refuses the net, naming the field with both the file's value and the engine's. A
+// refused net is NOT loaded and no other net is installed in its place: the caller gets an error and
+// nothing else, because a loader that quietly falls back to an embedded net lets a match report a
+// plausible Elo for a net that never played a move.
 func Load(data []byte) (*Network, error) {
 	if len(data) < headerBytes {
-		return nil, fmt.Errorf("nnue: net too small (%d bytes) for a 32-byte header", len(data))
+		return nil, fmt.Errorf("nnue: net refused: the file is %d bytes, too short for the %d-byte RNNUE1 header",
+			len(data), headerBytes)
 	}
-	if [4]byte(data[0:4]) != magic {
-		return nil, fmt.Errorf("nnue: not a stamped Pawnstar net (missing %q header)", string(magic[:]))
+	if [8]byte(data[offsetMagic:offsetFormatVersion]) != magic {
+		return nil, fmt.Errorf("nnue: net refused: magic is %q in the file but %q in this engine (not an RNNUE1 net)",
+			data[offsetMagic:offsetFormatVersion], magic[:])
 	}
-	// Header fields are little-endian; validate each against this build.
-	got := struct{ version, inputSize, kingBuckets, hiddenSize, qa, qb, scale int }{
-		version:     int(binary.LittleEndian.Uint16(data[4:6])),
-		inputSize:   int(binary.LittleEndian.Uint16(data[6:8])),
-		kingBuckets: int(binary.LittleEndian.Uint16(data[8:10])),
-		hiddenSize:  int(binary.LittleEndian.Uint16(data[10:12])),
-		qa:          int(int16(binary.LittleEndian.Uint16(data[12:14]))),
-		qb:          int(int16(binary.LittleEndian.Uint16(data[14:16]))),
-		scale:       int(int16(binary.LittleEndian.Uint16(data[16:18]))),
+	if storedHeaderCrc := binary.LittleEndian.Uint64(data[offsetHeaderCrc:headerBytes]); storedHeaderCrc != crc64XZ(data[:headerCrcCoverage]) {
+		return nil, fmt.Errorf("nnue: net refused: header_crc is %#016x in the file but %#016x over its own bytes 0..%d (corrupt header)",
+			storedHeaderCrc, crc64XZ(data[:headerCrcCoverage]), headerCrcCoverage-1)
 	}
-	if got.version != formatVersion || got.inputSize != inputSize || got.kingBuckets != kingBuckets ||
-		got.hiddenSize != hiddenSize || got.qa != qa || got.qb != qb || got.scale != evalScale {
-		return nil, fmt.Errorf("nnue: incompatible net (file v%d/in%d/buckets%d/hidden%d/qa%d/qb%d/scale%d; "+
-			"engine expects v%d/in%d/buckets%d/hidden%d/qa%d/qb%d/scale%d)",
-			got.version, got.inputSize, got.kingBuckets, got.hiddenSize, got.qa, got.qb, got.scale,
-			formatVersion, inputSize, kingBuckets, hiddenSize, qa, qb, evalScale)
+	if err := validateArchitecture(data); err != nil {
+		return nil, err
 	}
-	if len(data) < headerBytes+payloadBytes {
-		return nil, fmt.Errorf("nnue: net truncated (%d bytes, need at least %d)", len(data), headerBytes+payloadBytes)
+
+	// Check 2: the payload. payload_bytes was validated against this architecture's expected size
+	// above, so this also catches a truncated or padded file.
+	payload := data[headerBytes:]
+	if len(payload) != payloadBytes {
+		return nil, fmt.Errorf("nnue: net refused: the file carries %d payload bytes after its header but payload_bytes says %d",
+			len(payload), payloadBytes)
+	}
+	if storedPayloadCrc := binary.LittleEndian.Uint64(data[offsetPayloadCrc:offsetHeaderCrc]); storedPayloadCrc != crc64XZ(payload) {
+		return nil, fmt.Errorf("nnue: net refused: payload_crc is %#016x in the file but %#016x over its %d payload bytes (corrupt weights)",
+			storedPayloadCrc, crc64XZ(payload), len(payload))
 	}
 
 	// Payload in bullet's save order: feature_weights, feature_bias, output_weights, output_bias.
-	p := data[headerBytes:]
 	n := &Network{
 		featureWeights: make([]int16, numFeatureWeights),
 		featureBias:    make([]int16, hiddenSize),
 		outputWeights:  make([]int16, numOutputWeights),
 	}
-	off := readInt16Slice(p, 0, n.featureWeights)
-	off = readInt16Slice(p, off, n.featureBias)
-	off = readInt16Slice(p, off, n.outputWeights)
-	n.outputBias = int16(binary.LittleEndian.Uint16(p[off : off+2]))
+	off := readInt16Slice(payload, 0, n.featureWeights)
+	off = readInt16Slice(payload, off, n.featureBias)
+	off = readInt16Slice(payload, off, n.outputWeights)
+	n.outputBias = int32(binary.LittleEndian.Uint32(payload[off : off+4]))
 	n.deriveInt8OutputWeights()
 	return n, nil
+}
+
+// validateArchitecture checks every architecture field of a verified header against this build's own
+// compile-time constants, and the file's king_bucket_map_crc against the CRC of this engine's own
+// map. The first mismatch refuses the net, naming the field and both values.
+func validateArchitecture(header []byte) error {
+	for _, field := range []struct {
+		name   string
+		file   uint64
+		engine uint64
+		isHex  bool
+	}{
+		{name: "format_version", file: uint64(binary.LittleEndian.Uint16(header[offsetFormatVersion:offsetHeaderBytes])), engine: formatVersion},
+		{name: "header_bytes", file: uint64(binary.LittleEndian.Uint16(header[offsetHeaderBytes:offsetFeaturesPerBucket])), engine: headerBytes},
+		{name: "features_per_bucket", file: uint64(binary.LittleEndian.Uint16(header[offsetFeaturesPerBucket:offsetKingBuckets])), engine: featuresPerBucket},
+		{name: "king_buckets", file: uint64(binary.LittleEndian.Uint16(header[offsetKingBuckets:offsetHiddenSize])), engine: kingBuckets},
+		{name: "hidden_size", file: uint64(binary.LittleEndian.Uint16(header[offsetHiddenSize:offsetOutputBuckets])), engine: hiddenSize},
+		{name: "output_buckets", file: uint64(binary.LittleEndian.Uint16(header[offsetOutputBuckets:offsetFlags])), engine: outputBuckets},
+		{name: "flags", file: uint64(header[offsetFlags]), engine: engineFlags},
+		{name: "activation", file: uint64(header[offsetActivation]), engine: activationSCReLU},
+		{name: "qa", file: uint64(binary.LittleEndian.Uint16(header[offsetQa:offsetQb])), engine: qa},
+		{name: "qb", file: uint64(binary.LittleEndian.Uint16(header[offsetQb:offsetEvalScale])), engine: qb},
+		{name: "eval_scale", file: uint64(binary.LittleEndian.Uint16(header[offsetEvalScale:offsetReserved])), engine: evalScale},
+		{name: "reserved", file: uint64(binary.LittleEndian.Uint32(header[offsetReserved:offsetKingBucketMapCrc])), engine: 0},
+		{name: "king_bucket_map_crc", file: binary.LittleEndian.Uint64(header[offsetKingBucketMapCrc:offsetPayloadBytes]), engine: kingBucketMapCRC(), isHex: true},
+		{name: "payload_bytes", file: binary.LittleEndian.Uint64(header[offsetPayloadBytes:offsetPayloadCrc]), engine: payloadBytes},
+	} {
+		if field.file == field.engine {
+			continue
+		}
+		if field.isHex {
+			return fmt.Errorf("nnue: net refused: %s is %#016x in the file but %#016x in this engine "+
+				"(the net was trained against a different king bucket map)", field.name, field.file, field.engine)
+		}
+		return fmt.Errorf("nnue: net refused: %s is %d in the file but %d in this engine", field.name, field.file, field.engine)
+	}
+	return nil
+}
+
+// Stamp wraps a weight payload in a fresh RNNUE1 container, writing every architecture field, both
+// CRCs and the payload's size from THIS build's own compiled constants and map — never from anything
+// the caller claims about the payload. That is why a 512-wide net stamped by a 1024-wide build gets a
+// 1024-wide header and is then refused by Load: the stamper cannot describe a net it was not built
+// for, so the mismatch surfaces at once instead of after a spent training run.
+//
+// Stamp is the exact inverse of Load, which is what keeps the writer and the reader from drifting:
+// TestStampReproducesEmbeddedNet asserts that stamping the embedded net's own payload reproduces the
+// shipped file byte for byte.
+func Stamp(payload []byte) ([]byte, error) {
+	if len(payload) != payloadBytes {
+		return nil, fmt.Errorf("nnue: cannot stamp a %d-byte payload; this architecture's payload is %d bytes",
+			len(payload), payloadBytes)
+	}
+	header := make([]byte, headerBytes, headerBytes+payloadBytes)
+	copy(header[offsetMagic:], magic[:])
+	binary.LittleEndian.PutUint16(header[offsetFormatVersion:], formatVersion)
+	binary.LittleEndian.PutUint16(header[offsetHeaderBytes:], headerBytes)
+	binary.LittleEndian.PutUint16(header[offsetFeaturesPerBucket:], featuresPerBucket)
+	binary.LittleEndian.PutUint16(header[offsetKingBuckets:], kingBuckets)
+	binary.LittleEndian.PutUint16(header[offsetHiddenSize:], hiddenSize)
+	binary.LittleEndian.PutUint16(header[offsetOutputBuckets:], outputBuckets)
+	header[offsetFlags] = engineFlags
+	header[offsetActivation] = activationSCReLU
+	binary.LittleEndian.PutUint16(header[offsetQa:], qa)
+	binary.LittleEndian.PutUint16(header[offsetQb:], qb)
+	binary.LittleEndian.PutUint16(header[offsetEvalScale:], evalScale)
+	binary.LittleEndian.PutUint32(header[offsetReserved:], 0)
+	binary.LittleEndian.PutUint64(header[offsetKingBucketMapCrc:], kingBucketMapCRC())
+	binary.LittleEndian.PutUint64(header[offsetPayloadBytes:], payloadBytes)
+	binary.LittleEndian.PutUint64(header[offsetPayloadCrc:], crc64XZ(payload))
+	// Last, so header_crc covers every field above it.
+	binary.LittleEndian.PutUint64(header[offsetHeaderCrc:], crc64XZ(header[:headerCrcCoverage]))
+	return append(header, payload...), nil
 }
 
 // deriveInt8OutputWeights requantises the int16 output weights to int8 range for the int8 output dot.
@@ -238,7 +382,7 @@ func featureRow(bucket, colorIdx int, pc uint8, sq int, blackPersp bool) int {
 	} else {
 		base = colorIdx*384 + typeOffset + sq
 	}
-	return bucket*inputSize + base
+	return bucket*featuresPerBucket + base
 }
 
 // column returns the feature-transformer weight column (length hiddenSize) for one piece on
@@ -277,8 +421,8 @@ func (n *Network) refreshSide(side *[hiddenSize]int16, b *Board, bucket int, bla
 
 // Refresh rebuilds both perspectives of acc from scratch for board b.
 func (n *Network) Refresh(acc *Accumulator, b *Board) {
-	n.refreshSide(&acc.white, b, kingBucketMap[b.kingSquare(0)], false)
-	n.refreshSide(&acc.black, b, kingBucketMap[b.kingSquare(1)^rankFlip], true)
+	n.refreshSide(&acc.white, b, int(kingBucketMap[b.kingSquare(0)]), false)
+	n.refreshSide(&acc.black, b, int(kingBucketMap[b.kingSquare(1)^rankFlip]), true)
 }
 
 // Update moves acc from matching `from` to matching `to` by applying only the feature deltas for
@@ -288,10 +432,10 @@ func (n *Network) Refresh(acc *Accumulator, b *Board) {
 // (read from `from`); for each it now occupies, add the piece now there (read from `to`). A king
 // move that crosses a bucket boundary changes that whole perspective's bank, so it is refreshed.
 func (n *Network) Update(acc *Accumulator, from, to *Board) {
-	wf := kingBucketMap[from.kingSquare(0)]
-	wt := kingBucketMap[to.kingSquare(0)]
-	bf := kingBucketMap[from.kingSquare(1)^rankFlip]
-	bt := kingBucketMap[to.kingSquare(1)^rankFlip]
+	wf := int(kingBucketMap[from.kingSquare(0)])
+	wt := int(kingBucketMap[to.kingSquare(0)])
+	bf := int(kingBucketMap[from.kingSquare(1)^rankFlip])
+	bt := int(kingBucketMap[to.kingSquare(1)^rankFlip])
 
 	if wf == wt && bf == bt {
 		for colorIdx := 0; colorIdx <= 1; colorIdx++ {
@@ -343,7 +487,7 @@ func (n *Network) diffSide(side *[hiddenSize]int16, from, to *Board, bucket int,
 }
 
 // dequant reduces the raw int64 dot (in QA*QA*QB units) to clamped centipawns.
-func dequant(output int64, bias int16) int {
+func dequant(output int64, bias int32) int {
 	output /= qa
 	output += int64(bias)
 	output *= evalScale
