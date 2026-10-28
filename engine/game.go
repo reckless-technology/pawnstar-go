@@ -21,6 +21,7 @@ type Game struct {
 	evalTable          evalHashTable      // lockless evaluation cache, shared by all Lazy SMP threads
 	openingBook        openingBook        // pre-loaded book moves indexed by Zobrist hash
 	network            *nnue.Network      // NNUE evaluator (the only evaluator); installed by NewGame, swappable via EvalFile
+	networkOrigin      string             // where the INSTALLED net came from: embeddedNetOrigin or EvalFile's path (keptNetMessage names it)
 	threadCount        int                // Lazy SMP search threads; 1 = single-threaded (default; tests rely on it)
 	moveOverhead       time.Duration      // reserved from every hard deadline for GUI/network lag (UCI Move Overhead)
 	useOwnBook         bool               // consult the opening book (UCI OwnBook); false forces a real search
@@ -58,6 +59,7 @@ func NewGame() *Game {
 		openingBook:        newOpeningBook(),
 		evalTable:          newEvalHashTable(evalHashTableSize),
 		network:            nnue.Embedded(),
+		networkOrigin:      embeddedNetOrigin,
 		threadCount:        1, // single-threaded by default; main() / UCI `Threads` raise it for play
 		moveOverhead:       30 * time.Millisecond,
 		useOwnBook:         true,
