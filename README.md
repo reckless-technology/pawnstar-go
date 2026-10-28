@@ -306,6 +306,16 @@ The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direc
   A build at the shared architecture therefore refuses the shipped v12 net, by design — nothing has been
   trained at that shape yet, and the accumulator tests run there against a deterministic **synthetic
   net** the package builds itself, whose bytes are identical in the C++, Rust and Go ports.
+  The new shape has its own CI job (`new-shape`), which runs `make check KING_MIRRORING=1
+  OUTPUT_BUCKETS=8` and then the **cross-port node-count signature**: six fixed-depth-8 searches over
+  that synthetic net, compared with the values in
+  [tools/new-shape-signature.sh](tools/new-shape-signature.sh), which is committed byte-identical in
+  `pawnstar`, `pawnstar-rs` and `pawnstar-go` so that `diff` between the three repositories is the whole
+  audit. It asserts the net's size, SHA-256 and header before searching it — a drifted generator must
+  fail as a drifted generator, not as a search regression — and `--hash` is mandatory, its value printed
+  beside every node count, because a node count with no transposition-table size next to it is not a
+  number anybody can compare. Write the net with `make synthetic-net NET=synthetic-net.bin
+  KING_MIRRORING=1 OUTPUT_BUCKETS=8`.
 - **Lazy accumulator:** maintained on `searchState` and computed on demand. `playMove`/`makeNullMove` only invalidate the new ply; `undoMove` is free; `currentAccumulator` catches up from the nearest valid ancestor (copy + incremental `update`) **only when an eval reads it on an eval-cache miss**. A king move that crosses a bucket boundary refreshes that perspective from scratch. Captures, en passant, castling and promotion are handled uniformly through the colour bitboards plus the `squares[]` array.
 - **Output layer:** two forward passes (mirroring the C++ engine). `EvaluateExact` is the int16 SCReLU reference. `EvaluateInt8` is the **search's hot-path evaluator**: activations requantised to uint8 (`(clamp(x,0,QA)²+256) >> 9`) and the output weights to int8 range, scaled back before dequant — faster, at a bounded ≤40 cp (measured 28) deviation from the int16 reference. Exactly the C++ int8 layer.
 - **Kernels** are build-tag split three ways, all bit-identical (the int8 dot is the exact integer sum `Σ u8·w8`, so scalar == SIMD == NEON): **amd64 + `goexperiment.simd`** (256-bit `simd/archsimd` plus a hand-written AVX2 int8 dot), **arm64** (hand-written NEON — `VADD`/`VSUB` column updates and a `SQXTUN`/`UMULL`/`SMLAL` int8 dot, with the four ops Go's assembler lacks emitted as clang-verified `WORD` encodings), and **scalar** on other targets. The vectorised dot is roughly an order of magnitude faster than scalar (int8 output dot ~9.9× on Apple Silicon; column updates ~7×).

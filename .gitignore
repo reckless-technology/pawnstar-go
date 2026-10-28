@@ -14,3 +14,6 @@ pawnstar-go-*
 *.test
 # go test coverage profile (make cover)
 coverage.out
+
+# The synthetic net a new-shape parity run writes (tools/new-shape-signature.sh).
+synthetic-net.bin

@@ -1,6 +1,6 @@
 ---
 name: project-shared-nnue-shape-go
-description: The shared NNUE shape (king mirroring + 8 output heads) in pawnstar-go — the build-tag knobs, the synthetic net, and the PRE-EXISTING Go/C++ search divergence that the synthetic net's wild evaluations expose
+description: The shared NNUE shape (king mirroring + 8 output heads) in pawnstar-go — the build-tag knobs, the synthetic net, the six-position cross-port signature and the CI job that gates it, and the Hash-default divergence that made that signature look like a search bug
 metadata:
   node_type: memory
   type: project
@@ -85,7 +85,41 @@ shape's own net and so run at both shapes, which is the point of having a synthe
 on both the archsimd/AVX2 and the scalar kernel paths. At the new shape there is no bench: the engine
 rightly refuses v12's net, and over random weights a depth-13 search does not finish usefully.
 
-## The finding: a PRE-EXISTING Go/C++ search divergence, and it is not this change
+## RESOLVED: the "pre-existing search divergence" was the Hash default, and the gate is green
+
+**Superseded, same day.** Everything below this section was written before the cause was found, and its
+conclusion — that this port could not meet the six-position gate until a search difference was tracked
+down — is **wrong**. It is kept because the evidence it gathered is what ruled search and evaluation
+out, which is how the real cause was reached.
+
+The cause was `hashTableMB` in `engine/constants.go`: **512** here against **64** in the C++ and Rust
+ports, arrived at incidentally through `cec14a4`, a TT *locking* change, rather than decided. Table size
+changes the collision pattern and so the node count at a fixed depth. With the table pinned equal all
+three ports are bit-exact, and at `Hash 512` the C++ and Rust ports reproduce *this* port's numbers
+exactly — including the one-node 88,172 that started the hunt. 64 is now the agreed value in all three
+(`0808763` here), and each port pins its advertised `option name Hash` line in its own suite, this one in
+`TestUCIHandshakeInProcess`.
+
+Measured again on 2026-10-27 after that fix: **six of six** positions match the C++ and Rust ports
+exactly at `Hash 64`, depth 8, over the same synthetic net — 2,709 `g1f3` / 1,100,203 `f3d3` /
+117,442 `b4f4` / 183,574 `a1b1` / 125,721 `e2e4` / 134,448 `e2e3`. The gate is
+`tools/new-shape-signature.sh`, run by the `new-shape` CI job, and the same file with the same six values
+is committed in `pawnstar` and `pawnstar-rs`.
+
+**The lesson is the one the skill now states as a rule.** The only cross-port gate that had ever run was
+`bench`, and `bench` pins the table to 64 MB in all three ports — `engine/bench.go` says so in as many
+words, "a stable signature independent of the `Hash` option". *A gate that controls for a difference
+cannot detect it*, so the one check guarding three-way parity was the reason the break stayed invisible
+for five months. The six-position harness that first produced the numbers below set no `Hash` either,
+which is why the divergence survived it too. Hence the two rules the script enforces: `--hash` is
+mandatory and never defaulted, and its value is printed beside every node count. A node count whose
+table size is not stated is not a number anybody can compare.
+
+**And the general one, which the evidence below earned:** a node-count difference between the ports is a
+configuration question before it is a code one. Asking the cheap question first — do the three engines
+even agree on their table size — would have cost a second, against instrumenting 488,396 evaluations.
+
+## The finding as first written: a “pre-existing Go/C++ search divergence” — superseded above
 
 The new shape's gate was to be six fixed-depth-8 searches over the synthetic net, matching the C++
 exactly. **This port reproduces only one of the six** (startpos, 2,709 nodes, `g1f3`). The others
