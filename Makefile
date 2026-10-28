@@ -91,7 +91,7 @@ ALIAS_CMD := ln -s
 ALIAS_KIND := ->
 endif
 
-.PHONY: all build test test-short check cover perft search bk see nnue book lazysmp race timing test-uci bench baseline vet fmt clean docs-bundle source-archive
+.PHONY: all build test test-short check cover perft search bk see nnue synthetic-net book lazysmp race timing test-uci bench baseline vet fmt clean docs-bundle source-archive
 
 all: build
 
@@ -168,6 +168,27 @@ see:
 # The regex is case-sensitive: `TestNNUE` alone matches NEITHER TestNnueBoardLayout NOR TestOutputDotInt8Asm.
 nnue:
 	$(GO) test $(GOTAGS) $(PKG) -run 'TestNNUE|TestNnue|TestOutputDot' -v
+
+# Write the synthetic net at THIS build's shape to $(NET), and nothing else. The net comes from a fixed seed
+# through fixed integer arithmetic, so its bytes are identical on every platform and in all three bit-exact
+# ports - which is half the proof of a cross-port node-count comparison on its own, because two ports
+# comparing node counts have to be searching the same net. It is what gives a shape nothing has been trained
+# for a signature at all: at the shared architecture the engine rightly refuses the shipped v12 net, so
+# `bench` cannot run.
+#
+# A target rather than a bare `go test` in the caller, because the generator lives in a test (this
+# repository keeps no developer tools) and so needs GOEXPERIMENT and the shape's build tags, both of which
+# this file is the one place that sets:
+#
+#   make synthetic-net NET=synthetic-net.bin KING_MIRRORING=1 OUTPUT_BUCKETS=8
+#   tools/new-shape-signature.sh --hash 64 --net synthetic-net.bin ./pawnstar-go
+# NET goes through $(abspath): `go test` runs a test in its own PACKAGE directory, so a relative path
+# quietly lands in engine/nnue/ instead of where the caller asked for it. On Windows abspath yields
+# C:/..., which is what a native Go binary needs - an MSYS /c/... path it cannot open at all.
+NET ?= synthetic-net.bin
+synthetic-net:
+	$(GO) test $(GOTAGS) ./engine/nnue -run TestWriteSyntheticNet -v -count=1
+synthetic-net: export PAWNSTAR_WRITE_SYNTHETIC_NET = $(abspath $(NET))
 
 # Opening-book gate (questionable-move filtering).
 book:
