@@ -7,6 +7,7 @@ package engine
 // searchRootNode (no subprocess), so they are fast and deterministic.
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -224,48 +225,75 @@ func TestMovegenAllocationFree(t *testing.T) {
 	}
 }
 
-// TestLoadNNUEFileRefusesWithoutFallingBack: a missing or refused EvalFile must return an error and
-// leave NO evaluator installed — not the net that was loaded before it, and not the embedded one. The
-// engine must then refuse to search loudly rather than play on with weights nobody asked for, which is
-// how a match once reported a plausible Elo for a net that never played a move. EnableNNUE is the
-// deliberate way back.
-func TestLoadNNUEFileRefusesWithoutFallingBack(t *testing.T) {
+// TestLoadNNUEFileRefusesWithoutSubstituting: a missing or refused EvalFile must return an error and
+// change nothing — the net already playing stays installed, networkOrigin still names it, and the
+// engine goes on searching with it. That is what the container's no-substitution rule asks for: a
+// refused net is never put into play, and a match can never report a plausible Elo for a net that
+// never played a move, because keptNetMessage says on both streams which net did.
+//
+// This is the stronger property than the one this test asserted before (that the evaluator was
+// UNINSTALLED). Uninstalling it fails the same rule from the other side: it leaves the engine with no
+// defined play, answering `bestmove 0000` to every later `go`, so an operator who misses one message
+// gets a thousand games of nothing rather than a thousand games of the previous net.
+func TestLoadNNUEFileRefusesWithoutSubstituting(t *testing.T) {
 	skipWithoutTheShippedNet(t)
 	game := NewGame()
-	if err := game.LoadNNUEFile(filepath.Join(t.TempDir(), "does-not-exist.bin")); err == nil {
-		t.Error("LoadNNUEFile on a missing path: expected an error")
-	}
-	if game.network != nil {
-		t.Error("a missing EvalFile left an evaluator installed; a refusal must not fall back")
+	installed, origin := game.network, game.networkOrigin
+	if installed == nil || origin != embeddedNetOrigin {
+		t.Fatalf("a fresh Game has net %v from origin %q, want the embedded net", installed != nil, origin)
 	}
 	bad := filepath.Join(t.TempDir(), "garbage.bin")
 	if err := os.WriteFile(bad, []byte("not an RNNUE1 net"), 0o644); err != nil {
 		t.Fatalf("write temp: %v", err)
 	}
-	if err := game.LoadNNUEFile(bad); err == nil {
-		t.Error("LoadNNUEFile on a malformed file: expected an error")
-	}
-	if game.network != nil {
-		t.Error("a refused EvalFile left an evaluator installed; a refusal must not fall back")
+	for _, path := range []string{filepath.Join(t.TempDir(), "does-not-exist.bin"), bad} {
+		err := game.LoadNNUEFile(path)
+		if err == nil {
+			t.Errorf("LoadNNUEFile(%q): expected an error", path)
+		}
+		if game.network != installed || game.networkOrigin != origin {
+			t.Errorf("LoadNNUEFile(%q) changed the installed net (origin now %q); a refused net must "+
+				"leave the net already playing in place", path, game.networkOrigin)
+		}
+		// And the message an operator reads names the net still playing, not the refused one.
+		kept := game.keptNetMessage(path)
+		want := fmt.Sprintf("NNUE: keeping the net already loaded ('%s'); '%s' was refused and is not in play",
+			origin, path)
+		if kept != want {
+			t.Errorf("keptNetMessage(%q) = %q, want %q", path, kept, want)
+		}
 	}
 
-	// With no net installed the search refuses loudly and returns no move, rather than evaluating a
-	// node with no network (which would crash on the first `go`).
+	// The engine still searches, with that net.
 	game.newGameFromFen(startFen)
 	game.timeControl.clockType = clockFixedDepth
 	game.timeControl.depth = 4
+	if m := searchRootNode(game); m.isNone() {
+		t.Error("the engine stopped searching after a refused EvalFile; the kept net must still play")
+	}
+
+	// The no-net guard is the DEFENSIVE path now — reachable only when even the embedded net is
+	// unusable (a corrupt build), which no EvalFile can cause. Force that state directly and check it
+	// still refuses loudly rather than evaluating a node with no network.
+	game.network, game.networkOrigin = nil, ""
 	var refused move
 	out := captureStdout(t, func() { refused = searchRootNode(game) })
 	if !refused.isNone() {
 		t.Errorf("a search with no net installed returned %s, want no move", refused.String())
 	}
-	if !strings.Contains(out, "info string NNUE: no net loaded") {
+	if !strings.Contains(out, "info string NNUE: no net installed") {
 		t.Errorf("a search with no net installed printed %q, want a loud refusal", out)
+	}
+	if kept := game.keptNetMessage(bad); !strings.Contains(kept, "no net is installed at all") {
+		t.Errorf("with no net installed keptNetMessage said %q; it must not claim to keep a net", kept)
 	}
 
 	// EnableNNUE is the deliberate way back to the embedded net, and the engine searches again.
 	if err := game.EnableNNUE(); err != nil {
 		t.Fatalf("EnableNNUE after a refusal: %v", err)
+	}
+	if game.networkOrigin != embeddedNetOrigin {
+		t.Errorf("EnableNNUE left networkOrigin %q, want %q", game.networkOrigin, embeddedNetOrigin)
 	}
 	if m := searchRootNode(game); m.isNone() {
 		t.Error("engine cannot search after EnableNNUE restored the embedded net")
@@ -274,15 +302,30 @@ func TestLoadNNUEFileRefusesWithoutFallingBack(t *testing.T) {
 
 // captureStdout redirects os.Stdout for the duration of f and returns what was written. Safe because this
 // package's tests never run in parallel (they share the global search diagnostics), so there is no
-// concurrent writer to os.Stdout.
+// concurrent writer to os.Stdout. captureStderr does the same for os.Stderr.
 func captureStdout(t *testing.T, f func()) string {
 	t.Helper()
-	old := os.Stdout
+	return captureStream(t, &os.Stdout, f)
+}
+
+// captureStderr is captureStdout for the other stream. The EvalFile refusal must reach both, because a
+// match harness keeps stderr and routinely drops `info` lines — so a test that reads only stdout
+// cannot show that the operator was told which net is playing.
+func captureStderr(t *testing.T, f func()) string {
+	t.Helper()
+	return captureStream(t, &os.Stderr, f)
+}
+
+// captureStream redirects *stream (os.Stdout or os.Stderr) for the duration of f and returns what was
+// written to it.
+func captureStream(t *testing.T, stream **os.File, f func()) string {
+	t.Helper()
+	old := *stream
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	os.Stdout = w
+	*stream = w
 	done := make(chan string, 1)
 	go func() {
 		var b strings.Builder
@@ -291,6 +334,6 @@ func captureStdout(t *testing.T, f func()) string {
 	}()
 	f()
 	_ = w.Close()
-	os.Stdout = old
+	*stream = old
 	return <-done
 }

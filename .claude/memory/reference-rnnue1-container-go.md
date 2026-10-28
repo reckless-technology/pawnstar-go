@@ -1,6 +1,6 @@
 ---
 name: reference-rnnue1-container-go
-description: The RNNUE1 net container in pawnstar-go — Go's hash/crc64 already IS CRC-64/XZ, the fixed CRCs and header bytes of the shipped v12 net, and the no-fallback refusal rule
+description: The RNNUE1 net container in pawnstar-go — Go's hash/crc64 already IS CRC-64/XZ, the fixed CRCs and header bytes of the shipped v12 net, and the refusal rule (loud on both streams, keeping the net already playing)
 metadata:
   node_type: memory
   type: reference
@@ -65,22 +65,50 @@ that the shipped net really carries this build's architecture rather than merely
 There is no separate stamping tool in this repo (and no Go developer tool at all, by design — the
 coverage gate is `./...` whole); `Stamp` plus that test is the whole of it.
 
-## A refused net does not fall back — and that changed two tests
+## A refused net is never substituted for — and this rule has now moved twice
 
-`LoadNNUEFile` installs `nil` on a refusal: not the net loaded before it, and **not** the embedded
-one. `searchRootNode` then refuses to search and returns no move, so the caller emits
-`bestmove 0000`. The refusal is printed as an `info string` **and** on stderr, because a match log
-keeps stderr even when the harness drops info lines. `EnableNNUE` is the deliberate way back.
+**The rule as it stands (2026-10-28, branch `evalfile-refusal-is-loud`, all four engines together).**
+`LoadNNUEFile` changes **nothing** on a refusal: the net already installed stays installed and goes on
+playing, and `networkOrigin` still names it. `handleUciSetOption` prints **two** lines on **both**
+streams — the loader's refusal, then
 
-This reversed the old, explicitly tested behaviour — `TestLoadNNUEFileErrors` asserted that a bad
-`EvalFile` "must leave the current evaluator intact" — so it was rewritten as
-`TestLoadNNUEFileRefusesWithoutFallingBack`, and the in-process `EvalFile` case now expects
-`game.network == nil`. Both traps the skill names are closed at once: a silent fallback (a match
-reporting a plausible Elo for a net that never played a move) and leaving the net merely unloaded
-(`readyok`, then a crash on the first `go`).
+```
+info string NNUE: keeping the net already loaded ('<kept net origin>'); '<refused path>' was refused and is not in play
+```
 
-Note the C++ port's `src/main.cpp` still has the trap-1 fallback in the open — on a
-`PAWNSTAR_EVALFILE` load failure it prints "falling back to the embedded net" and plays on.
+(bare, without the `info string ` prefix, on stderr). The wording is **fixed and shared with
+`pawnstar`, `pawnstar-rs` and `zenith`**; do not reword it in one port. `networkOrigin` on `Game` is
+what makes naming the kept net possible at all: the path, or `embedded`.
+
+**Why it moved.** Installing `nil` closed trap 1 (a silent fallback) but opened the mirror of it: the
+engine then had **no defined play**, answering `bestmove 0000` to every later `go`. An operator who
+missed one message got a thousand games of nothing rather than a thousand games of the previous net,
+and "which net actually played?" was still unanswered. Keeping the net already playing **and saying
+so, loudly, on a stream no harness drops** satisfies the skill's rule — a refused net is never put
+into play — while leaving the engine in a state that has a defined meaning.
+
+**`searchRootNode`'s no-net guard stays**, as a *defensive* path: it is reachable only when even the
+embedded net is unusable, i.e. a corrupt build, which is `EnableNNUE`'s failure and the one case that
+really does leave no evaluator. Its message is now
+`info string NNUE: no net installed (not even the embedded one) — refusing to search`; it no longer
+blames a refused `EvalFile`, which cannot cause it.
+
+**The tests, each time.** `TestLoadNNUEFileErrors` once asserted a bad `EvalFile` "must leave the
+current evaluator intact"; 2026-10-27 reversed that into
+`TestLoadNNUEFileRefusesWithoutFallingBack` (expecting `game.network == nil`); 2026-10-28 made it
+`TestLoadNNUEFileRefusesWithoutSubstituting`, which asserts the **stronger** property rather than
+simply reverting: the net and its origin are unchanged, `keptNetMessage` names that net, the engine
+still searches with it, **and** the no-net guard still refuses loudly when that state is forced
+directly. `engine/uci_inprocess_test.go` checks the same through `HandleCommand` on both streams
+(`captureStderr` / `runUCIStreams`), and `engine/uci_evalfile_test.go` drives the **real binary** —
+the only way to show the routing, and that the search afterwards is real (same bestmove, identical
+node count: 136,277 at depth 10 from the start position, book off, hash cleared).
+
+**pawnstar-go has no startup `EvalFile` path at all**, unlike the other three: `main()` installs the
+embedded net via `NewGame` and reads no `PAWNSTAR_EVALFILE`, so there is no startup fallback and no
+`FATAL: ... was read and refused` here to leave alone. (The C++ port's `src/main.cpp` does have that
+startup path, and as of 2026-10-27 still had trap 1 in the open — "falling back to the embedded net"
+on a load failure.)
 
 ## The gate
 

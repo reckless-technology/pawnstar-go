@@ -7,6 +7,7 @@ package engine
 
 import (
 	"errors"
+	"fmt"
 	"unsafe"
 
 	"pawnstar-go/engine/nnue"
@@ -54,18 +55,28 @@ func clampEvalToBand(score int) int {
 	return min(max(score, -nnueSearchClamp), nnueSearchClamp)
 }
 
+// embeddedNetOrigin is the networkOrigin value standing for the net compiled into the binary. Every
+// other origin is the path EvalFile was given, so the kept-net message names either a real file or
+// this word and never an empty string.
+const embeddedNetOrigin = "embedded"
+
 // EnableNNUE (re)installs the embedded NNUE network as this game's evaluator, replacing any net loaded
 // via EvalFile. NewGame already installs it, so this is only needed to revert to the embedded net.
 //
 // Returns an error if the embedded net is unusable — which would mean the build itself is corrupt,
-// since the net is compiled in and its container's checks are made on it like any other. As in
-// LoadNNUEFile, that leaves the game with no evaluator rather than keeping whatever net was
-// installed before: a net asked for and not delivered is never silently substituted.
+// since the net is compiled in and its container's checks are made on it like any other. That one case
+// does leave the game with no evaluator, and deliberately: the embedded net is the last resort, so
+// there is nothing left to keep, and the only honest state is none installed with a search that
+// refuses loudly. It is also the single path that keeps searchRootNode's no-net guard reachable. A net
+// read from a file and REFUSED is a different case entirely — see LoadNNUEFile, which keeps the net
+// already playing and says which one it is.
 func (game *Game) EnableNNUE() error {
 	net := nnue.Embedded()
-	game.network = net     // nil when even the embedded net is unusable: no substitution, by design
-	game.evalTable.clear() // cached scores are net-dependent
+	game.network = net                     // nil only when the build itself is corrupt (see above)
+	game.networkOrigin = embeddedNetOrigin // and "" below when there is no net to name
+	game.evalTable.clear()                 // cached scores are net-dependent
 	if net == nil {
+		game.networkOrigin = ""
 		return errors.New("nnue: embedded net unavailable")
 	}
 	return nil
@@ -74,15 +85,44 @@ func (game *Game) EnableNNUE() error {
 // LoadNNUEFile loads an external RNNUE1 net from disk and installs it as this game's evaluator,
 // replacing the net installed before it.
 //
-// A refused net leaves the game with NO evaluator at all — not the net that was installed before,
-// and not the embedded one. That is deliberate and is the whole point of the container's checks: a
-// loader that keeps the previous net plays on with weights nobody asked for, and a match then
-// reports a plausible Elo for a net that never played a move. searchRootNode refuses to search
-// while no net is installed, so the failure is loud at every later `go` rather than silent. Call
-// EnableNNUE to come back to the embedded net deliberately.
+// A refused net changes nothing: the net already playing stays installed and keeps playing, and the
+// caller reports the refusal on stdout as an `info string` AND on stderr, naming which net is now in
+// play (keptNetMessage, printed by handleUciSetOption). The rule the container's checks exist to
+// enforce is that a refused net is never SUBSTITUTED FOR — a match must never report a plausible Elo
+// for a net that never played a move — and keeping the net already playing satisfies it, because the
+// operator is told on a stream no harness drops which net the games were actually played with.
+//
+// Uninstalling the evaluator instead (what this used to do) breaks the same rule from the other side:
+// it leaves the engine in a state with no defined play, where every later `go` answers
+// `bestmove 0000`. An operator who misses one message then has a thousand games of nothing instead of
+// a thousand games of the net that was already loaded. searchRootNode's no-net guard therefore stays
+// as a defensive path — reachable when even the embedded net is unusable, i.e. a corrupt build (see
+// EnableNNUE) — rather than as this function's ordinary outcome.
+//
+// Call EnableNNUE to come back to the embedded net deliberately.
 func (game *Game) LoadNNUEFile(path string) error {
 	net, err := nnue.LoadFile(path)
-	game.network = net     // nil on a refusal: no fallback, by design
+	if err != nil {
+		return err // the net already installed keeps playing, and networkOrigin still names it
+	}
+	game.network = net
+	game.networkOrigin = path
 	game.evalTable.clear() // cached scores are net-dependent
-	return err
+	return nil
+}
+
+// keptNetMessage is the one line that tells an operator which net is actually playing after
+// refusedPath was refused. The wording is fixed and shared by all four engines, so a match log reads
+// the same whichever engine wrote it; handleUciSetOption prints it on stdout as an `info string` and
+// on stderr, because a harness keeps stderr and routinely drops info lines.
+//
+// The no-net branch is no longer reachable from a refused EvalFile — only from a build whose own
+// embedded net is unusable — but the message must never claim to keep a net the engine does not have.
+func (game *Game) keptNetMessage(refusedPath string) string {
+	if game.network == nil {
+		return fmt.Sprintf("NNUE: no net is installed at all; '%s' was refused and is not in play — "+
+			"the next `go` will refuse to search", refusedPath)
+	}
+	return fmt.Sprintf("NNUE: keeping the net already loaded ('%s'); '%s' was refused and is not in play",
+		game.networkOrigin, refusedPath)
 }

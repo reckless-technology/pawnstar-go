@@ -34,6 +34,18 @@ func runUCI(t *testing.T, game *Game, lines ...string) (out string, quit bool) {
 	return out, quit
 }
 
+// runUCIStreams is runUCI with stderr captured as well — for the EvalFile refusal, which must reach
+// both streams because a match harness keeps stderr and routinely drops `info` lines. (The subprocess
+// test engine/uci_evalfile_test.go proves the same of the real binary; this one is what the coverage
+// profile sees.)
+func runUCIStreams(t *testing.T, game *Game, lines ...string) (out, errOut string) {
+	t.Helper()
+	errOut = captureStderr(t, func() {
+		out, _ = runUCI(t, game, lines...)
+	})
+	return out, errOut
+}
+
 // bestmoveOf returns the move named by the last `bestmove` line in out, or "" if there is none.
 func bestmoveOf(out string) string {
 	m := regexp.MustCompile(`(?m)^bestmove (\S+)`).FindAllStringSubmatch(out, -1)
@@ -516,14 +528,30 @@ func TestUCISetOptionInProcess(t *testing.T) {
 			t.Errorf("EvalFile%q: output %q, embedded restored %v", value, out, game.network == embedded)
 		}
 	}
-	// A refused EvalFile reports why and leaves NO evaluator installed: the embedded net is not a
-	// fallback (see LoadNNUEFile). EnableNNUE puts it back, so the rest of this test can search.
-	out, _ = runUCI(t, game, "setoption name EvalFile value no/such/net.bin")
-	if !strings.Contains(out, `info string EvalFile "no/such/net.bin": `) || game.network != nil {
-		t.Errorf("a refused EvalFile: output %q, evaluator uninstalled %v", out, game.network == nil)
+	// A refused EvalFile reports why on BOTH streams, names the net still playing, and keeps it
+	// installed — see LoadNNUEFile for why keeping it, rather than uninstalling the evaluator, is what
+	// the container's no-substitution rule asks for. The engine must go on searching with that net.
+	runUCI(t, game, "setoption name EvalFile value <embedded>")
+	installed, origin := game.network, game.networkOrigin
+	out, errOut := runUCIStreams(t, game, "setoption name EvalFile value no/such/net.bin")
+	wantKept := "NNUE: keeping the net already loaded ('" + origin + "'); 'no/such/net.bin' was refused and is not in play"
+	for _, s := range []struct{ name, text, prefix string }{
+		{"stdout", out, "info string "}, // stderr carries the same text without the prefix
+		{"stderr", errOut, ""},
+	} {
+		for _, want := range []string{s.prefix + `EvalFile "no/such/net.bin": `, s.prefix + wantKept} {
+			if !strings.Contains(s.text, want) {
+				t.Errorf("a refused EvalFile printed %q on %s, want it to contain %q", s.text, s.name, want)
+			}
+		}
 	}
-	if err := game.EnableNNUE(); err != nil {
-		t.Fatalf("EnableNNUE after a refusal: %v", err)
+	if game.network != installed || game.networkOrigin != origin {
+		t.Errorf("a refused EvalFile changed the installed net (origin now %q, was %q)", game.networkOrigin, origin)
+	}
+	game.timeControl.clockType = clockFixedDepth
+	game.timeControl.depth = 4
+	if m := searchRootNode(game); m.isNone() {
+		t.Error("the engine stopped searching after a refused EvalFile; the kept net must still play")
 	}
 
 	out, _ = runUCI(t, game, "setoption name Threads value 3", "setoption name Threads value lots")

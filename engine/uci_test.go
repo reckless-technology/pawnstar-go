@@ -112,15 +112,35 @@ type uciEngine struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
 	lines chan string // stdout lines delivered by a background goroutine
+	// stderrLines holds the engine's stderr, but only for an engine started by
+	// startEngineCapturingStderr; startEngine discards stderr as the original script did. Guarded
+	// because the pump goroutine appends to it while the test reads it.
+	stderrMu    sync.Mutex
+	stderrLines []string
 }
 
 // startEngine launches the engine pinned to a single core / single thread (so searches are deterministic
-// and cheap), mirroring the bash coproc's `GOMAXPROCS=1 PAWNSTAR_THREADS=1`.
+// and cheap), mirroring the bash coproc's `GOMAXPROCS=1 PAWNSTAR_THREADS=1`. stderr is discarded.
 func startEngine(t *testing.T) *uciEngine {
+	t.Helper()
+	return startEngineStreams(t, false)
+}
+
+// startEngineCapturingStderr is startEngine with the engine's stderr captured as well, for the one
+// thing only a real process can show: that a message reaches BOTH streams. A match harness keeps
+// stderr and routinely drops `info` lines, so an in-process test of stdout alone cannot prove the
+// operator was told anything.
+func startEngineCapturingStderr(t *testing.T) *uciEngine {
+	t.Helper()
+	return startEngineStreams(t, true)
+}
+
+// startEngineStreams is the shared body of the two constructors above.
+func startEngineStreams(t *testing.T, withStderr bool) *uciEngine {
 	t.Helper()
 	cmd := exec.Command(engineBinary(t))
 	cmd.Env = append(os.Environ(), "GOMAXPROCS=1", "PAWNSTAR_THREADS=1")
-	cmd.Stderr = nil // discard stderr, like the script's 2>/dev/null
+	cmd.Stderr = nil // discard stderr, like the script's 2>/dev/null (unless captured below)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -130,15 +150,34 @@ func startEngine(t *testing.T) *uciEngine {
 	if err != nil {
 		t.Fatalf("startEngine: StdoutPipe: %v", err)
 	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("startEngine: Start: %v", err)
-	}
-
 	e := &uciEngine{
 		t:     t,
 		cmd:   cmd,
 		stdin: stdin,
 		lines: make(chan string, 1024),
+	}
+	// The stderr pipe must be created before Start and drained by a goroutine for the same reason
+	// close() drains stdout: a full pipe nobody reads blocks the engine, and Wait would then never
+	// return.
+	var stderr io.ReadCloser
+	if withStderr {
+		if stderr, err = cmd.StderrPipe(); err != nil {
+			t.Fatalf("startEngine: StderrPipe: %v", err)
+		}
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("startEngine: Start: %v", err)
+	}
+	if stderr != nil {
+		go func() {
+			sc := bufio.NewScanner(stderr)
+			sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+			for sc.Scan() {
+				e.stderrMu.Lock()
+				e.stderrLines = append(e.stderrLines, sc.Text())
+				e.stderrMu.Unlock()
+			}
+		}()
 	}
 	// Pump stdout lines into the channel so readUntil can select on a timeout rather than block forever.
 	go func() {
@@ -214,6 +253,14 @@ func (e *uciEngine) close() {
 		<-drained
 	}
 	_ = e.cmd.Wait()
+}
+
+// stderrSoFar returns a copy of the engine's stderr lines so far (empty unless the engine was started
+// by startEngineCapturingStderr).
+func (e *uciEngine) stderrSoFar() []string {
+	e.stderrMu.Lock()
+	defer e.stderrMu.Unlock()
+	return append([]string(nil), e.stderrLines...)
 }
 
 // anyLineMatches reports whether any line satisfies re.

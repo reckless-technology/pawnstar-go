@@ -67,11 +67,17 @@ func (game *Game) HandleCommand(line string) bool {
 }
 
 // handleUciSetOption processes "setoption name <Name> [value <Value>]". Supported options:
+//
 //   - EvalFile (string): a path to an RNNUE1 net to load; "<embedded>", "default" or empty reload the
-//     embedded net. Names and values may contain spaces, so both are parsed span-wise. A refused net
-//     leaves no evaluator installed (LoadNNUEFile: no fallback), and the refusal is printed on stderr
-//     as well as as an `info string`, so a match log carries the reason even when the harness drops
-//     info lines — which is how a wrong net went unnoticed for a whole match before.
+//     embedded net. Names and values may contain spaces, so both are parsed span-wise.
+//
+//     A refused net is reported on TWO streams and in TWO lines, because a harness keeps stderr and
+//     routinely drops `info` lines, and because "it failed" is not enough on its own: first the
+//     loader's own refusal, naming the field, the file's value and the engine's value, then the net
+//     that is still playing (keptNetMessage). The net already loaded is KEPT — see LoadNNUEFile for
+//     why that, and not an uninstalled evaluator, is what the container's no-substitution rule asks
+//     for. A wrong net once went unnoticed for a whole match; an operator reading either stream now
+//     has both the reason and the net the games were played with.
 func (game *Game) handleUciSetOption(fields []string) {
 	name, value := parseSetOption(fields)
 	switch strings.ToLower(name) {
@@ -82,8 +88,12 @@ func (game *Game) handleUciSetOption(fields []string) {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 			}
 		} else if err := game.LoadNNUEFile(value); err != nil {
+			// Two lines on both streams: why it was refused, then which net is actually playing.
 			fmt.Printf("info string EvalFile %q: %v\n", value, err)
 			fmt.Fprintf(os.Stderr, "EvalFile %q: %v\n", value, err)
+			kept := game.keptNetMessage(value)
+			fmt.Printf("info string %s\n", kept)
+			fmt.Fprintln(os.Stderr, kept)
 		} else {
 			fmt.Printf("info string NNUE net loaded from %s\n", value)
 		}

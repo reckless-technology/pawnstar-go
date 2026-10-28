@@ -26,12 +26,14 @@ import (
 //   - Hard stop if elapsed > budget.
 func searchRootNode(game *Game) move {
 	game.ponderMove = moveNone() // set below by the main thread's iterativeDeepen if the PV has a reply
-	// NNUE is the only evaluator, and a refused net leaves none installed — deliberately, so a net the
-	// engine was told to load and could not is never quietly replaced by the embedded one. Refuse the
-	// search loudly here, the single funnel every search passes through, rather than evaluating a node
-	// with no network: the caller emits `bestmove 0000`, which no harness can mistake for a played game.
+	// NNUE is the only evaluator, so with no net installed there is nothing to search with. This is a
+	// DEFENSIVE path, not the EvalFile one: a refused EvalFile keeps the net already playing and says so
+	// (LoadNNUEFile / keptNetMessage), and the only way to reach here is a build whose own embedded net is
+	// unusable — EnableNNUE's failure. Refuse loudly at this single funnel every search passes through
+	// rather than evaluate a node with no network: the caller emits `bestmove 0000`, which no harness can
+	// mistake for a played game.
 	if game.network == nil {
-		noNetworkRefusal := "info string NNUE: no net loaded (the last EvalFile was refused) — refusing to search"
+		noNetworkRefusal := "info string NNUE: no net installed (not even the embedded one) — refusing to search"
 		fmt.Println(noNetworkRefusal)
 		fmt.Fprintln(os.Stderr, noNetworkRefusal)
 		return moveNone()
