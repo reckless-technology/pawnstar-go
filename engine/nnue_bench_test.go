@@ -25,7 +25,7 @@ func BenchmarkNNUEEvaluateExact(b *testing.B) {
 	net.Refresh(&acc, board)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sink = net.EvaluateExact(&acc, int(pos.colorToMove))
+		sink = net.EvaluateExact(&acc, board, int(pos.colorToMove))
 	}
 }
 
@@ -39,7 +39,7 @@ func BenchmarkNNUEEvaluateInt8(b *testing.B) {
 	net.Refresh(&acc, board)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sink = net.EvaluateInt8(&acc, int(pos.colorToMove))
+		sink = net.EvaluateInt8(&acc, board, int(pos.colorToMove))
 	}
 }
 

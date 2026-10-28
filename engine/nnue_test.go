@@ -59,6 +59,7 @@ func TestNnueBoardLayout(t *testing.T) {
 // king-bucket orientation, SCReLU activation, dequantisation and net file format all match. This is
 // the correctness oracle for the whole NNUE port — the SIMD kernels must reproduce it bit-for-bit.
 func TestNNUEReference(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	const tolerance = 2 // integer-quantisation rounding vs bullet; mirrors the C++ test_nnue bound
 
 	net, err := nnue.LoadFile("nnue/pawnstar-v12.bin")
@@ -115,6 +116,7 @@ func TestNNUEReference(t *testing.T) {
 // scalar build also confirms the two int8 kernels agree (identical deviations => identical int8 values),
 // the way TestNNUEReference guards the int16 kernels.
 func TestNNUEInt8(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	const int8Bound = 40 // matches C++ kInt8Bound; the measured max is far smaller
 
 	net, err := nnue.LoadFile("nnue/pawnstar-v12.bin")
@@ -140,8 +142,8 @@ func TestNNUEInt8(t *testing.T) {
 		b := pos.nnueBoard()
 		var acc nnue.Accumulator
 		net.Refresh(&acc, b)
-		i8 := net.EvaluateInt8(&acc, int(pos.colorToMove))
-		ref := net.EvaluateExact(&acc, int(pos.colorToMove))
+		i8 := net.EvaluateInt8(&acc, b, int(pos.colorToMove))
+		ref := net.EvaluateExact(&acc, b, int(pos.colorToMove))
 		dev := i8 - ref
 		if dev < 0 {
 			dev = -dev
@@ -171,9 +173,11 @@ func TestNNUEInt8(t *testing.T) {
 // path evaluates exactly as the reference full-refresh path.
 func TestNNUEIncremental(t *testing.T) {
 	game := NewGame()
-	if err := game.EnableNNUE(); err != nil {
-		t.Fatalf("enable NNUE: %v", err)
-	}
+	// At this build's shape, whatever it is: the embedded net where that is this shape, and otherwise
+	// the synthetic one. The accumulator property under test holds for any weights at all, and this is
+	// the broad walk behind the hand-chosen crossings in TestNNUEBoundaryCrossings — skipping it at a
+	// new shape would skip it exactly where the new indexing code is.
+	game.network = shapeTestNet(t)
 	// Positions exercising castling, captures, en passant and promotions (the tricky update cases).
 	fens := []string{
 		startFen,
@@ -204,7 +208,7 @@ func evaluateExactPosition(net *nnue.Network, pos *position) int {
 	b := pos.nnueBoard()
 	var acc nnue.Accumulator
 	net.Refresh(&acc, b)
-	return net.EvaluateExact(&acc, int(pos.colorToMove))
+	return net.EvaluateExact(&acc, b, int(pos.colorToMove))
 }
 
 // accsEqual reports whether the maintained (caught-up) accumulator for the current node matches a

@@ -43,7 +43,7 @@ func evaluatePositionNonDraw(ss *searchState) int {
 		return scaleByRule50(hashScore, int(pos.halfMove))
 	}
 
-	score := clampEvalToBand(ss.game.network.EvaluateInt8(ss.currentAccumulator(), int(pos.colorToMove)))
+	score := clampEvalToBand(ss.game.network.EvaluateInt8(ss.currentAccumulator(), pos.nnueBoard(), int(pos.colorToMove)))
 	ss.game.evalTable.record(pos.hash, score)
 	return scaleByRule50(score, int(pos.halfMove))
 }

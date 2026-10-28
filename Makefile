@@ -22,6 +22,49 @@ export GOEXPERIMENT := simd
 # scalar-fallback path, no GOEXPERIMENT) does not set it and still runs anywhere.
 export GOAMD64 := v3
 
+# The NNUE network SHAPE. Two knobs, so either shape can be built from this one tree while the three
+# bit-exact ports (C++, Rust, Go) are brought across together. The defaults are v12's shape, the one the
+# shipped net was trained for; the shared architecture is KING_MIRRORING=1 with OUTPUT_BUCKETS=8:
+#
+#   make check KING_MIRRORING=1 OUTPUT_BUCKETS=8
+#
+# Both are stamped into every net's header (`flags` bit 0, `output_buckets`, and the bucket map's CRC-64)
+# and the loader checks all three, so a net can only load into a build of its own shape - a new-shape
+# build REFUSES the shipped pawnstar-v12.bin, which is the container working and not a fault. A shape
+# change is also an evaluation change, so it moves the bench signature and breaks bit-exactness with the
+# C++ and Rust ports until all three land together: do not flip these defaults for one engine alone.
+#
+# Go has no preprocessor, so the knobs are BUILD TAGS (engine/nnue/shape_*.go) rather than -D defines,
+# and they have to reach every `go build`, `go test` and `go vet` here - which is why GOTAGS is threaded
+# through every one of them below. `go test` also builds the engine BINARY for the UCI subprocess tests;
+# that build reads the shape off the nnue package's own constants, so it cannot drift from the tests
+# driving it (engine/uci_test.go, buildEngineBinary).
+NNUE_TAGS :=
+
+ifeq ($(KING_MIRRORING),1)
+  NNUE_TAGS += pawnstar_nnue_king_mirroring
+else ifneq ($(KING_MIRRORING),)
+  ifneq ($(KING_MIRRORING),0)
+    $(error KING_MIRRORING must be 0 or 1, not "$(KING_MIRRORING)")
+  endif
+endif
+
+ifeq ($(OUTPUT_BUCKETS),8)
+  NNUE_TAGS += pawnstar_nnue_output_buckets_8
+else ifneq ($(OUTPUT_BUCKETS),)
+  ifneq ($(OUTPUT_BUCKETS),1)
+    $(error OUTPUT_BUCKETS must be 1 or 8, not "$(OUTPUT_BUCKETS)")
+  endif
+endif
+
+empty :=
+space := $(empty) $(empty)
+comma := ,
+ifneq ($(strip $(NNUE_TAGS)),)
+  GOTAGS := -tags $(subst $(space),$(comma),$(strip $(NNUE_TAGS)))
+endif
+GOTAGS ?=
+
 BINARY := pawnstar-go
 PKG    := ./...
 
@@ -53,18 +96,18 @@ endif
 all: build
 
 build:
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(VERSIONED) .
+	$(GO) build $(GOTAGS) -ldflags "$(LDFLAGS)" -o $(VERSIONED) .
 	@rm -f $(ALIAS) && $(ALIAS_CMD) $(VERSIONED) $(ALIAS)
 	@for f in $(BINARY)_[0-9]*_[0-9]*_[0-9]*; do [ "$$f" = "$(VERSIONED)" ] || rm -f "$$f"; done
 	@echo "built $(VERSIONED)  ($(ALIAS) $(ALIAS_KIND) $(VERSIONED), version $(VERSION))"
 
 # Full test suite (all packages; perft capped at depth 5, search to depth 9).
 test:
-	$(GO) test $(PKG)
+	$(GO) test $(GOTAGS) $(PKG)
 
 # Quick suite (-short: BK at depth 7, smaller NNUE walk).
 test-short:
-	$(GO) test -short $(PKG)
+	$(GO) test $(GOTAGS) -short $(PKG)
 
 # Full correctness gate: the WHOLE suite, plus the race-detector pass (the only thing a plain `go test`
 # does not cover).
@@ -98,7 +141,7 @@ check: test race
 COVER_MIN ?= 90
 
 cover:
-	$(GO) test $(PKG) -timeout 45m -coverpkg=$(PKG) -coverprofile=coverage.out
+	$(GO) test $(GOTAGS) $(PKG) -timeout 45m -coverpkg=$(PKG) -coverprofile=coverage.out
 	@$(GO) tool cover -func=coverage.out | awk -v min=$(COVER_MIN) ' \
 		/^total:/ { found = 1; total = $$NF; sub(/%/, "", total) } \
 		END { \
@@ -108,31 +151,31 @@ cover:
 		}'
 
 perft:
-	$(GO) test $(PKG) -run TestPerft -v
+	$(GO) test $(GOTAGS) $(PKG) -run TestPerft -v
 
 search:
-	$(GO) test $(PKG) -run TestSearch -short -v
+	$(GO) test $(GOTAGS) $(PKG) -run TestSearch -short -v
 
 bk:
-	$(GO) test $(PKG) -run TestBratkoKopec -v
+	$(GO) test $(GOTAGS) $(PKG) -run TestBratkoKopec -v
 
 see:
-	$(GO) test $(PKG) -run TestSEE -v
+	$(GO) test $(GOTAGS) $(PKG) -run TestSEE -v
 
 # NNUE gates: int16 reference (0 cp vs C++), int8 search eval (<=40 cp, scalar==SIMD), lazy accumulator,
 # the unsafe position->nnue.Board layout contract (TestNnueBoardLayout), and the hand-written AVX2/NEON
 # output-dot bit-identity gate (TestOutputDotInt8Asm, in the nnue package).
 # The regex is case-sensitive: `TestNNUE` alone matches NEITHER TestNnueBoardLayout NOR TestOutputDotInt8Asm.
 nnue:
-	$(GO) test $(PKG) -run 'TestNNUE|TestNnue|TestOutputDot' -v
+	$(GO) test $(GOTAGS) $(PKG) -run 'TestNNUE|TestNnue|TestOutputDot' -v
 
 # Opening-book gate (questionable-move filtering).
 book:
-	$(GO) test $(PKG) -run TestOpeningBook -v
+	$(GO) test $(GOTAGS) $(PKG) -run TestOpeningBook -v
 
 # Lazy SMP smoke test (multi-threaded search sanity).
 lazysmp:
-	$(GO) test $(PKG) -run TestLazySMP -v
+	$(GO) test $(GOTAGS) $(PKG) -run TestLazySMP -v
 
 # The concurrency tests under the race detector — the data-race-freedom claims (lockless TT/eval
 # cache sharing, the ponder clock atomics) are only actually verified when -race is on. -race needs cgo, which go turns
@@ -141,24 +184,24 @@ lazysmp:
 # tools/setup-dev.ps1 installs and records with `go env -w CC=...` (the Windows CI job passes CC itself).
 race: export CGO_ENABLED := 1
 race:
-	$(GO) test $(PKG) -race -run 'TestLazySMP|TestPonderRace|TestFixedTimeDeadlineFires' -v
+	$(GO) test $(GOTAGS) $(PKG) -race -run 'TestLazySMP|TestPonderRace|TestFixedTimeDeadlineFires' -v
 
 # Chess-clock / time-management tests (budget, deadline firing, defaults, ponder race).
 timing:
-	$(GO) test $(PKG) -run 'TestTimeControlDefaults|TestComputeBudget|TestPonderRace|TestFixedTimeDeadlineFires' -v
+	$(GO) test $(GOTAGS) $(PKG) -run 'TestTimeControlDefaults|TestComputeBudget|TestPonderRace|TestFixedTimeDeadlineFires' -v
 
 # UCI protocol regression test — drives the built binary as a UCI process (handshake, seldepth,
 # searchmoves, currmove, bench determinism, ponder protocol). Lives in the engine package
 # ([engine/uci_test.go](engine/uci_test.go)) but builds the binary itself (lazily), so no `build`
 # prerequisite is needed; -short skips it, and other engine tests never trigger the build.
 test-uci:
-	$(GO) test $(PKG) -run 'TestUCIProtocol|TestUCIBenchDeterminism' -v
+	$(GO) test $(GOTAGS) $(PKG) -run 'TestUCIProtocol|TestUCIBenchDeterminism' -v
 
 bench:
-	$(GO) test $(PKG) -bench BenchmarkPerft7 -benchtime=10s -run '^$$'
+	$(GO) test $(GOTAGS) $(PKG) -bench BenchmarkPerft7 -benchtime=10s -run '^$$'
 
 vet:
-	$(GO) vet $(PKG) .
+	$(GO) vet $(GOTAGS) $(PKG) .
 
 fmt:
 	$(GO) fmt ./...
@@ -169,10 +212,10 @@ fmt:
 docs-bundle:
 	rm -rf docs-bundle && mkdir -p docs-bundle
 	cp README.md CLAUDE.md docs-bundle/
-	$(GO) doc -all ./engine > docs-bundle/engine-api.txt
-	$(GO) doc -all -u ./engine > docs-bundle/engine-internals.txt
-	$(GO) doc -all ./engine/nnue > docs-bundle/nnue-api.txt
-	$(GO) doc -all -u ./engine/nnue > docs-bundle/nnue-internals.txt
+	$(GO) doc $(GOTAGS) -all ./engine > docs-bundle/engine-api.txt
+	$(GO) doc $(GOTAGS) -all -u ./engine > docs-bundle/engine-internals.txt
+	$(GO) doc $(GOTAGS) -all ./engine/nnue > docs-bundle/nnue-api.txt
+	$(GO) doc $(GOTAGS) -all -u ./engine/nnue > docs-bundle/nnue-internals.txt
 	rm -f $(BINARY)-$(VERSION)-docs.zip
 	cd docs-bundle && zip -rq ../$(BINARY)-$(VERSION)-docs.zip .
 	rm -rf docs-bundle

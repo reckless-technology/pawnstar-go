@@ -91,6 +91,7 @@ func TestPositionMovesReplay(t *testing.T) {
 // TestSetOption covers the multi-word-name setoption parser and each option's effect — none of which was
 // exercised before.
 func TestSetOption(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	game := NewGame()
 
 	game.HandleCommand("setoption name Move Overhead value 50")
@@ -154,6 +155,7 @@ func TestParseSetOption(t *testing.T) {
 // TestFormatScore only pins the *formatting* of. Searching a mate-in-1 deeper must still report mate 1
 // (the shortest mate), not a longer distance.
 func TestMateDistance(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	scoreRe := regexp.MustCompile(`score mate (-?\d+)`)
 	cases := []struct {
 		name, fen, wantMove string
@@ -228,6 +230,7 @@ func TestMovegenAllocationFree(t *testing.T) {
 // how a match once reported a plausible Elo for a net that never played a move. EnableNNUE is the
 // deliberate way back.
 func TestLoadNNUEFileRefusesWithoutFallingBack(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	game := NewGame()
 	if err := game.LoadNNUEFile(filepath.Join(t.TempDir(), "does-not-exist.bin")); err == nil {
 		t.Error("LoadNNUEFile on a missing path: expected an error")

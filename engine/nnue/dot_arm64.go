@@ -16,7 +16,9 @@ package nnue
 func outputDotInt8Asm(stm, ntm *[hiddenSize]int16, w8 []int16) int64
 
 // int8OutputDot is the search's int8 output dot — the hand-written NEON kernel on arm64. (The scalar
-// outputDotInt8 is retained as the bit-identical reference for TestOutputDotInt8Asm.)
-func (n *Network) int8OutputDot(stm, ntm *[hiddenSize]int16) int64 {
-	return outputDotInt8Asm(stm, ntm, n.outputWeightsI8)
+// outputDotInt8 is retained as the bit-identical reference for TestOutputDotInt8Asm.) bucket selects the
+// output head, whose 2*hiddenSize weights are a contiguous run, so the kernel is head-agnostic.
+func (n *Network) int8OutputDot(stm, ntm *[hiddenSize]int16, bucket int) int64 {
+	start := bucket * 2 * hiddenSize
+	return outputDotInt8Asm(stm, ntm, n.outputWeightsI8[start:start+2*hiddenSize])
 }

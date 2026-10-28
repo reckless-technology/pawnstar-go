@@ -151,6 +151,7 @@ func TestPonderRace(t *testing.T) {
 // roughly its budget — the deadline must not fire early, nor let the search overrun by a wide margin.
 // Bounds are deliberately generous (the C++ clock test does the same) so it stays reliable under load.
 func TestFixedTimeDeadlineFires(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	if testing.Short() {
 		t.Skip("timing test skipped under -short")
 	}
