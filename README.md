@@ -256,7 +256,7 @@ On a beta cutoff or alpha raise, `recordGood` credits the move to the history an
 
 ### Transposition table
 
-Single table ([engine/transposition.go](engine/transposition.go)) sized from `hashTableMB`. The entry count is rounded up to the next power of 2 so entries are indexed by `hash & mask` (a bitmask) rather than modulo.
+Single table ([engine/transposition.go](engine/transposition.go)) sized from `hashTableMB` (**64 MB**, the value `uci` advertises as the `Hash` default and the same as the C++ `kHashtableMegabytes` and the Rust `HASHTABLE_MEGABYTES` — table size changes the collision pattern and so the node count at a fixed depth, so the three ports are only bit-exact while their defaults agree). The entry count is rounded up to the next power of 2 so entries are indexed by `hash & mask` (a bitmask) rather than modulo.
 
 **Lockless — Hyatt's XOR trick** (ported from the C++ engine). All of score, depth, node type and age are packed into the move's spare bits (see *Move encoding*), so a cell holds just two 64-bit words:
 
@@ -335,7 +335,7 @@ The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direc
 | `go depth <n>` | Fixed depth |
 | `go infinite` | Search until `stop` |
 | `go nodes <n>` | Search until the node limit (checked per thread) |
-| `go searchmoves <m…>` | Restrict the root search to the given moves |
+| `go searchmoves <m…>` | Restrict the root search to the given moves. The list ends at the next recognised `go` keyword, so `go searchmoves e2e4 depth 10` is a depth-10 search restricted to `e2e4` |
 | `go ... ponder` | Search on the opponent's time; no `bestmove` until `ponderhit`/`stop` |
 | `ponderhit` | Predicted move was played — convert the ponder search to a timed one (budget from now) |
 | `bench` / `bench <depth>` | Node-count benchmark over the 16 C++-reference (Bratko-Kopec) positions at depth `benchDepth`=13 (or an explicit `<depth>`); deterministic, single-threaded, book off, on a pinned 64 MB TT (signature independent of the `Hash` option). Current signature: 6,601,454 nodes (since the depth-weighted history bonus/malus + gravity update; 6,888,983 with the earlier butterfly history), pinned by a golden-signature test |
@@ -344,7 +344,7 @@ The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direc
 | `setoption name OwnBook value <true\|false>` | Consult the opening book (false forces a real search) |
 | `setoption name EvalFile value <path\|<embedded>>` | Load an external RNNUE1 net, or reload the embedded one (a refused net leaves none loaded) |
 | `setoption name Threads value <n>` | Lazy SMP search-thread count |
-| `setoption name Hash value <mb>` | Resize the transposition table |
+| `setoption name Hash value <mb>` | Resize the transposition table (spin, **default 64**, 1–4096 MB) |
 | `setoption name Clear Hash` | Clear the TT and eval cache |
 | `setoption name Move Overhead value <ms>` | Time reserved from every deadline for GUI/network lag |
 | `setoption name Ponder value <true\|false>` | Advertises pondering support (the GUI drives it via `go ponder`/`ponderhit`) |
