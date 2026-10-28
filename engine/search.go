@@ -104,8 +104,13 @@ func (ss *searchState) resetForSearch() {
 	ss.seldepth = 0
 	ss.accStack = ss.accStack[:1]
 	ss.accValid = ss.accValid[:1]
-	game.network.Refresh(&ss.accStack[0], ss.posStack[0].nnueBoard())
-	ss.accValid[0] = true
+	// No net installed means the last EvalFile was refused: searchRootNode declines to search and says
+	// so, so leave the root accumulator invalid rather than dereferencing nil here. Seeding it would be
+	// meaningless anyway — there are no weights to seed it from.
+	if game.network != nil {
+		game.network.Refresh(&ss.accStack[0], ss.posStack[0].nnueBoard())
+		ss.accValid[0] = true
+	}
 }
 
 // currentPosition returns a pointer to the current (deepest) position on the stack.

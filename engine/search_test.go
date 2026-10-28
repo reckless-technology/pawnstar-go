@@ -69,6 +69,7 @@ var bkCases = [24]bkCase{
 }
 
 func TestBratkoKopec(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	failures := 0
 	for i, tc := range bkCases {
 		game := NewGame()

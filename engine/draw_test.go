@@ -78,6 +78,7 @@ func TestDrawByFiftyMoves(t *testing.T) {
 // Then the search: a queen up at clock 99 with no pawn move or capture to play, castling reaches clock 100
 // and must score as the draw, where at clock 0 the same move scores the extra queen.
 func TestDrawByFiftyMovesAcrossCastling(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	game := NewGame()
 	game.newGameFromFen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 98 60")
 	ss := newSearchStateFromGame(game)
@@ -118,6 +119,7 @@ func TestDrawByFiftyMovesAcrossCastling(t *testing.T) {
 // and plays it, where every other move draws. The reverse at the hundredth ply: a check that leaves a legal move
 // (with the f7 pawn gone, Ra8+ leaves the king f7) and a quiet move (Ra2) both still draw.
 func TestMateTakesPrecedenceOverFiftyMoves(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	const mating = "6k1/5ppp/8/8/8/8/8/R5K1 w - - 99 80"
 	game := NewGame()
 	game.newGameFromFen(mating)

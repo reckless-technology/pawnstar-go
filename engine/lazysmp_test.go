@@ -8,6 +8,7 @@ import "testing"
 // of search state (history, killers, continuation history, countermoves, accumulator, diagnostics) is
 // per-thread. The single-threaded tests elsewhere cover determinism; this one covers concurrency.
 func TestLazySMPSmoke(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	fens := []string{
 		startFen,
 		"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", // Kiwipete

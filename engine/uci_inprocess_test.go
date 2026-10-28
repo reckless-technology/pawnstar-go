@@ -119,6 +119,7 @@ func TestUCIPositionEdgeCases(t *testing.T) {
 // ignored rather than crashing the engine. The start position and its first replies are in the opening
 // book, so every search here returns at once with a book move and the test measures only the parsing.
 func TestUCIGoParsing(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	cases := []struct {
 		name, position, goLine string
 		check                  func(t *testing.T, tc *timeControl)
@@ -242,6 +243,7 @@ func TestUCIGoParsing(t *testing.T) {
 // TestUCISearchMovesInProcess: `go searchmoves` restricts the root (skipping the book), and a list with
 // no legal move in it is ignored rather than leaving the engine with nothing to search.
 func TestUCISearchMovesInProcess(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	game := NewGame()
 	out, _ := runUCI(t, game, "position startpos", "go depth 4 searchmoves a2a3 h2h3")
 	if best := bestmoveOf(out); best != "a2a3" && best != "h2h3" {
@@ -260,6 +262,7 @@ func TestUCISearchMovesInProcess(t *testing.T) {
 // when the principal variation has a reply, plain `bestmove <m>` for a book move, and `bestmove 0000`
 // when the side to move has no legal move.
 func TestUCIBestmoveForms(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	game := NewGame()
 	out, _ := runUCI(t, game, "setoption name OwnBook value false", "position startpos", "go depth 5")
 	if !regexp.MustCompile(`(?m)^bestmove [a-h][1-8][a-h][1-8] ponder [a-h][1-8][a-h][1-8]$`).MatchString(out) {
@@ -319,6 +322,7 @@ func TestUCIPonderInProcess(t *testing.T) {
 // search ran on and stopThinking waited in wg.Wait() for ever. Every iteration here hung before the fix, so
 // the loop runs on a goroutine of its own and a hang fails the test rather than wedging the package.
 func TestUCIStopRacesInProcess(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	game := NewGame()
 	runUCI(t, game, "setoption name OwnBook value false", "setoption name Threads value 1")
 	cases := []struct {
@@ -397,6 +401,7 @@ func TestUCIStandardClockSearch(t *testing.T) {
 // TestSearchReportsCurrmove: once a search has run for more than three seconds the root reports each move
 // it is searching (`info ... currmove`). The clock origin is set ten seconds back rather than waiting.
 func TestSearchReportsCurrmove(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	game := NewGame()
 	game.openingBook.clear()
 	game.timeControl.clockType = clockFixedDepth
@@ -411,6 +416,7 @@ func TestSearchReportsCurrmove(t *testing.T) {
 // TestUCISetOptionInProcess covers every option's handling of good, clamped and malformed values, and
 // loading a net from a file and returning to the embedded one.
 func TestUCISetOptionInProcess(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	game := NewGame()
 	embedded := nnue.Embedded()
 
@@ -474,6 +480,7 @@ func TestUCISetOptionInProcess(t *testing.T) {
 // caller's Threads, OwnBook and Hash as they were. PAWNSTAR_BENCH_DEBUG adds each position's best move and
 // the diagnostic counters.
 func TestUCIBenchInProcess(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	game := NewGame()
 	game.HandleCommand("setoption name Threads value 3")
 	game.HandleCommand("setoption name Hash value 1")

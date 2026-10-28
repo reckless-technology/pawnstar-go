@@ -29,6 +29,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"pawnstar-go/engine/nnue"
 )
 
 // The UCI tests drive the built engine binary as a subprocess. Because this test lives in the engine
@@ -52,13 +54,36 @@ func buildEngineBinary() {
 	if runtime.GOOS == "windows" {
 		bin += ".exe" // name the output explicitly so the built path and the exec path agree on Windows
 	}
-	build := exec.Command("go", "build", "-o", bin, "pawnstar-go") // the root main package (this test is in engine/)
+	// The NNUE SHAPE tags this test binary was built with, read off the nnue package's own constants so
+	// the engine binary cannot be built at a different shape from the tests driving it. Without this a
+	// new-shape test run would drive a DEFAULT-shape engine, which loads the shipped net happily and so
+	// passes while testing the wrong thing.
+	args := []string{"build"}
+	if shapeTags := nnueShapeBuildTags(); shapeTags != "" {
+		args = append(args, "-tags", shapeTags)
+	}
+	args = append(args, "-o", bin, "pawnstar-go") // the root main package (this test is in engine/)
+	build := exec.Command("go", args...)
 	build.Env = append(os.Environ(), "GOEXPERIMENT=simd")
 	if out, err := build.CombinedOutput(); err != nil {
 		uciBinErr = fmt.Errorf("go build failed: %v\n%s", err, out)
 		return
 	}
 	uciBinPath = bin
+}
+
+// nnueShapeBuildTags returns the comma-separated build tags that reproduce this test binary's NNUE
+// shape, or "" for the default shape. It mirrors engine/nnue/shape_*.go, and the Makefile's
+// KING_MIRRORING / OUTPUT_BUCKETS knobs set the same tags.
+func nnueShapeBuildTags() string {
+	var tags []string
+	if nnue.KingMirroringEnabled {
+		tags = append(tags, "pawnstar_nnue_king_mirroring")
+	}
+	if nnue.OutputBuckets == 8 {
+		tags = append(tags, "pawnstar_nnue_output_buckets_8")
+	}
+	return strings.Join(tags, ",")
 }
 
 // engineBinary returns the path to the engine binary, building it once (lazily) on first call.
@@ -219,6 +244,7 @@ var (
 // the former test/uci_test.sh check-for-check. The sub-tests run against one shared engine process (the
 // original script used a single coproc for checks 1–6) except bench determinism, which spawns fresh processes.
 func TestUCIProtocol(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	if testing.Short() {
 		t.Skip("UCI subprocess test skipped in -short mode")
 	}
@@ -396,6 +422,7 @@ func TestUCIProtocol(t *testing.T) {
 //	"position fen 8/8"                                  — kingless: kingSquare() == 64 indexes past the tables
 //	"position fen garbage"                              — board parse walked x/y off the board
 func TestUCIMalformedInput(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	if testing.Short() {
 		t.Skip("UCI subprocess test skipped in -short mode")
 	}
@@ -469,6 +496,7 @@ func TestUCIMalformedInput(t *testing.T) {
 // cancel flag as it began, so such a stop was lost: the engine never answered `go infinite` + `stop` and
 // never exited on `go infinite` + `quit` — every attempt hung before the fix.
 func TestUCIStopAndQuitStraightAfterGo(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	if testing.Short() {
 		t.Skip("UCI subprocess test skipped in -short mode")
 	}
@@ -520,6 +548,7 @@ const benchGoldenNodes = "6601454"
 // uninitialised-read class of bug that made node counts wobble) AND must equal the golden bit-parity
 // signature benchGoldenNodes. Each run is a fresh `bench\nquit` piped into a new process.
 func TestUCIBenchDeterminism(t *testing.T) {
+	skipWithoutTheShippedNet(t)
 	if testing.Short() {
 		t.Skip("UCI subprocess test skipped in -short mode")
 	}
