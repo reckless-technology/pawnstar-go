@@ -34,8 +34,15 @@ const (
 	// iterative deepening begins.
 	startDepth = 3
 
-	// hashTableMB is the default transposition table size in megabytes.
-	hashTableMB = 512
+	// hashTableMB is the default transposition table size in megabytes, and the value `uci` advertises as
+	// `option name Hash ... default`. It must stay 64, the same as the C++ kHashtableMegabytes and the Rust
+	// HASHTABLE_MEGABYTES: table size changes the collision pattern and so the node count at a fixed depth,
+	// which makes an unequal default a silent break of the three ports' bit-exactness at every `go`. It was
+	// 512 here between cec14a4 (a TT locking change that moved it as a side effect, not a decision) and
+	// 2026-10-27; `bench` pins benchHashMB = 64 regardless, which is why the one cross-port gate we had
+	// could not see it. 64 MB is also the safer default for match play: the match harness runs up to 14
+	// concurrent games, which at 512 MB an engine would be 14 GB of tables on a 12 GB machine.
+	hashTableMB = 64
 
 	// evalHashTableSize is the number of slots in the evaluation cache. At 8 bytes per lockless entry
 	// this is ~8 MB, the size the C++ engine found optimal (larger regressed slightly).

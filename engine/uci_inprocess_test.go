@@ -9,6 +9,7 @@ package engine
 import (
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,11 @@ func TestUCIHandshakeInProcess(t *testing.T) {
 		"option name OwnBook type check default true\n",
 		"option name EvalFile type string default <embedded>\n",
 		"option name Threads type spin default 1 min 1 max ",
-		"option name Hash type spin default ",
+		// The Hash default is pinned to the exact number, not just the prefix: the C++ and Rust ports
+		// advertise 64 too, and the three are only bit-exact at a fixed depth while their table sizes
+		// agree. `bench` pins 64 in all three, so it cannot see a default that has drifted - this
+		// assertion is the only thing in this repo that can. Changing it means changing all three.
+		"option name Hash type spin default 64 min 1 max 4096\n",
 		"option name Clear Hash type button\n",
 		"option name Move Overhead type spin default 30 min 0 max 5000\n",
 		"option name Ponder type check default false\n",
@@ -255,6 +260,87 @@ func TestUCISearchMovesInProcess(t *testing.T) {
 	best := bestmoveOf(out)
 	if !slices.ContainsFunc(legal, func(m move) bool { return m.String() == best }) {
 		t.Errorf("an all-illegal searchmoves list gave bestmove %q; output:\n%s", best, out)
+	}
+}
+
+// TestUCIGoSearchMovesStopsAtTheNextKeyword: the move list after `searchmoves` ends at the next recognised
+// `go` keyword, which is then honoured - the rule the C++ and Rust parsers already had. Go used to append
+// every remaining token to the move list and jump to the end of the line, so `go searchmoves e2e4 depth 10`
+// set no depth limit at all and the search ran to the engine's own default depth (15) where the other two
+// ports stopped at 10. Nothing caught it: the subprocess suite's SearchMoves case sends exactly that line
+// and asserts only the bestmove, which the bug leaves right.
+func TestUCIGoSearchMovesStopsAtTheNextKeyword(t *testing.T) {
+	skipWithoutTheShippedNet(t)
+	cases := []struct {
+		name, command string
+		wantMoves     []string
+		wantClock     clockType
+		wantDepth     int           // clockFixedDepth only
+		wantNodes     int           // 0 = no node limit
+		wantMovesToGo int           // 0 = none given
+		wantRemaining time.Duration // clockFixedTime only
+	}{
+		{
+			name: "depth after searchmoves", command: "go searchmoves e2e4 depth 10",
+			wantMoves: []string{"e2e4"}, wantClock: clockFixedDepth, wantDepth: 10,
+		},
+		{
+			name: "two moves then nodes", command: "go searchmoves e2e4 b1c3 nodes 2000",
+			wantMoves: []string{"e2e4", "b1c3"}, wantClock: clockInfinite, wantNodes: 2000,
+		},
+		{
+			name: "movetime and movestogo after searchmoves", command: "go searchmoves e2e4 movetime 20 movestogo 7",
+			wantMoves: []string{"e2e4"}, wantClock: clockFixedTime, wantMovesToGo: 7, wantRemaining: 20 * time.Millisecond,
+		},
+		{
+			// `searchmoves` terminates its own list and then starts collecting again, so the two lists join
+			// (the C++ clears search_moves_ once at the top of handle_go and push_backs from there on).
+			name: "a second searchmoves accumulates", command: "go searchmoves e2e4 searchmoves d2d4 movetime 20",
+			wantMoves: []string{"e2e4", "d2d4"}, wantClock: clockFixedTime, wantRemaining: 20 * time.Millisecond,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			game := NewGame()
+			out, _ := runUCI(t, game, "setoption name OwnBook value false", "position startpos", c.command)
+			tc := game.timeControl
+			if !slices.Equal(tc.searchMoves, c.wantMoves) {
+				t.Errorf("searchMoves = %q, want %q", tc.searchMoves, c.wantMoves)
+			}
+			if tc.clockType != c.wantClock {
+				t.Errorf("clockType = %d, want %d (the keyword after the move list was swallowed)", tc.clockType, c.wantClock)
+			}
+			if c.wantClock == clockFixedDepth && tc.depth != c.wantDepth {
+				t.Errorf("depth = %d, want %d", tc.depth, c.wantDepth)
+			}
+			if tc.maxNodes != c.wantNodes {
+				t.Errorf("maxNodes = %d, want %d", tc.maxNodes, c.wantNodes)
+			}
+			if tc.numMovesRemaining != c.wantMovesToGo {
+				t.Errorf("numMovesRemaining = %d, want %d", tc.numMovesRemaining, c.wantMovesToGo)
+			}
+			if c.wantClock == clockFixedTime && tc.timeRemaining != c.wantRemaining {
+				t.Errorf("timeRemaining = %v, want %v", tc.timeRemaining, c.wantRemaining)
+			}
+			if bestmoveOf(out) == "" {
+				t.Errorf("no bestmove for %q; output:\n%s", c.command, out)
+			}
+		})
+	}
+
+	// The depth limit reaching the clock is not quite the whole claim: prove the search actually stops
+	// there, by reading the deepest completed iteration out of the info lines.
+	game := NewGame()
+	out, _ := runUCI(t, game, "setoption name OwnBook value false", "position startpos",
+		"go searchmoves e2e4 depth 10")
+	deepest := 0
+	for _, m := range regexp.MustCompile(`(?m)^info depth (\d+) `).FindAllStringSubmatch(out, -1) {
+		if d, err := strconv.Atoi(m[1]); err == nil && d > deepest {
+			deepest = d
+		}
+	}
+	if deepest != 10 {
+		t.Errorf("go searchmoves e2e4 depth 10 reached depth %d, want 10; output:\n%s", deepest, out)
 	}
 }
 

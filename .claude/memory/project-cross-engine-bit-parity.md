@@ -96,3 +96,42 @@ with zenith and stoopid-chess: `6k1/5ppp/8/8/8/8/8/R5K1 w - - 99 80` (a1a8 mate 
 zenith had the same bug (fixed, zenith #55); stoopid-chess never did (tests added, #12). The same PRs made
 the Windows binaries import system DLLs alone (C++ /MT, Rust +crt-static; Go was already kernel32 only),
 held by tools/windows-dependents.ps1 in CI and the release.
+
+---
+
+**THE DEFAULT `Hash` WAS 512 HERE AND 64 IN THE OTHER TWO, AND IT BROKE PARITY AT EVERY `go`
+(2026-10-27).** Not a search bug - a configuration one, and the whole reason it survived is that the only
+cross-port gate we have cannot see it. `engine/constants.go hashTableMB` was **512** while
+`pawnstar/src/constants.h kHashtableMegabytes` and `pawnstar-rs/src/constants.rs HASHTABLE_MEGABYTES`
+were **64**. Table size changes the collision pattern, which changes the node count at a fixed depth, so
+the three engines answered every UCI `go` with different numbers - Kiwipete at each engine's own default
+gave 234,338 / 423,517 / 708,866 in C++ and Rust against Go's 234,322 / 423,651 / 709,207 at depths
+12/13/14, on the SHIPPED v12 net. Pinned equal they are identical at every depth, in both directions:
+at `Hash 512` C++ and Rust reproduce Go's numbers exactly. **There is no search divergence.**
+
+Go's 512 came in as an incidental side effect of `cec14a4`, a TT *locking* change, not as a decision.
+It is now **64**, which also makes it the safe default for match play (the harness runs up to 14
+concurrent games; 512 MB an engine would be 14 GB of tables on a 12 GB machine, and it only escaped
+notice because the harness pins `--hash 16`).
+
+**Why years of bench parity could not see it, which is the part to remember: `bench` pins
+`benchHashMB` = 64 in all three.** The one gate guarding three-way parity normalised away the only
+variable that differed - *a gate that controls for a difference cannot detect it*. Two rules came out of
+it, and both are now enforced rather than written down: every cross-port node count is reported with the
+`Hash` value printed beside it (`claude-skills/reckless-nnue/scripts/node-count-signature.sh`, where
+`--hash` is mandatory and not defaulted), and the ports' **advertised** defaults are compared directly
+(`claude-skills/reckless-nnue/scripts/hash-default-parity.sh`, which exits 1 when they disagree - it
+printed 64/64/512 and failed on the binaries as they stood). Each port also pins its own advertised line
+in its own suite now: `TestUCIHandshakeInProcess` here, `test_uci_commands` in C++,
+`tests/uci_binary_test.rs` in Rust. Moving `hashTableMB` does **not** move the bench signature -
+6,601,454 held on the SIMD and the scalar path.
+
+**Found alongside it: `go searchmoves` swallowed the rest of the line.** `handleUciGo`'s
+`case "searchmoves"` did `append(tc.searchMoves, args[i+1:]...)` then `i = len(args)`, so
+`go searchmoves e2e4 depth 10` set **no depth limit at all** and the search ran to depth 18 (its own
+stability exit) where the C++ `kCollectMoves` and the Rust `State::CollectMoves` stopped at 10. The move
+list now ends at the next recognised `go` keyword (`goKeywords`/`isGoKeyword`), which is what both other
+ports already did, `searchmoves` included as a terminator so a second one accumulates. Nothing caught
+it: `engine/uci_test.go`'s SearchMoves case sends exactly that line and asserts only the bestmove, which
+the bug leaves right. `TestUCIGoSearchMovesStopsAtTheNextKeyword` now pins the keyword rule and the
+depth actually reached; checked by breaking it (restore the old two lines and it fails naming depth 18).

@@ -179,6 +179,19 @@ func goArgValue(args []string, i int) (int, bool) {
 	return v, err == nil
 }
 
+// goKeywords is every token handleUciGo recognises as a `go` keyword: the flags `infinite`/`ponder`, the
+// value-taking clock and limit keywords, and `searchmoves` itself. It exists so the move list after
+// `searchmoves` knows where to stop, and it must list exactly the cases handleUciGo's switch handles — the
+// C++ handle_go and the Rust handle_go keep the same list for the same reason.
+var goKeywords = map[string]bool{
+	"wtime": true, "btime": true, "winc": true, "binc": true, "movestogo": true,
+	"depth": true, "movetime": true, "infinite": true, "ponder": true, "nodes": true,
+	"searchmoves": true,
+}
+
+// isGoKeyword reports whether token is a recognised `go` keyword rather than, say, a coordinate move.
+func isGoKeyword(token string) bool { return goKeywords[token] }
+
 // handleUciGo handles the "go" command, parsing the clock parameters and starting the search.
 func (game *Game) handleUciGo(args []string) {
 	// Stop any running search before touching the clock it reads: a `go` that arrives while one runs would
@@ -250,10 +263,15 @@ func (game *Game) handleUciGo(args []string) {
 			}
 			i++
 		case "searchmoves":
-			// The rest of the args are UCI moves to restrict the root search to. args[i+1:] is safe for any
-			// i < len(args) (an empty tail yields an empty slice), so no bounds check is needed here.
-			tc.searchMoves = append(tc.searchMoves, args[i+1:]...)
-			i = len(args)
+			// Collect the UCI moves to restrict the root search to, stopping at the next recognised `go`
+			// keyword rather than at the end of the line — the rule the C++ (handle_go's kCollectMoves) and
+			// Rust (State::CollectMoves) parsers share. `searchmoves` is usually last, but a keyword may
+			// follow it, and swallowing the tail left `go searchmoves e2e4 depth 10` with no depth limit at
+			// all: Go searched to depth 15 where the other two stopped at 10.
+			for i+1 < len(args) && !isGoKeyword(args[i+1]) {
+				tc.searchMoves = append(tc.searchMoves, args[i+1])
+				i++
+			}
 		}
 	}
 	game.startThinking()
