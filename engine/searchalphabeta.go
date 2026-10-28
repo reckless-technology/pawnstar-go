@@ -131,7 +131,37 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		// Reverse futility pruning (static null move): at shallow depth, if we are far enough above
 		// beta that even conceding rfpMargin per ply still leaves us at/above beta, assume a quiet
 		// move holds the advantage and cut. Disabled in the mate zone so it cannot mask a forced mate.
-		if depth <= rfpMaxDepth && abs(beta) < winThreshold && evalScore-rfpMargin*depth >= beta {
+		//
+		// The mate bound is written as the C++ `-kCheckmatedScore - kMaxPly` and the Rust
+		// `-CHECKMATED_SCORE - MAX_PLY` are, i.e. 31836, rather than as winThreshold (31000). Those two
+		// tests are equivalent today, but only CONTINGENTLY, and the invariant they rest on is worth
+		// stating because nothing in the test suite guards it:
+		//
+		//   The only scores outside the ±nnueMaxEval (30000) eval clamp are mate scores, and every mate
+		//   score is `checkmatedScore + ply` (the two sites above: the fifty-move-precedence checkmate
+		//   and the move loop's). `ply` cannot exceed maxPly, because a node at ply >= maxPly returns a
+		//   static eval before the move loop. So |mate| lies in [-checkmatedScore - maxPly,
+		//   -checkmatedScore] = [31836, 31900]. A node's beta is either -alpha of its parent (both the
+		//   full window and the null-move window negate and swap) or alpha+1 of its grandparent (PVS
+		//   hands the child (-alpha-1, -alpha), so the grandchild's beta is -(-alpha-1)). The smallest
+		//   |beta| reachable above winThreshold is therefore 31836 exactly - and this test is strict, so
+		//   it excludes that too. The open interval (winThreshold, 31836) over which the two spellings
+		//   disagree holds no value beta can take.
+		//
+		// Measured before the spelling was changed, with the Go RFP site instrumented to classify beta at
+		// every site it reached: 0 sites in that interval across ~146 million sites over twelve runs -
+		// bench, seven mate positions (including KBN-v-K, a position where the side to move is the one
+		// being mated, and the promotion race that drives the search to maxPly) and three deep ordinary
+		// searches. Not a vacuous probe: the true mate zone took 2,889,367 sites in the promotion race
+		// alone, 2,630,029 of which would have pruned had the guard allowed it, and the closest |beta|
+		// ever came to the bound was 31,846. Bench held at 6,601,454 on both the SIMD and the scalar
+		// path, and node counts stayed identical to the C++ and Rust ports.
+		//
+		// So: RAISE maxPly, or change the mate-score encoding, and winThreshold silently stops meaning
+		// the same thing as this bound - a divergence from the other two ports that would appear only in
+		// positions a bench never reaches, and so one the bit-exactness gate could not see. Keeping the
+		// three ports spelled alike is what makes that invariant not load-bearing.
+		if depth <= rfpMaxDepth && abs(beta) < -checkmatedScore-maxPly && evalScore-rfpMargin*depth >= beta {
 			ss.dbg.reverseFutilityPrunes++
 			return evalScore
 		}
