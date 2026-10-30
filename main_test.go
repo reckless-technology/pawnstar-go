@@ -12,9 +12,15 @@ import (
 	"testing"
 )
 
-// runMain runs main with input as its stdin and returns what it printed.
-func runMain(t *testing.T, input string) string {
+// runMain runs main with input as its stdin and returns what it printed. args, if given, replace the
+// command line for the call - main otherwise sees the test binary's own arguments, which it ignores.
+func runMain(t *testing.T, input string, args ...string) string {
 	t.Helper()
+	if args != nil {
+		old := os.Args
+		os.Args = append([]string{"pawnstar-go"}, args...)
+		defer func() { os.Args = old }()
+	}
 	in := filepath.Join(t.TempDir(), "stdin.txt")
 	if err := os.WriteFile(in, []byte(input), 0o644); err != nil {
 		t.Fatalf("write stdin: %v", err)
@@ -64,5 +70,40 @@ func TestMainEndsAtEndOfInput(t *testing.T) {
 	out := runMain(t, "isready\n")
 	if !strings.HasSuffix(out, "readyok\n") {
 		t.Errorf("want readyok last; output:\n%s", out)
+	}
+}
+
+// TestMainLicenceFlag: --license prints the training-data notice and nothing else - no banner, no engine
+// constructed, and stdin untouched - under each spelling the flag accepts. The notice is an obligation of
+// distributing the embedded network, so the text is asserted, not just its presence.
+func TestMainLicenceFlag(t *testing.T) {
+	for _, flag := range []string{"--license", "-license", "--licence", "-licence"} {
+		out := runMain(t, "isready\n", flag)
+		if strings.Contains(out, "Pawnstar (Go)") || strings.Contains(out, "readyok") {
+			t.Errorf("%s ran the UCI loop; output:\n%s", flag, out)
+		}
+		for _, want := range []string{
+			"Open Database License 1.0",
+			"https://storage.lczero.org/files/training_data/",
+			"run test91",
+			"run test60",
+			"http://opendatacommons.org/licenses/odbl/1.0/",
+			"Database Contents License 1.0",
+			"THIRD-PARTY-NOTICES.md",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s did not print %q; output:\n%s", flag, want, out)
+			}
+		}
+	}
+}
+
+// TestMainIgnoresOtherArguments: the engine takes its configuration from UCI and the environment, so an
+// unrecognised argument is ignored rather than refused - which is also why the in-process tests above can
+// call main with the test binary's own command line.
+func TestMainIgnoresOtherArguments(t *testing.T) {
+	out := runMain(t, "isready\nquit\n", "--not-a-flag", "license")
+	if !strings.HasPrefix(out, "Pawnstar (Go)") || !strings.Contains(out, "readyok") {
+		t.Errorf("unrecognised arguments did not leave the UCI loop alone; output:\n%s", out)
 	}
 }

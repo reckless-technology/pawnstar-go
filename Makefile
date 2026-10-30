@@ -239,7 +239,7 @@ fmt:
 # internal function and type).
 docs-bundle:
 	rm -rf docs-bundle && mkdir -p docs-bundle
-	cp README.md CLAUDE.md docs-bundle/
+	cp README.md CLAUDE.md THIRD-PARTY-NOTICES.md docs-bundle/
 	$(GO) doc $(GOTAGS) -all ./engine > docs-bundle/engine-api.txt
 	$(GO) doc $(GOTAGS) -all -u ./engine > docs-bundle/engine-internals.txt
 	$(GO) doc $(GOTAGS) -all ./engine/nnue > docs-bundle/nnue-api.txt
