@@ -33,18 +33,40 @@ func TestSearch(t *testing.T) {
 
 type bkCase struct {
 	fen      string
-	accepted []string // acceptable best moves; the search runs the parallel NNUE evaluator, which picks
-	// among near-equal moves nondeterministically, so this is the union observed over many runs.
+	accepted []string // acceptable best moves: the union over the depths TestBratkoKopec runs (7 under
+	// -short, 8 otherwise). The search here is single-threaded and therefore deterministic, so this is a
+	// union over DEPTHS and not over repeated runs - two runs at one depth give the same move every time
+	// (TestGenerateBratkoKopecNNUE asserts that by taking two of each).
 }
 
 // bkCases are the 24 Bratko-Kopec positions with accepted best moves from the NNUE evaluator. The
 // search is single-threaded and therefore deterministic (see TestGenerateBratkoKopecNNUE). Where two
-// moves are listed they are the depth-7 (short) and depth-8 (full) choices. Regenerate with GEN_BK=1
-// after swapping the embedded net - these belong to pawnstar-v20.bin, the net of release 2.0.0, and
-// were regenerated for it; the set is the search's choices and not a tablebase, so a move changing
-// here is the new evaluation choosing differently rather than a regression on its own.
+// moves are listed they are the depth-7 (short) and depth-8 (full) choices - this port's set is the
+// union over depths **7 and 8** because TestBratkoKopec drops to depth 7 under -short, where the C++
+// and Rust ports record the union over depths 8-11. Regenerate with GEN_BK=1 after swapping the
+// embedded net - these belong to pawnstar-v20.bin, the net of release 2.0.0, and were regenerated for
+// it; the set is the search's choices and not a tablebase, so a move changing here is the new
+// evaluation choosing differently rather than a regression on its own.
+//
+// Two positions moved off the classical Bratko-Kopec answer with v20, and they are named here so that
+// a future re-blessing cannot silently absorb them:
+//
+//   - pos02 plays f2f3 at depth 8 and reaches the classical d4d5 only from depth 9 (measured at
+//     depths 9, 10 and 11), so d4d5 is outside this port's recorded 7-8 union by construction.
+//   - pos24 plays g2g3 at depths 8-10 and e4f5 at depth 11, and does NOT find the classical f2f4 at
+//     any of depths 8-11.
+//
+// v12 found both at depth 8. Bratko-Kopec is 24 positions and is not a strength measurement - v20
+// measured +9.99 Elo at 8+0.08 (8,000 games) and +1.13 at 12+0.12 (12,000 games) against v12 - so
+// this is a recorded difference, not a regression to chase.
+//
+// Verified across the three ports on 2026-10-30 (the Legion, Windows): each port's own binary, Hash
+// pinned to 64 MB, single-threaded, book off, over all 24 positions at depths 7, 8, 9, 10 and 11 -
+// identical best move AND identical node count in all 120 position/depth pairs in C++, Rust and Go.
+// So the two moved positions moved in all three, as bit-exactness requires, and pos03 f7g5 and pos20
+// e2h5 below are confirmed to be the depth-7 choices rather than leftovers.
 var bkCases = [24]bkCase{
-	{"1k1r4/pp1b1R02/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - -", []string{"d6d1"}},                      // pos01 freq=map[d6d1:4]
+	{"1k1r4/pp1b1R2/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - -", []string{"d6d1"}},                       // pos01 freq=map[d6d1:4]
 	{"3r1k2/4npp1/1ppr3p/p6P/P2PPPP1/1NR5/5K2/2R5 w - -", []string{"f2f3"}},                      // pos02 freq=map[f2f3:4]
 	{"2q1rr1k/3bbnnp/p2p1pp1/2pPp3/PpP1P1P1/1P2BNNP/2BQ1PRK/7R b - -", []string{"f7g5", "f8g8"}}, // pos03 freq=map[f7g5:2 f8g8:2]
 	{"rnbqkb1r/p3pppp/1p6/2ppP3/3N4/2P5/PPP1QPPP/R1B1KB1R w KQkq -", []string{"e5e6"}},           // pos04 freq=map[e5e6:4]

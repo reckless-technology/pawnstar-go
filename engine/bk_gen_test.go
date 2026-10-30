@@ -12,8 +12,9 @@ import (
 // evaluator. It is skipped unless GEN_BK is set. For each position it replays the exact test setup
 // (fresh NewGame + NNUE, cold TT, opening book cleared) several times at both the -short depth (7) and
 // the full depth (8), then prints, per position, the distinct best moves seen ordered by frequency.
-// The parallel search is timing-nondeterministic, so the union across runs is baked into bkCases (up
-// to 3 moves). Rerun after swapping the embedded net:
+// The search is single-threaded and deterministic, so what goes into bkCases is the union across the
+// two DEPTHS, not across runs; the second run of each is there only to confirm that. Rerun after
+// swapping the embedded net:
 //
 //	GOEXPERIMENT=simd GEN_BK=1 go test ./engine/ -run TestGenerateBratkoKopecNNUE -v 2>/dev/null | grep BKGEN
 func TestGenerateBratkoKopecNNUE(t *testing.T) {
