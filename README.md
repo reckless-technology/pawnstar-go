@@ -28,8 +28,10 @@ source. That notice, in full and with both run lines verbatim, is
 obligation is the *notice*, and ODbL does not require the network itself to be ODbL-licensed; and the
 engine's GPLv3 licence does not make the network GPLv3 merely because GPLv3 code trained it.
 
-Because the net is embedded in the binary, the notice travels with the executable too:
-`pawnstar-go --license` prints it, and every release's documentation bundle contains the file.
+Because the net is embedded in the binary, the notice travels with the executable too: the **`license`
+UCI command** prints a condensed form of it, as does `pawnstar-go --license` on the command line, and
+every release's documentation bundle contains the file. That matters because no release publishes a
+source tarball - someone who downloads only the binary gets no file from this repository at all.
 
 ### Provenance of earlier networks
 
@@ -397,6 +399,7 @@ networks**, which were trained on PlentyChess self-play data, are at the top of 
 |---|---|
 | `uci` | Prints engine id and `uciok` |
 | `isready` | Prints `readyok` |
+| `license` | Prints the engine's licence and the third-party notices the shipped data obliges - the condensed form of [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), in wording shared with the C++, Rust and zenith engines. Printing only: it reads and writes no engine state |
 | `ucinewgame` | Stops search, resets position and clock. Does **not** clear the TT/eval cache (use `Clear Hash` for that) — so repeating a position in one session reuses the TT and node counts shrink |
 | `position startpos [moves ...]` | Sets position from start FEN, applies move list |
 | `position fen <fen> [moves ...]` | Sets position from FEN, applies move list |
@@ -435,4 +438,8 @@ redistribute and/or modify it under the terms of that license; it comes with **n
 
 The NNUE network ([engine/nnue/pawnstar-v20.bin](engine/nnue/pawnstar-v20.bin)) is the one
 [Pawnstar](https://github.com/reckless-technology/pawnstar) ships, under the same license — the same
-blob byte for byte in `pawnstar`, `pawnstar-rs` and `pawnstar-go`.
+blob byte for byte in `pawnstar`, `pawnstar-rs` and `pawnstar-go`. It was trained on data that is not
+ours, which obliges a notice: **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** carries it, the
+`license` UCI command and `pawnstar-go --license` print it, and every release's documentation bundle
+ships it. This module has no third-party code dependencies, so that notice and the opening book's
+provenance are the whole of what it owes.

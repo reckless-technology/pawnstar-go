@@ -35,6 +35,9 @@ func (game *Game) HandleCommand(line string) bool {
 		fmt.Println("uciok")
 	case "isready":
 		fmt.Println("readyok")
+	case "license":
+		// Printing only - no engine state is read or written. See engine/licence.go.
+		handleUciLicense()
 	case "setoption":
 		game.handleUciSetOption(fields[1:])
 	case "ucinewgame":
