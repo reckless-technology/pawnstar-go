@@ -5,9 +5,18 @@ Pawnstar-Go is free software under the **GNU General Public License, version 3**
 That licence covers the engine's own code. This file records the third-party material distributed with
 it, and the notices that material obliges.
 
-The module has **no third-party code dependencies at all** — [go.mod](go.mod) declares none, there is
-no `go.sum` and nothing is vendored — so everything below is about **data** shipped in this repository
-and in its release binaries.
+The module has **no third-party code dependencies at all**: [go.mod](go.mod) declares none, there is no
+`go.sum`, nothing is vendored, `go mod graph` names only this module and the Go toolchain, and
+`go list -deps ./...` resolves to this module's own three packages plus the standard library. So
+everything below is about **data** shipped in this repository and in its release binaries.
+
+**Why this file differs from the C++ engine's.** `pawnstar`'s notices carry bullet's MIT licence,
+because that repository redistributes two trainer files adapted from bullet's own example. Neither file
+is here - this port carries no trainer at all, and `tools/` holds only shell and PowerShell scripts.
+Where the Go source names bullet, it is a comment describing arithmetic this code must match (the
+output-head divisor, the king-bucket map expansion, the payload save order), not bullet's code. So no
+MIT notice is owed here, and one must not be copied in from the C++ repository to make the two files
+look alike.
 
 ## The evaluation network's training data
 
