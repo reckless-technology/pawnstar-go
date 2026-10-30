@@ -53,16 +53,28 @@ func TestNnueBoardLayout(t *testing.T) {
 	}
 }
 
-// TestNNUEReference cross-checks the scalar int16 EvaluateExact forward pass against the trainer's
-// reference evaluations (engine/testdata/nnue_reference.txt, one "<fen> | <expected_cp>" per line,
-// produced by bullet). Agreement within a couple of centipawns confirms the feature indexing,
-// king-bucket orientation, SCReLU activation, dequantisation and net file format all match. This is
-// the correctness oracle for the whole NNUE port — the SIMD kernels must reproduce it bit-for-bit.
+// TestNNUEReference cross-checks the scalar int16 EvaluateExact forward pass against an independent
+// oracle's evaluations (engine/testdata/nnue_reference.txt, one "<fen> | <expected_cp>" per line).
+// Agreement within a couple of centipawns confirms the feature indexing, king-bucket orientation and
+// mirroring, the material output head, the SCReLU activation, dequantisation and the net file format
+// all match. This is the correctness oracle for the whole NNUE port — the SIMD kernels must reproduce
+// it bit-for-bit.
+//
+// Provenance of the expected values. For the v12 net they were bullet's own, and the tolerance of 2
+// below is the float-vs-integer rounding that allowed for (the C++ suite's bound). Release 2.0.0
+// shipped pawnstar-v20.bin, for which there is no trainer-side file, so they were recomputed for the
+// same 250 positions by a reader and forward pass written in Python from the reckless-nnue
+// specification rather than from this package - an independent implementation, not a recording of
+// this one. That reader was validated first by reproducing all 250 of bullet's v12 values to 0 cp,
+// which is the check the specification requires of any new implementation of the metric; it then
+// agrees with this package on the new net to 0 cp as well. The tolerance stays at 2 rather than
+// being tightened to 0: it is the C++ bound, and a trainer-produced file would carry the rounding
+// again.
 func TestNNUEReference(t *testing.T) {
 	skipWithoutTheShippedNet(t)
 	const tolerance = 2 // integer-quantisation rounding vs bullet; mirrors the C++ test_nnue bound
 
-	net, err := nnue.LoadFile("nnue/pawnstar-v12.bin")
+	net, err := nnue.LoadFile("nnue/pawnstar-v20.bin")
 	if err != nil {
 		t.Fatalf("load net: %v", err)
 	}
@@ -119,7 +131,7 @@ func TestNNUEInt8(t *testing.T) {
 	skipWithoutTheShippedNet(t)
 	const int8Bound = 40 // matches C++ kInt8Bound; the measured max is far smaller
 
-	net, err := nnue.LoadFile("nnue/pawnstar-v12.bin")
+	net, err := nnue.LoadFile("nnue/pawnstar-v20.bin")
 	if err != nil {
 		t.Fatalf("load net: %v", err)
 	}

@@ -3,7 +3,7 @@ package engine
 // The NNUE shape gates: the accumulator's incremental update across every boundary a king move can
 // cross, at whatever shape this build was compiled for.
 //
-// Horizontal king mirroring adds a boundary that did not exist in v12's shape and that is SILENT when
+// Horizontal king mirroring adds a boundary that v12's shape did not have and that is SILENT when
 // handled wrongly. On the mirrored map a king stepping d1 -> e1 keeps bucket 3 — files 3 and 4 both
 // mirror to file 3 — while every feature row that perspective reads moves, because the perspective
 // has gained the file flip. Code that decided whether to refresh by comparing bucket indices, which
@@ -25,24 +25,30 @@ import (
 	"pawnstar-go/engine/nnue"
 )
 
-// isShippedNetShape reports whether this build is the shape the shipped v12 net was trained for.
-// A build at another shape rightly refuses that net, so a gate that is about the shipped net
-// specifically — the trainer-reference evaluations, the Bratko-Kopec move set, the golden bench
-// signature — has nothing to run against and says so rather than failing.
-const isShippedNetShape = nnue.FormatVersion == 1 && nnue.OutputBuckets == 1
+// isShippedNetShape reports whether this build is the shape the shipped net was trained for — the
+// shared architecture, mirrored with eight output heads, which is this tree's DEFAULT. A build at
+// v12's older shape (the `..._king_mirroring_off` / `..._output_buckets_1` tags) rightly refuses that
+// net, so a gate that is about the shipped net specifically — the reference evaluations, the
+// Bratko-Kopec move set, the golden bench signature — has nothing to run against and says so rather
+// than failing.
+//
+// It compares the architecture FIELDS and not the net's checksums on purpose: a probe that asked
+// whether the embedded net loads would make a corrupt net of this very shape skip quietly where it
+// must fail loudly.
+const isShippedNetShape = nnue.FormatVersion == 2 && nnue.OutputBuckets == 8
 
-// skipWithoutTheShippedNet skips a test whose expected values belong to the shipped v12 net.
+// skipWithoutTheShippedNet skips a test whose expected values belong to the shipped net.
 func skipWithoutTheShippedNet(t *testing.T) {
 	t.Helper()
 	if !isShippedNetShape {
-		t.Skipf("this build is format_version %d with %d output head(s), so it refuses the shipped v12 net; "+
+		t.Skipf("this build is format_version %d with %d output head(s), so it refuses the shipped net; "+
 			"this gate's expected values are that net's. The shape's own gates are TestNNUEBoundaryCrossings "+
 			"and the fixed-depth synthetic-net node counts.", nnue.FormatVersion, nnue.OutputBuckets)
 	}
 }
 
-// shapeTestNet returns a net at THIS build's shape: the embedded v12 net where that is this shape,
-// and otherwise the synthetic net, which is built from a fixed seed through fixed integer arithmetic
+// shapeTestNet returns a net at THIS build's shape: the embedded net where that is this shape, and
+// otherwise the synthetic net, which is built from a fixed seed through fixed integer arithmetic
 // and is byte-identical in the C++, Rust and Go ports. Weight quality is irrelevant to what the
 // boundary gates check — that an incrementally-updated accumulator equals a from-scratch rebuild
 // holds for any weights at all — and without it these gates would be skipped exactly at the shape

@@ -518,12 +518,12 @@ func TestUCISetOptionInProcess(t *testing.T) {
 	game := NewGame()
 	embedded := nnue.Embedded()
 
-	out, _ := runUCI(t, game, "setoption name EvalFile value nnue/pawnstar-v12.bin")
-	if !strings.Contains(out, "info string NNUE net loaded from nnue/pawnstar-v12.bin") || game.network == embedded {
+	out, _ := runUCI(t, game, "setoption name EvalFile value nnue/pawnstar-v20.bin")
+	if !strings.Contains(out, "info string NNUE net loaded from nnue/pawnstar-v20.bin") || game.network == embedded {
 		t.Errorf("loading the net from its file: output %q, still embedded %v", out, game.network == embedded)
 	}
 	for _, value := range []string{" value <embedded>", " value default", " value DEFAULT", ""} {
-		runUCI(t, game, "setoption name EvalFile value nnue/pawnstar-v12.bin")
+		runUCI(t, game, "setoption name EvalFile value nnue/pawnstar-v20.bin")
 		if out, _ := runUCI(t, game, "setoption name EvalFile"+value); out != "" || game.network != embedded {
 			t.Errorf("EvalFile%q: output %q, embedded restored %v", value, out, game.network == embedded)
 		}

@@ -37,9 +37,28 @@ func crc64XZ(data []byte) uint64 { return crc64.Checksum(data, crcTable) } // co
 `TestCrc64XZCheckValue` asserts the check value and names the wrong number, so nobody has to work out
 why their CRC disagrees with the C++ and Rust ports again.
 
-## Fixed numbers for the shipped v12 net
+## Fixed numbers for the nets
 
 The three ports must stamp byte-identical files, so these are the cross-port comparison values.
+
+**The shipped net since release 2.0.0 is `pawnstar-v20.bin`** at the mirrored eight-head shape, and
+`pawnstar-v12.bin` has been deleted from the tree (history untouched). v20's values:
+
+| | |
+|---|---|
+| `format_version` / `flags` / `output_buckets` | 2 / 1 / 8 |
+| `king_bucket_map_crc` | `0x0A20060D4E9586E0` — the mirrored `min(file, 7 - file)` map |
+| `payload_bytes` | `12617760` = 12,582,912 + 2,048 + 32,768 + **32** |
+| `payload_crc` | `0x62C460241DDC3EF7` |
+| `header_crc` | `0x5A2DFC8FA67F2B2C` |
+| file size | `12617824` (64 + payload) |
+| SHA-256 | `c8a29b328849cd1ea60c65f5d3dea84f585f404037ec026c44a94e1174b1cc34` |
+
+Independently decoded from the raw bytes by a Python reader written from the `reckless-nnue`
+specification, which also reproduced the v12 values below, so the two sets are on one footing.
+
+The retired **v12** net's values, kept because another port or an old file may still be compared
+against them:
 
 | | |
 |---|---|

@@ -154,8 +154,9 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		// being mated, and the promotion race that drives the search to maxPly) and three deep ordinary
 		// searches. Not a vacuous probe: the true mate zone took 2,889,367 sites in the promotion race
 		// alone, 2,630,029 of which would have pruned had the guard allowed it, and the closest |beta|
-		// ever came to the bound was 31,846. Bench held at 6,601,454 on both the SIMD and the scalar
-		// path, and node counts stayed identical to the C++ and Rust ports.
+		// ever came to the bound was 31,846. Bench held at 6,601,454 - the v12 net's signature, which
+		// release 2.0.0 later moved to 5,617,906 - on both the SIMD and the scalar path, and node counts
+		// stayed identical to the C++ and Rust ports.
 		//
 		// So: RAISE maxPly, or change the mate-score encoding, and winThreshold silently stops meaning
 		// the same thing as this bound - a divergence from the other two ports that would appear only in

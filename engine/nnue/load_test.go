@@ -46,9 +46,16 @@ func TestCrc64XZCheckValue(t *testing.T) {
 // this one was written. A port whose numbers differ has a bug and must compare field by field rather
 // than adjust its map.
 func TestShapeReferenceValues(t *testing.T) {
-	wantVersion, wantPayload, wantMapCRC := 1, 12589060, uint64(0xCC6DDB5DAF0AB18D)
+	// format_version and the map's CRC follow the MIRRORING knob; the payload size follows the HEAD
+	// count. Keyed separately on purpose: the two knobs are independent, and a single `if` on one of
+	// them would assert the wrong payload size for a build that moved only the other.
+	wantVersion, wantMapCRC := 1, uint64(0xCC6DDB5DAF0AB18D)
 	if KingMirroringEnabled {
-		wantVersion, wantPayload, wantMapCRC = 2, 12617760, 0x0A20060D4E9586E0
+		wantVersion, wantMapCRC = 2, 0x0A20060D4E9586E0
+	}
+	wantPayload := 12589060
+	if OutputBuckets == 8 {
+		wantPayload = 12617760
 	}
 	if FormatVersion != wantVersion {
 		t.Errorf("FormatVersion = %d, want %d — version 2 means mirroring on WITH eight output heads, and "+
@@ -136,12 +143,12 @@ func TestOutputBucketSelection(t *testing.T) {
 }
 
 // acceptedNet returns a net image THIS build accepts, so that the loader's refusals can be provoked
-// by mutating a sound file at either shape. At v12's shape that is the shipped net; at the shared
-// architecture nothing has been trained yet, so it is the synthetic net (synthetic.go), which carries
-// this build's own header and is accepted exactly as a trained net would be.
+// by mutating a sound file at either shape. At the shipped shape that is the shipped net; at v12's
+// older shape this tree holds no trained net, so it is the synthetic net (synthetic.go), which
+// carries this build's own header and is accepted exactly as a trained net would be.
 func acceptedNet(t *testing.T) []byte {
 	t.Helper()
-	if !KingMirroringEnabled && OutputBuckets == 1 {
+	if KingMirroringEnabled && OutputBuckets == 8 {
 		return embeddedNet
 	}
 	image, err := SyntheticNetImage()
@@ -156,22 +163,24 @@ func acceptedNet(t *testing.T) []byte {
 // header the stamper writes — and proves the committed net carries this build's architecture, CRCs and
 // king bucket map rather than merely passing the checks by luck.
 func TestStampReproducesEmbeddedNet(t *testing.T) {
-	if KingMirroringEnabled || OutputBuckets != 1 {
-		t.Skipf("the shipped net is format_version 1 with one output head; this build is format_version %d "+
-			"with %d, so it rightly refuses it — TestSyntheticNetAtThisShape is the stamper's gate here",
+	if !KingMirroringEnabled || OutputBuckets != 8 {
+		t.Skipf("the shipped net is format_version 2 with eight output heads; this build is format_version "+
+			"%d with %d, so it rightly refuses it — TestSyntheticNetAtThisShape is the stamper's gate here",
 			FormatVersion, OutputBuckets)
 	}
-	// The shipped net's own fixed numbers, pinned as literals so the cross-port comparison values stay
-	// written down here rather than only derived from whatever file happens to be committed.
+	// The shipped net's own fixed numbers (pawnstar-v20.bin, release 2.0.0), pinned as literals so the
+	// cross-port comparison values stay written down here rather than only derived from whatever file
+	// happens to be committed. Independently reproduced from the raw bytes by a reader written from the
+	// reckless-nnue specification, not from this package.
 	const (
-		v12HeaderCrc  = 0x19EE0DC79A04735D
-		v12PayloadCrc = 0x8A91EC366E6B450B
+		shippedHeaderCrc  = 0x5A2DFC8FA67F2B2C
+		shippedPayloadCrc = 0x62C460241DDC3EF7
 	)
-	if got := binary.LittleEndian.Uint64(embeddedNet[offsetHeaderCrc:]); got != v12HeaderCrc {
-		t.Errorf("the shipped net's header_crc is %#016x, want %#016x", got, uint64(v12HeaderCrc))
+	if got := binary.LittleEndian.Uint64(embeddedNet[offsetHeaderCrc:]); got != shippedHeaderCrc {
+		t.Errorf("the shipped net's header_crc is %#016x, want %#016x", got, uint64(shippedHeaderCrc))
 	}
-	if got := binary.LittleEndian.Uint64(embeddedNet[offsetPayloadCrc:]); got != v12PayloadCrc {
-		t.Errorf("the shipped net's payload_crc is %#016x, want %#016x", got, uint64(v12PayloadCrc))
+	if got := binary.LittleEndian.Uint64(embeddedNet[offsetPayloadCrc:]); got != shippedPayloadCrc {
+		t.Errorf("the shipped net's payload_crc is %#016x, want %#016x", got, uint64(shippedPayloadCrc))
 	}
 	if len(embeddedNet) != headerBytes+payloadBytes {
 		t.Fatalf("the embedded net is %d bytes, want %d (a %d-byte header and a %d-byte payload)",
@@ -385,7 +394,8 @@ func TestLoadFile(t *testing.T) {
 
 // TestSyntheticNetAtThisShape is the stamper's and the loader's gate at a shape with no trained net:
 // the synthetic net is exactly payloadBytes of weights in this build's own container, and this build
-// loads it back. It is also the inverse-proof TestStampReproducesEmbeddedNet gives at v12's shape —
+// loads it back. It is also the inverse-proof TestStampReproducesEmbeddedNet gives at the shipped
+// shape —
 // SyntheticNetPayload writes the payload independently of the code that reads it, so the two agree
 // about the layout or this fails.
 //
