@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"pawnstar-go/engine"
 	"strings"
 	"testing"
 )
@@ -73,27 +74,19 @@ func TestMainEndsAtEndOfInput(t *testing.T) {
 	}
 }
 
-// TestMainLicenceFlag: --license prints the training-data notice and nothing else - no banner, no engine
-// constructed, and stdin untouched - under each spelling the flag accepts. The notice is an obligation of
-// distributing the embedded network, so the text is asserted, not just its presence.
+// TestMainLicenceFlag: --license prints the licence notice and nothing else - no banner, no engine
+// constructed, stdin untouched - under each spelling the flag accepts, and prints exactly the text the
+// `license` UCI command prints, since the two must never drift. engine.LicenceNotice is the one copy;
+// the engine package's own test is what holds that text to THIRD-PARTY-NOTICES.md.
 func TestMainLicenceFlag(t *testing.T) {
+	want := strings.Join(engine.LicenceNotice(), "\n") + "\n"
 	for _, flag := range []string{"--license", "-license", "--licence", "-licence"} {
 		out := runMain(t, "isready\n", flag)
-		if strings.Contains(out, "Pawnstar (Go)") || strings.Contains(out, "readyok") {
-			t.Errorf("%s ran the UCI loop; output:\n%s", flag, out)
+		if out != want {
+			t.Errorf("%s did not print the licence notice alone; output:\n%s", flag, out)
 		}
-		for _, want := range []string{
-			"Open Database License 1.0",
-			"https://storage.lczero.org/files/training_data/",
-			"run test91",
-			"run test60",
-			"http://opendatacommons.org/licenses/odbl/1.0/",
-			"Database Contents License 1.0",
-			"THIRD-PARTY-NOTICES.md",
-		} {
-			if !strings.Contains(out, want) {
-				t.Errorf("%s did not print %q; output:\n%s", flag, want, out)
-			}
+		if strings.Contains(out, "UCI compatible chess engine") || strings.Contains(out, "readyok") {
+			t.Errorf("%s ran the UCI loop; output:\n%s", flag, out)
 		}
 	}
 }
