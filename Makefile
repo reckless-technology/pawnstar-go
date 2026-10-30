@@ -22,37 +22,44 @@ export GOEXPERIMENT := simd
 # scalar-fallback path, no GOEXPERIMENT) does not set it and still runs anywhere.
 export GOAMD64 := v3
 
-# The NNUE network SHAPE. Two knobs, so either shape can be built from this one tree while the three
-# bit-exact ports (C++, Rust, Go) are brought across together. The defaults are v12's shape, the one the
-# shipped net was trained for; the shared architecture is KING_MIRRORING=1 with OUTPUT_BUCKETS=8:
+# The NNUE network SHAPE. Two knobs, so either shape builds from this one tree. The DEFAULTS are the
+# shared architecture every reckless-technology chess engine is unified on - horizontal king mirroring
+# with eight material output heads - which is what the shipped net (engine/nnue/pawnstar-v20.bin,
+# release 2.0.0) was trained for. v12's older shape is still buildable, on purpose:
 #
-#   make check KING_MIRRORING=1 OUTPUT_BUCKETS=8
+#   make check KING_MIRRORING=0 OUTPUT_BUCKETS=1      # v12's shape: unmirrored, one output head
 #
-# Both are stamped into every net's header (`flags` bit 0, `output_buckets`, and the bucket map's CRC-64)
-# and the loader checks all three, so a net can only load into a build of its own shape - a new-shape
-# build REFUSES the shipped pawnstar-v12.bin, which is the container working and not a fault. A shape
-# change is also an evaluation change, so it moves the bench signature and breaks bit-exactness with the
-# C++ and Rust ports until all three land together: do not flip these defaults for one engine alone.
+# Both knobs are stamped into every net's header (`flags` bit 0, `output_buckets`, and the bucket map's
+# CRC-64) and the loader checks all three, so a net can only load into a build of its own shape - a
+# KING_MIRRORING=0 build REFUSES the shipped net, naming format_version, which is the container working
+# and not a fault. There is no net in this tree at v12's shape (pawnstar-v12.bin was removed in 2.0.0),
+# so a build there runs its gates against the synthetic net instead.
+#
+# A shape change is also an evaluation change, so it moves the bench signature and breaks bit-exactness
+# with the C++ and Rust ports until all three land together: do not flip these defaults for one engine
+# alone. They were flipped for 2.0.0 in all three at once.
 #
 # Go has no preprocessor, so the knobs are BUILD TAGS (engine/nnue/shape_*.go) rather than -D defines,
 # and they have to reach every `go build`, `go test` and `go vet` here - which is why GOTAGS is threaded
-# through every one of them below. `go test` also builds the engine BINARY for the UCI subprocess tests;
-# that build reads the shape off the nnue package's own constants, so it cannot drift from the tests
-# driving it (engine/uci_test.go, buildEngineBinary).
+# through every one of them below. The tags name the NON-default shape (`..._king_mirroring_off`,
+# `..._output_buckets_1`), so a build with no tags at all - a plain `go build` - is the shipped shape.
+# `go test` also builds the engine BINARY for the UCI subprocess tests; that build reads the shape off
+# the nnue package's own constants, so it cannot drift from the tests driving it (engine/uci_test.go,
+# buildEngineBinary).
 NNUE_TAGS :=
 
-ifeq ($(KING_MIRRORING),1)
-  NNUE_TAGS += pawnstar_nnue_king_mirroring
+ifeq ($(KING_MIRRORING),0)
+  NNUE_TAGS += pawnstar_nnue_king_mirroring_off
 else ifneq ($(KING_MIRRORING),)
-  ifneq ($(KING_MIRRORING),0)
+  ifneq ($(KING_MIRRORING),1)
     $(error KING_MIRRORING must be 0 or 1, not "$(KING_MIRRORING)")
   endif
 endif
 
-ifeq ($(OUTPUT_BUCKETS),8)
-  NNUE_TAGS += pawnstar_nnue_output_buckets_8
+ifeq ($(OUTPUT_BUCKETS),1)
+  NNUE_TAGS += pawnstar_nnue_output_buckets_1
 else ifneq ($(OUTPUT_BUCKETS),)
-  ifneq ($(OUTPUT_BUCKETS),1)
+  ifneq ($(OUTPUT_BUCKETS),8)
     $(error OUTPUT_BUCKETS must be 1 or 8, not "$(OUTPUT_BUCKETS)")
   endif
 endif
@@ -172,15 +179,15 @@ nnue:
 # Write the synthetic net at THIS build's shape to $(NET), and nothing else. The net comes from a fixed seed
 # through fixed integer arithmetic, so its bytes are identical on every platform and in all three bit-exact
 # ports - which is half the proof of a cross-port node-count comparison on its own, because two ports
-# comparing node counts have to be searching the same net. It is what gives a shape nothing has been trained
-# for a signature at all: at the shared architecture the engine rightly refuses the shipped v12 net, so
-# `bench` cannot run.
+# comparing node counts have to be searching the same net. It is also what gives a shape with no trained
+# net a signature at all: a KING_MIRRORING=0 build rightly refuses the shipped net and this tree holds no
+# net at v12's shape, so `bench` cannot run there.
 #
 # A target rather than a bare `go test` in the caller, because the generator lives in a test (this
 # repository keeps no developer tools) and so needs GOEXPERIMENT and the shape's build tags, both of which
 # this file is the one place that sets:
 #
-#   make synthetic-net NET=synthetic-net.bin KING_MIRRORING=1 OUTPUT_BUCKETS=8
+#   make synthetic-net NET=synthetic-net.bin
 #   tools/new-shape-signature.sh --hash 64 --net synthetic-net.bin ./pawnstar-go
 # NET goes through $(abspath): `go test` runs a test in its own PACKAGE directory, so a relative path
 # quietly lands in engine/nnue/ instead of where the caller asked for it. On Windows abspath yields

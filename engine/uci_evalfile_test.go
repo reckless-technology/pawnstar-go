@@ -45,7 +45,7 @@ const (
 // you. Adding them by hand double-complements both (see TestCrc64XZCheckValue in engine/nnue).
 func writeIncompatibleNet(t *testing.T) string {
 	t.Helper()
-	shipped, err := os.ReadFile(filepath.Join("nnue", "pawnstar-v12.bin"))
+	shipped, err := os.ReadFile(filepath.Join("nnue", "pawnstar-v20.bin"))
 	if err != nil {
 		t.Fatalf("read the shipped net: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestUCIRefusedEvalFileKeepsTheNetPlaying(t *testing.T) {
 		t.Skip("UCI subprocess test skipped in -short mode")
 	}
 	// Absolute paths: the engine echoes back what it was given, so the expected message is exact.
-	good, err := filepath.Abs(filepath.Join("nnue", "pawnstar-v12.bin"))
+	good, err := filepath.Abs(filepath.Join("nnue", "pawnstar-v20.bin"))
 	if err != nil {
 		t.Fatalf("absolute path of the shipped net: %v", err)
 	}

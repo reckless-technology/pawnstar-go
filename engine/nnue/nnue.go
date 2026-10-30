@@ -9,10 +9,11 @@
 // "PSN1" header, which described the architecture but carried neither the king bucket map's contents
 // nor any integrity check — the two gaps that let a net load cleanly and then evaluate wrongly.
 //
-// Architecture (shipped net v12): Chess768 features (2 colours * 6 types * 64 squares) per
-// perspective, x kingBuckets king-square weight banks -> an hiddenSize int16 accumulator
-// per perspective. Activation is SCReLU (clamp to [0,QA] then square). The output layer dots the
-// two perspectives (side-to-move first) and dequantises to centipawns.
+// Architecture (the shipped net, pawnstar-v20.bin of release 2.0.0): Chess768 features (2 colours *
+// 6 types * 64 squares) per perspective, x kingBuckets horizontally mirrored king-square weight
+// banks -> an hiddenSize int16 accumulator per perspective. Activation is SCReLU (clamp to [0,QA]
+// then square). The output layer dots the two perspectives (side-to-move first) through the material
+// output head the piece count selects, and dequantises to centipawns.
 //
 // The package is decoupled from the engine's board types: positions are passed as a Board — raw
 // uint64 occupancy bitboards plus uint8 piece codes — so the engine (which this package must not
@@ -31,11 +32,11 @@ import (
 // The architecture this build is compiled for. Every one of these is written into the header by Stamp
 // and checked against the header by Load, so a net of another shape is refused rather than misread.
 //
-// Two of them are build knobs rather than fixed numbers — kingMirroringOn (shape_mirroring_off.go /
-// shape_mirroring_on.go) and outputBuckets (shape_heads_one.go / shape_heads_eight.go) — so that
-// either the v12 shape or the shared architecture can be built from this one tree while the three
-// bit-exact ports are brought across together. Everything below derives from them; nothing about the
-// shape is written down twice.
+// Two of them are build knobs rather than fixed numbers — kingMirroringOn (shape_mirroring_on.go /
+// shape_mirroring_off.go) and outputBuckets (shape_heads_eight.go / shape_heads_one.go) — so that
+// either the shared architecture or v12's older shape can be built from this one tree. The shared
+// architecture is the DEFAULT and is what the shipped net was trained for; v12's shape is the tagged
+// build. Everything below derives from the two knobs; nothing about the shape is written down twice.
 const (
 	featuresPerBucket = 768                             // features per perspective per bucket: 2 colours * 6 types * 64
 	kingBuckets       = 8                               // king-square weight banks (TestKingBucketMapWellFormed checks the map needs exactly this many)
@@ -66,7 +67,7 @@ const (
 	// int16PayloadBytes covers feature_weights, feature_bias and output_weights; output_bias follows as
 	// int32[outputBuckets], so the payload is not a whole number of int16 values.
 	int16PayloadBytes = (numFeatureWeights + hiddenSize + numOutputWeights) * 2
-	payloadBytes      = int16PayloadBytes + outputBuckets*4 // 12589060 at v12's shape, 12617760 at the shared one
+	payloadBytes      = int16PayloadBytes + outputBuckets*4 // 12617760 at the shipped shape, 12589060 at v12's
 
 	// outputBucketDivisor matches bullet's MaterialCount<N> exactly: the divisor is ceil(32 / N), so
 	// the head is (piece_count - 2) / 4 at eight heads and every position selects head 0 at one.
@@ -79,9 +80,9 @@ const (
 )
 
 // The shape this build was compiled for, exported so that a test can say which gates apply (the
-// shipped v12 net only loads into a format_version 1 build) and so that the three expected values of
-// the shared architecture — FormatVersion 2, PayloadBytes 12617760 and KingBucketMapCRC
-// 0x0A20060D4E9586E0 — can be asserted from outside the package.
+// shipped net only loads into a format_version 2 build with eight output heads) and so that the three
+// expected values of the shipped architecture — FormatVersion 2, PayloadBytes 12617760 and
+// KingBucketMapCRC 0x0A20060D4E9586E0 — can be asserted from outside the package.
 const (
 	// KingMirroringEnabled reports whether a perspective whose own king stands on files e-h is
 	// mirrored (square ^ 7) before feature indexing.

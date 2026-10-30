@@ -7,12 +7,12 @@ import "encoding/binary"
 // platform and in every run.
 //
 // It exists because a shape with no trained net otherwise has nothing to test with and no node count
-// to compare. Nothing has been trained at the shared architecture yet, and a build at that shape
-// rightly refuses the shipped v12 net (its format_version is 1 where this build's is 2), so the
-// accumulator gates and the search would both have had to be skipped exactly where the new code is.
-// Weight *quality* is irrelevant to what they check: that an incrementally-updated accumulator
-// equals a from-scratch rebuild holds for any weights at all, and a fixed-depth node count is a
-// parity signature whatever the weights are, as long as every port uses the same ones.
+// to compare. This tree holds no net at v12's older shape, and a build there rightly refuses the
+// shipped one (its format_version is 2 and it carries eight output heads), so the accumulator gates
+// and the search would both have had to be skipped at the retained shape. Weight *quality* is
+// irrelevant to what they check: that an incrementally-updated accumulator equals a from-scratch
+// rebuild holds for any weights at all, and a fixed-depth node count is a parity signature whatever
+// the weights are, as long as every port uses the same ones.
 //
 // The engine's own Stamp writes the header, so the image carries this build's architecture fields,
 // bucket-map CRC and both checksums, and Load accepts it exactly as it would a trained net. Writing

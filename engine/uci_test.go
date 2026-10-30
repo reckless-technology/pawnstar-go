@@ -586,10 +586,15 @@ func TestUCIStopAndQuitStraightAfterGo(t *testing.T) {
 }
 
 // benchGoldenNodes is the expected `bench` node total — the cross-engine bit-parity signature (the C++
-// engine reports the same count; see CLAUDE.md). Any change to search, move ordering, pruning, the TT, or
-// the eval shifts this number: bump it ONLY for a deliberate, SPRT-gated engine change, never to quieten
-// the test.
-const benchGoldenNodes = "6601454"
+// and Rust ports report the same count; see CLAUDE.md). Any change to search, move ordering, pruning,
+// the TT, or the eval shifts this number: bump it ONLY for a deliberate, SPRT-gated engine change,
+// never to quieten the test.
+//
+// 5,617,906 since release 2.0.0 made the mirrored, eight-output-head shape the default and shipped
+// pawnstar-v20.bin for it (6,601,454 with the v12 net at v12's shape). The net and the shape are both
+// part of the evaluation, so the signature moved with them; it is a cross-PORT gate, so the C++ and
+// Rust ports must report 5,617,906 too and a difference is a defect rather than a rounding.
+const benchGoldenNodes = "5617906"
 
 // TestUCIBenchDeterminism: single-threaded bench is deterministic, so two runs must agree (guards the
 // uninitialised-read class of bug that made node counts wobble) AND must equal the golden bit-parity
