@@ -98,7 +98,7 @@ ALIAS_CMD := ln -s
 ALIAS_KIND := ->
 endif
 
-.PHONY: all build test test-short check cover perft search bk see nnue synthetic-net book lazysmp race timing test-uci bench baseline vet fmt clean docs-bundle source-archive
+.PHONY: all build test test-short check cover perft search bk see nnue synthetic-net book lazysmp race timing test-uci bench baseline vet fmt clean docs-bundle
 
 all: build
 
@@ -247,10 +247,6 @@ docs-bundle:
 	rm -f $(BINARY)-$(VERSION)-docs.zip
 	cd docs-bundle && zip -rq ../$(BINARY)-$(VERSION)-docs.zip .
 	rm -rf docs-bundle
-
-# The source a release ships, pawnstar-go-<version>-source.tar.gz: a clean `git archive` of HEAD (no .git).
-source-archive:
-	git archive --format=tar.gz --prefix=$(BINARY)-$(VERSION)/ -o $(BINARY)-$(VERSION)-source.tar.gz HEAD
 
 # Snapshot the current build as the SPRT baseline opponent (tools/sprt.sh BIN_B default).
 baseline: build

@@ -344,10 +344,10 @@ jobs:
           path: pawnstar-go_*.exe
           if-no-files-found: error
 
-  # Documentation bundle + source archive, versioned like the binaries, made as release.yml makes them
-  # (`make docs-bundle` and `make source-archive`; the Makefile says what the bundle holds).
+  # Documentation bundle, versioned like the binaries, made as release.yml makes it (`make docs-bundle`; the
+  # Makefile says what the bundle holds). No source archive: a release publishes none, so CI builds none.
   artifact-docs:
-    name: artifact (docs + source)
+    name: artifact (docs)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -359,17 +359,9 @@ jobs:
           cache: false # no go.sum / external deps to cache
       - name: Generate docs bundle
         run: make docs-bundle
-      - name: Source archive
-        run: make source-archive
       - name: Upload docs bundle
         uses: actions/upload-artifact@v6
         with:
           name: pawnstar-go-docs
           path: pawnstar-go-*-docs.zip
-          if-no-files-found: error
-      - name: Upload source archive
-        uses: actions/upload-artifact@v6
-        with:
-          name: pawnstar-go-source
-          path: pawnstar-go-*-source.tar.gz
           if-no-files-found: error

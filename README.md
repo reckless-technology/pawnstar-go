@@ -132,7 +132,10 @@ that `actions/setup-go` gives the Go `go.mod` names.
 | `pawnstar-go-<version>-windows-amd64.exe` | the engine (AVX2), Authenticode-signed through SSL.com eSigner (Jonathan Reckless) |
 | `pawnstar-go-<version>-macos-arm64.zip` | the engine for Apple silicon, signed with a Developer ID (hardened runtime) and notarised by Apple |
 | `pawnstar-go-<version>-linux-amd64` | the engine for Linux (AVX2) |
-| `pawnstar-go-<version>-source.tar.gz`, `-docs.zip` | the source at the commit, and the documentation bundle - README, CLAUDE.md, [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and `go doc -all` for both packages (`make source-archive`, `make docs-bundle`) |
+| `pawnstar-go-<version>-docs.zip` | the documentation bundle - README, CLAUDE.md, [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and `go doc -all` for both packages (`make docs-bundle`) |
+
+No source tarball is published. The repository is public: clone or fork it for the source, which is also the only copy
+that carries its history.
 
 The macOS engine ships in a zip because a bare binary can't carry a stapled notarisation ticket: Gatekeeper looks its
 ticket up online, and the zip keeps the executable bit through a browser's download. The signing runs from

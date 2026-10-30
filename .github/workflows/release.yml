@@ -21,12 +21,13 @@
 #     Gatekeeper finds its ticket online, as the release checks it does.
 #   A publishing run that would ship an unsigned binary fails instead.
 #
-# The files: pawnstar-go-<version>-linux-amd64, -windows-amd64.exe and -macos-arm64.zip (the binary inside), the source
-# as -source.tar.gz and the documentation as -docs.zip (make source-archive and make docs-bundle). verify
-# opens the release as a draft and each job uploads straight onto it, so no workflow artifact stands between a build
-# and its release; publish makes the source and documentation (in a dry run too), checks all five are on the draft,
-# pushes the tag and takes the draft public. A failed job can be run again; a run that fails before it publishes leaves
-# only a draft, which the next run replaces.
+# The files: pawnstar-go-<version>-linux-amd64, -windows-amd64.exe and -macos-arm64.zip (the binary inside), and the
+# documentation as -docs.zip (make docs-bundle). No source tarball is published: the repository is public, so anyone who
+# wants the source clones or forks it, which is also the only copy that carries its history. verify opens the release as
+# a draft and each job uploads straight onto it, so no workflow artifact stands between a build and its release; publish
+# makes the documentation (in a dry run too), checks all four are on the draft, pushes the tag and takes the draft
+# public. A failed job can be run again; a run that fails before it publishes leaves only a draft, which the next run
+# replaces.
 #
 # Every job runs on a GitHub-hosted runner, free for a public repository, its image pinned by version (ubuntu-24.04,
 # windows-2025, macos-15 on Apple silicon), each from a fresh machine: setup-go installs the Go go.mod pins, and the image
@@ -338,12 +339,12 @@ jobs:
         if: always() && runner.os == 'macOS'
         run: tools/sign-macos.sh close
 
-  # The source and the documentation, made in a dry run too, so a release's first run of this job is not its first run
+  # The documentation, made in a dry run too, so a release's first run of this job is not its first run
   # at all; then, in a publishing run, the draft checked and published. Every step is safe to run again: an upload
   # replaces a file of the same name an earlier attempt left on the draft, and a tag an earlier attempt pushed is taken
   # as it stands when it names this commit.
   publish:
-    name: source, documentation, publish
+    name: documentation, publish
     needs: [verify, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -362,12 +363,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false # no go.sum / external deps to cache
-      - name: The source and the documentation
+      - name: The documentation
         run: |
           set -euo pipefail
           mkdir assets
-          make docs-bundle source-archive
-          mv "pawnstar-go-$VERSION-docs.zip" "pawnstar-go-$VERSION-source.tar.gz" assets/
+          make docs-bundle
+          mv "pawnstar-go-$VERSION-docs.zip" assets/
           ls -l assets
       - name: Onto the draft
         if: env.PUBLISH == 'true'
@@ -388,7 +389,7 @@ jobs:
         if: env.PUBLISH != 'true'
         continue-on-error: true
         with:
-          name: source-and-docs
+          name: docs
           path: assets/*
           retention-days: 1
       - name: Publish the release
@@ -401,8 +402,7 @@ jobs:
           assets=$(gh api "$release" --jq '.assets[].name')
           missing=""
           for file in "pawnstar-go-$VERSION-linux-amd64" "pawnstar-go-$VERSION-windows-amd64.exe" \
-                      "pawnstar-go-$VERSION-macos-arm64.zip" "pawnstar-go-$VERSION-source.tar.gz" \
-                      "pawnstar-go-$VERSION-docs.zip"; do
+                      "pawnstar-go-$VERSION-macos-arm64.zip" "pawnstar-go-$VERSION-docs.zip"; do
             grep -qx "$file" <<< "$assets" || { echo "::error::$file is not on the draft $TAG"; missing="$missing $file"; }
           done
           [ -z "$missing" ] || exit 1
