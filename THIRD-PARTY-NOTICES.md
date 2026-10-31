@@ -88,8 +88,8 @@ downloader has. Four places therefore carry the notice:
 — specifically the monthly export of standard rated games named in the book file's own header, which
 also records every filter used, the counts and the SHA-256 of exactly the bytes read. It reaches this
 repository as a byte-for-byte copy of the book `pawnstar` built with its `tools/make_book.cpp` and
-ships as `pawnstar.book`; the three ports' books are identical by design, which is what lets a match
-between two of them start from the same openings. Nothing in this repository regenerates it, and
+ships as `pawnstar.book`; the three ports' books are identical by design, so an engine-versus-engine
+match between two of them is not decided by one of them knowing a wider book. Nothing in this repository regenerates it, and
 nothing should: the header carries a generation timestamp, so a second run of the generator produces a
 different file.
 
