@@ -34,7 +34,8 @@ func newOpeningBook() openingBook {
 // loadOpeningBook builds a hash→moves index from book text (one move-sequence per line). A move written
 // with a trailing "?" is *questionable*: it is replayed so the rest of the line still parses, but is
 // never recorded as a candidate (getMove will never return it) — matching the C++ book. The shipped
-// book carries no `?` move, but the marker stays part of the format the three ports share. Parsing of a
+// book is marked: pawnstar's tools/filter_book put a `?` on every move its own NNUE scored more than
+// 100 cp below its position's best, so the engine answers such a move but never plays it. Parsing of a
 // line stops at the first token that is not a legal move in the reached position.
 func loadOpeningBook(r io.Reader) openingBook {
 	b := openingBook{moves: make(map[zobrist][]move)}
