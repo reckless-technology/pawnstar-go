@@ -21,16 +21,24 @@ The book `pawnstar` built with its `tools/make_book.cpp` and ships as `pawnstar.
 commit `1162592` on `main`). Taken **byte for byte**, because the three ports' books are identical by
 design and must stay so.
 
+**Superseded on 2026-10-31 by the screened book** - the same book put through `pawnstar`'s
+`tools/filter_book`, which marks with a trailing `?` every move that engine's own NNUE scores more than
+100 cp below its position's best, and appends the engine's own choice as an extra unmarked line at the 84
+positions where every database move is marked. Taken byte for byte from `pawnstar`'s `a7a9198`. The table
+below is the screened file; the unscreened one it replaced was 3,244 lines, 155,503 bytes, SHA-256
+`154228ffc843dc8068b6d0da2ff7df9daa39442e923d1eb6a82fc93ca448bcae`.
+
 | | |
 |---|---|
-| Lines | 3,244 opening lines (3,280 including the `#` header) |
-| Bytes | 155,503, LF |
-| SHA-256 | `154228ffc843dc8068b6d0da2ff7df9daa39442e923d1eb6a82fc93ca448bcae` |
+| Lines | 3,328 opening lines - 3,244 the database's and 84 the engine's own (3,386 including the `#` header) |
+| Bytes | 162,286, LF |
+| SHA-256 | `5f42b523bb68b011be8989218888c4ddb767c9f89c35100cc68b9115c09e9a19` |
 | Source | Lichess open database, standard rated games, export **2017-01** |
 | Filters | both players Elo ≥ 2200, time-control base ≥ 180 s, standard, finished, ≥ 16 plies |
 | Games | **73,128 used of 10,680,708 seen** |
 | Keep rule | a move kept where **≥ 8** games played it from the position **and** it was **≥ 1 %** of games reaching it |
-| First moves | `e2e4` (1,558 lines), `d2d4` (1,171), `g1f3` (338), `c2c4` (177), nothing else |
+| First moves | `e2e4` (1,610 lines), `d2d4` (1,199), `g1f3` (341), `c2c4` (178), nothing else |
+| Screening | `tools/filter_book`, `pawnstar-v20.bin` at depth 12, 100 cp margin; 922 lines carry a `?` |
 | Dedication | Creative Commons **CC0 1.0** (`CC0-1.0`) |
 
 ## Rules that are easy to get wrong
@@ -50,8 +58,10 @@ design and must stay so.
   each line where its thresholds stopped it, so no line is a prefix of another and each appears exactly
   once; candidates are stored with repeats, so a uniform pick is frequency-weighted by lines.
 - **Format and parser unchanged**: one line per pruned tree leaf in coordinate notation, `#` to end of
-  line a comment. The new book contains **no `?` move**, but the questionable-move marker stays part of
-  the format the three ports share, and `loadOpeningBook` still honours it.
+  line a comment. The screened book **does** carry `?` moves - 922 of its 3,328 lines - and
+  `loadOpeningBook` honours the marker: such a move is replayed so the rest of the line parses but is
+  never offered, which is why the 84 engine-chosen lines exist (a position whose every move is marked
+  would drop the engine out of book, silently).
 - The header names **C++ identifiers and paths** (`OpeningBook::ParseLineOfPlay`, `tools/make_book.cpp`,
   `nnue/openings.epd`). That is an accepted consequence of byte-identity — **do not "fix" it here**, or
   the three books diverge.
@@ -63,7 +73,11 @@ design and must stay so.
   carry the old claim. It requires `Lichess open database`, `https://database.lichess.org/`, `CC0 1.0`,
   the dedication URL and `asks for no attribution`; **forbids** `TSCP` and `Kerrigan`; requires **more
   than 385 opening lines**, because a book truncated to its header would load fine and play nothing;
-  and checks the start position still has a move.
+  and checks the start position still has a move. Since the screened book landed it also pins the
+  screening: that the book carries `?` marks at all (regenerating with `make_book` and forgetting
+  `filter_book` would silently ship every move the database offered), that the file distinguishes the
+  engine's own moves from the database's (the header's CC0 claim covers the database's lines, not those),
+  and that every position a line continues from still offers a selectable move.
 - `TestLicenceCommandPrintsTheNotice` and `TestLicenceNoticeAgreesWithTheNoticesFile`
   (`engine/licence_test.go`) hold the same claims to the printed notice and to
   `THIRD-PARTY-NOTICES.md`. The printed notice must contain no `TSCP`/`Kerrigan`; the markdown file
