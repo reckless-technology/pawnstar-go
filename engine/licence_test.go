@@ -53,13 +53,32 @@ func TestLicenceCommandPrintsTheNotice(t *testing.T) {
 		`ODbL "Produced Work": the obligation is this notice`,
 		"ODbL does not require the network itself to be ODbL-licensed",
 		"not GPL merely because GPLv3 code trained it",
-		"public-domain TSCP book.txt",
 		"PlentyChess, by Yoshie2000",
 		"no third-party code dependencies",
+		// The opening book's provenance, which is the one claim in this notice that used to be WRONG:
+		// the book was derived from TSCP's book.txt and called public domain, and TSCP is Copyright
+		// 1997 Tom Kerrigan under an informal non-commercial permission - GPL-incompatible, and not a
+		// dedication at all. The book is now built from the Lichess open database, whose CC0
+		// dedication makes the claim true. Both halves are pinned: that the new source and its
+		// dedication are named, and (below) that the old claim is gone.
+		"Lichess open database",
+		"https://database.lichess.org/",
+		"CC0 1.0",
+		"https://creativecommons.org/publicdomain/zero/1.0/",
+		// CC0 asks for no attribution at all, so the notice must not imply that this port owes one:
+		// overstating an obligation is its own kind of false provenance claim, and this check is what
+		// stops a later edit quietly turning the courtesy back into a duty.
+		"CC0 waives attribution",
 	}
 	for _, want := range append(wants, licenceAttributionLines...) {
 		if !strings.Contains(flat, collapse(want)) {
 			t.Errorf("`license` did not print %q", want)
+		}
+	}
+	// A notice that still said "TSCP" would be the exact defect this replaced.
+	for _, unwanted := range []string{"TSCP", "Kerrigan"} {
+		if strings.Contains(flat, unwanted) {
+			t.Errorf("`license` still claims %q as the book's provenance", unwanted)
 		}
 	}
 }
@@ -85,7 +104,10 @@ func TestLicenceNoticeAgreesWithTheNoticesFile(t *testing.T) {
 		"37.17%",
 		"Produced Work",
 		"Yoshie2000",
-		"TSCP",
+		"Lichess open database",
+		"https://database.lichess.org/",
+		"CC0 1.0",
+		"https://creativecommons.org/publicdomain/zero/1.0/",
 	) {
 		flat := collapse(want)
 		if !strings.Contains(file, flat) {

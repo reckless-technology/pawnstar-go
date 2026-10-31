@@ -33,7 +33,8 @@ func newOpeningBook() openingBook {
 
 // loadOpeningBook builds a hash→moves index from book text (one move-sequence per line). A move written
 // with a trailing "?" is *questionable*: it is replayed so the rest of the line still parses, but is
-// never recorded as a candidate (getMove will never return it) — matching the C++ book. Parsing of a
+// never recorded as a candidate (getMove will never return it) — matching the C++ book. The shipped
+// book carries no `?` move, but the marker stays part of the format the three ports share. Parsing of a
 // line stops at the first token that is not a legal move in the reached position.
 func loadOpeningBook(r io.Reader) openingBook {
 	b := openingBook{moves: make(map[zobrist][]move)}
@@ -67,7 +68,11 @@ func (book *openingBook) clear() {
 }
 
 // getMove returns a randomly chosen book move for hash, or moveNone if the
-// position is not in the book.  Random selection gives variety across games.
+// position is not in the book.  Random selection gives variety across games, and because candidates are
+// stored with repeats - once per book line that plays the move from this position - a uniform pick is
+// frequency-weighted.  The weight is therefore the number of book *lines* through the move, not a count
+// of games: the generator pruned each line where its thresholds stopped it, so no line is a prefix of
+// another and each appears exactly once.
 func (book *openingBook) getMove(hash zobrist) move {
 	candidates := book.moves[hash]
 	if len(candidates) == 0 {

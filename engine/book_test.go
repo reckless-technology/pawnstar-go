@@ -49,3 +49,52 @@ func TestOpeningBookQuestionableMove(t *testing.T) {
 		t.Errorf("exf4 should be playable after the questionable f2f4, got %q", reply.String())
 	}
 }
+
+// TestShippedBookProvenance: the book this engine embeds says where it came from, and does not say the
+// old thing. The book it replaced was derived from TSCP's book.txt and was asserted to be public domain
+// in about twenty places across the three ports; TSCP is Copyright 1997 Tom Kerrigan under an informal
+// non-commercial permission, which GPLv3 cannot take, so the claim was false and the material had to go
+// rather than be re-worded. This book is built from the Lichess open database, whose CC0 1.0 dedication
+// makes the same claim true. It is asserted against the **embedded** bytes because that is what ships: a
+// correct engine/book.txt beside a stale go:embed would pass a file check and still print the old claim.
+func TestShippedBookProvenance(t *testing.T) {
+	for _, want := range []string{
+		"Lichess open database",
+		"https://database.lichess.org/",
+		"CC0 1.0",
+		"https://creativecommons.org/publicdomain/zero/1.0/",
+		// CC0 waives attribution, so the header must not imply an obligation that does not exist -
+		// claiming a duty nobody owes is the mirror image of claiming a permission nobody gave.
+		"asks for no attribution",
+	} {
+		if !strings.Contains(embeddedBook, want) {
+			t.Errorf("the embedded book does not name %q", want)
+		}
+	}
+	for _, unwanted := range []string{"TSCP", "Kerrigan"} {
+		if strings.Contains(embeddedBook, unwanted) {
+			t.Errorf("the embedded book still makes a claim about %q", unwanted)
+		}
+	}
+
+	// Every line below the header parses, which loadOpeningBook proves by indexing them - but a line
+	// that stops early is silent, so count the lines too: a book truncated to its header would load
+	// perfectly and play nothing, and only a start-position check would catch it. The count pins the
+	// width that was the other half of the point - 385 lines replayed each opening about 13 times in a
+	// long match, which inflated every confidence interval the matches produced.
+	lines := 0
+	for _, line := range strings.Split(embeddedBook, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			lines++
+		}
+	}
+	if lines <= 385 {
+		t.Errorf("the embedded book has %d opening lines, not wider than the 385-line book it replaced", lines)
+	}
+
+	// And it is a book, not just a header: the start position has a move.
+	embedded := newOpeningBook()
+	if embedded.getMove(hashAfter(t)).isNone() {
+		t.Error("the embedded book has no move for the start position")
+	}
+}

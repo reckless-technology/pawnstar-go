@@ -82,11 +82,45 @@ downloader has. Four places therefore carry the notice:
   the condensed form and this file to each other;
 - the command line: `pawnstar-go --license` prints the same text, from the same place.
 
-## The opening book
+## The opening book (the Lichess open database)
 
-[engine/book.txt](engine/book.txt) is derived from the public-domain TSCP `book.txt`
-(<https://github.com/terredeciles/TSCP>), reaching this repository as a byte-for-byte copy of the C++
-engine's `pawnstar.book`.
+**The shipped opening book [engine/book.txt](engine/book.txt) was built from the Lichess open database**
+— specifically the monthly export of standard rated games named in the book file's own header, which
+also records every filter used, the counts and the SHA-256 of exactly the bytes read. It reaches this
+repository as a byte-for-byte copy of the book `pawnstar` built with its `tools/make_book.cpp` and
+ships as `pawnstar.book`; the three ports' books are identical by design, which is what lets a match
+between two of them start from the same openings. Nothing in this repository regenerates it, and
+nothing should: the header carries a generation timestamp, so a second run of the generator produces a
+different file.
+
+- **Source:** Lichess open database, standard rated games, <https://database.lichess.org/>
+- **Dedication:** Creative Commons CC0 1.0 Universal (`CC0-1.0`),
+  <https://creativecommons.org/publicdomain/zero/1.0/>
+
+**This section is a courtesy, not an obligation, and it should not be read as one.** CC0 is a
+dedication of the work to the public domain so far as the law allows, and it explicitly waives
+attribution: whoever uses the data owes Lichess nothing, this port included. Saying where a book's
+lines came from is simply how a provenance claim is made checkable, and Lichess made the database
+freely available, so the credit is given because it is right. Nobody downstream of this engine inherits
+a condition from this section — there is none to inherit, and the book carries no third party's
+restriction.
+
+The book is compiled into every binary this repository distributes
+([engine/book_embed.go](engine/book_embed.go), a `go:embed` directive), so, like the network, it goes
+wherever the executable goes — and no release publishes a source tarball. The `license` UCI command and
+`pawnstar-go --license` therefore print this provenance too, from the single copy in
+`engine/licence.go`.
+
+That matters here for a reason worth recording. **The book this replaced did not have a licence anybody
+could point to.** It was derived from TSCP's `book.txt` and was described throughout this repository as
+public domain; TSCP is Copyright 1997 Tom Kerrigan, and the only permission ever located for it was an
+informal 2002 email allowing use "as long as you're not making any money off of it" — a non-commercial
+permission, which is incompatible with the GPLv3 this engine is distributed under, and not a
+public-domain dedication at all. Because the book is embedded, **every Go binary ever shipped from this
+repository contained those bytes.** The material was removed rather than re-worded, because no wording
+could have made the claim true. CC0 was chosen for the replacement precisely because it is a dedication
+the rights holder actually made, so "this book carries no restriction" is now a statement that can be
+checked rather than believed.
 
 ## Withdrawn training data — PlentyChess
 
