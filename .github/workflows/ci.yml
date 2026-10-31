@@ -244,7 +244,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
   # ---------------------------------------------------------------------------------------------------------
-  # Build artifacts: a native engine binary for Linux and Windows plus a docs bundle and source archive, all
+  # Build artifacts: a native engine binary for Linux and Windows plus a docs bundle, all
   # versioned from the git tags by tools/version.sh (hence the full-history checkouts). Binaries upload only
   # after that platform's build AND test pass (the upload is a later step, so a failed build/test ends the job
   # first); each binary job is self-contained — it builds the versioned binary
