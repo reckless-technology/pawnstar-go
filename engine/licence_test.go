@@ -69,6 +69,10 @@ func TestLicenceCommandPrintsTheNotice(t *testing.T) {
 		// overstating an obligation is its own kind of false provenance claim, and this check is what
 		// stops a later edit quietly turning the courtesy back into a duty.
 		"CC0 waives attribution",
+		// Not every line of the book came from the database: screening marks the moves this engine rates
+		// far below its own choice, and where that left a position nothing it would play, its own choice
+		// was added there. Those lines are this project's work, and the notice draws the distinction.
+		"Eighty-four of the book's 3,328 lines",
 	}
 	for _, want := range append(wants, licenceAttributionLines...) {
 		if !strings.Contains(flat, collapse(want)) {
