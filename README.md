@@ -50,7 +50,7 @@ contains an evaluator trained on that data.
 For the network's architecture, its container format and the gates on it, see
 [*NNUE evaluation*](#nnue-evaluation) under Architecture.
 
-## Build and run
+## Build
 
 **Setting up a machine.** `tools/setup-dev.ps1` (Windows) and `tools/setup-dev.sh` (Linux, macOS) install what
 building, testing, linting and debugging need - Go, the newest 1.26.x (1.27 changed the `simd/archsimd` API the amd64
@@ -63,12 +63,62 @@ own `make` is handed only the PATH when Git Bash starts it, and leaves Go withou
 
 ```bash
 make build                # build with GOEXPERIMENT=simd -> ./pawnstar-go
-./pawnstar-go             # interactive UCI session
 ```
 
 Requires Go 1.26.x (not 1.27 or later: the experimental `simd/archsimd` API the amd64 kernels use changed in 1.27, and the code does not compile there; the newest gopls needs 1.27 to build, but `go install` fetches that toolchain for gopls alone and leaves the repo's Go as it is). On Windows the binaries carry `.exe` and `pawnstar-go.exe` is a copy of the versioned one rather than a symlink. The engine evaluates with an embedded **NNUE** network (the only evaluator). Its hot kernels are build-tag split, all bit-identical: on **amd64** they use `simd/archsimd` plus hand-written AVX2 assembly, gated behind `GOEXPERIMENT=simd` (the `Makefile` sets this); on **arm64** they use hand-written NEON assembly (no experiment needed). A plain `go build` on any other target falls back to bit-identical scalar kernels.
 
-Point any UCI-compatible GUI (Arena, Cute Chess, etc.) at the binary — no configuration needed. UCI option `EvalFile` (path to an RNNUE1 net, or `<embedded>` for the built-in one) loads an alternative network. A net that fails the container's checks is **refused**, loudly and with no fallback: the engine then has no evaluator and refuses to search, rather than playing on with a net nobody asked for.
+## Usage
+
+Run as a UCI engine — point any UCI-compatible GUI (Arena, Cute Chess, and the rest) at the binary, which needs no configuration:
+
+```bash
+./pawnstar-go             # interactive UCI session (pawnstar-go.exe on Windows)
+```
+
+No files need to sit beside it: both the NNUE network and the opening book are compiled into the binary (`go:embed`), so the single executable is the whole engine. It prints one banner line, `Pawnstar (Go) — UCI compatible chess engine`, before the handshake; a GUI ignores it. The only command-line argument it recognises is `--license` (`--licence`, `-license`, `-licence`), which prints the licence and the third-party notices and exits — anything else on the command line is ignored, since the engine takes its configuration from UCI and the environment.
+
+`PAWNSTAR_THREADS`, read once at startup, sets the initial Lazy SMP thread count; unset or not a positive integer, the default is every logical CPU. A GUI can override it at any time with `setoption name Threads`.
+
+Beyond the standard UCI commands — [*UCI protocol*](#uci-protocol) under Architecture lists every one of them, with the `go` variants and the `info` fields — two engine-specific commands are available at the prompt:
+
+```
+license        print the engine's licence and the third-party notices the shipped data obliges
+bench          search 16 fixed positions to a fixed depth; print "<nodes> nodes <nps> nps"
+bench <depth>  the same at an explicit depth (the default is 13)
+```
+
+`bench` is deterministic: single-threaded, book off, on its own pinned 64 MB transposition table, so its node count does not move with the `Hash` or `Threads` options. The signature is **5,617,906** nodes, asserted by a golden-signature test. `PAWNSTAR_BENCH_DEBUG=1` additionally dumps each position's best move and diagnostic counters after its search, for comparison against the C++ engine's bench; normal `bench` output is unchanged without it.
+
+There is no `eval`, `nnue`, `getboard`, `bookmoves`, `dbg` or `help` command — the C++ engine has those, this port does not; its search diagnostics are reached from tests instead (`dbgxClear`/`dbgxPrint`, [*Search diagnostics*](#search-diagnostics)). An unrecognised command is ignored in silence.
+
+One behaviour worth knowing before driving the engine from a harness: `ucinewgame` resets the position, the node count and the clock but **does not** clear the transposition table or the eval cache — `Clear Hash` is what does that. Repeating one position with `ucinewgame` + `go depth N` in a single session therefore gives shrinking, non-deterministic node counts; send `setoption name Clear Hash` before each search, or start a fresh process per position. The C++ engine clears on `ucinewgame`, so this is a deliberate divergence.
+
+### UCI options
+
+The options the `uci` response advertises, in the order it prints them:
+
+- **`OwnBook`** (check, default `true`) — play from the embedded opening book; `false` forces a real search from the first move.
+- **`EvalFile`** (string, default `<embedded>`) — path to an RNNUE1 net to load at runtime (below).
+- **`Threads`** (spin, default = the startup count above, 1–256) — Lazy SMP search threads; the value is clamped into range.
+- **`Hash`** (spin, default 64, 1–4096 MB) — transposition-table size, rebuilt at the new size when it is set. The default must stay **equal to the C++ and Rust ports'**: the table size changes the collision pattern and so the node count at a fixed depth, so an unequal default breaks the three ports' bit-exactness at every `go` — and invisibly, since `bench` pins 64 MB in all three.
+- **`Clear Hash`** (button) — empties the transposition table **and** the eval cache, without resizing either.
+- **`Move Overhead`** (spin, default 30, 0–5000 ms) — time held back from every deadline to cover GUI and network lag.
+- **`Ponder`** (check, default `false`) — advertised so a GUI knows the engine can ponder. The value is declarative only: pondering is driven entirely by `go ponder` and `ponderhit`, and the engine ignores the value of `setoption name Ponder`.
+
+A `setoption` naming an option that does not exist is ignored, and so is a value that will not parse as the number its option wants — the option keeps what it had.
+
+### The NNUE net
+
+NNUE is the only evaluator, and its net is in the binary: `NewGame` installs the embedded v20 net at construction, so there is no net file to find and no working-directory dependency. (The C++ engine loads `nnue/pawnstar-v20.bin` from the working directory and falls back to its embedded copy; this port has the embedded copy alone.) To play with a different net:
+
+```
+setoption name EvalFile value /path/to/net.bin   # load another RNNUE1 net
+setoption name EvalFile value <embedded>         # back to the built-in net ("default", or no value at all, do the same)
+```
+
+A net that fails the container's checks is **refused**, and **the net already loaded keeps playing**: the refusal names the field, the file's value and the engine's own, and a second line names the net still in play — both lines on stdout as `info string` *and* on stderr, because a harness keeps stderr and routinely drops `info` lines. Nothing is ever substituted silently. The only way to have no evaluator at all is a build whose own embedded net is unusable; the next `go` then refuses to search and returns `bestmove 0000`, which no harness can mistake for a played game, rather than evaluate a node with no network.
+
+See [*NNUE evaluation*](#nnue-evaluation) under Architecture for the network's shape, its container format and the gates on it.
 
 ## Testing
 
