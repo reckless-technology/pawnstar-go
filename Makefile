@@ -197,9 +197,10 @@ synthetic-net:
 	$(GO) test $(GOTAGS) ./engine/nnue -run TestWriteSyntheticNet -v -count=1
 synthetic-net: export PAWNSTAR_WRITE_SYNTHETIC_NET = $(abspath $(NET))
 
-# Opening-book gate (questionable-move filtering).
+# Opening-book gates (questionable-move filtering, and the shipped book's provenance - asserted against
+# the embedded bytes, which is what ships).
 book:
-	$(GO) test $(GOTAGS) $(PKG) -run TestOpeningBook -v
+	$(GO) test $(GOTAGS) $(PKG) -run 'TestOpeningBook|TestShippedBookProvenance' -v
 
 # Lazy SMP smoke test (multi-threaded search sanity).
 lazysmp:

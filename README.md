@@ -80,7 +80,7 @@ go test ./engine/ -run TestPerftExtra -short -v  # verify incremental Zobrist ha
 go test ./engine/ -run TestSearch -short -v       # search every EPD position to depth 9; exercises TT and search
 go test ./engine/ -run TestBratkoKopec -v         # 24 Bratko-Kopec positions at depth 8 (NNUE on); search-quality gate, bit-identical to C++
 go test ./engine/ -run TestSEE -v                 # 24 SEE cases + TestSEECrossCheck (fast == make-move reference over ~1M captures)
-go test ./engine/ -run TestOpeningBook -v         # opening-book '?' (questionable) move handling
+go test ./engine/ -run 'TestOpeningBook|TestShippedBookProvenance' -v  # book '?' handling, and the embedded book's provenance
 make test-uci                                     # UCI protocol as a process (handshake, seldepth, searchmoves, currmove, bench + golden signature)
 make race                                         # concurrency tests (Lazy SMP, ponder clock) under the race detector
 make cover                                        # statement coverage of the whole suite -> coverage.out (git-ignored); fails under COVER_MIN (90 %), CI too
@@ -385,7 +385,7 @@ networks**, which were trained on PlentyChess self-play data, are at the top of 
 
 ### Opening book
 
-`openingBook` ([engine/book.go](engine/book.go)) parses [engine/book.txt](engine/book.txt) (385 lines from TSCP — a byte-for-byte copy of the C++ engine's `pawnstar.book`), embedded in the binary via `go:embed` ([engine/book_embed.go](engine/book_embed.go)) so no external file is needed. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves. A move written with a trailing `?` is *questionable*: it is replayed so the rest of the line still parses, but is never offered by `getMove` — matching the C++ book (109 lines carry `?`, filtering 122 candidate entries). `getMove` returns a random candidate, giving variety across games.
+`openingBook` ([engine/book.go](engine/book.go)) parses [engine/book.txt](engine/book.txt) — 3,244 opening lines built from the [Lichess open database](https://database.lichess.org/), which is dedicated to the public domain under Creative Commons [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), so the book carries no third party's restriction. It is a byte-for-byte copy of the book `pawnstar` built with its `tools/make_book.cpp` and ships as `pawnstar.book`, and the three ports' books are identical by design; the file's own `#` header records the monthly export it came from, every filter used, the counts and the SHA-256 of exactly the bytes read, and nothing here regenerates it. CC0 waives attribution, so the credit in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) is given because it is right, not because anything obliges it. The book is embedded in the binary via `go:embed` ([engine/book_embed.go](engine/book_embed.go)) so no external file is needed, and [.gitattributes](.gitattributes) marks it `-text` so no CRLF checkout can change the bytes that go in. `loadOpeningBook` replays each line from the start position and maps Zobrist hashes to candidate next moves. A move written with a trailing `?` is *questionable*: it is replayed so the rest of the line still parses, but is never offered by `getMove` — matching the C++ book; the shipped book carries no such move, but the marker stays part of the format the three ports share. `getMove` returns a random candidate, giving variety across games: candidates are stored with repeats, once per line that plays the move from the position, so a uniform pick is frequency-weighted — by the number of book **lines** through a move, not by a game count, since each line was pruned where the generator's thresholds stopped it and so appears exactly once.
 
 ### History heuristic
 
@@ -441,5 +441,8 @@ The NNUE network ([engine/nnue/pawnstar-v20.bin](engine/nnue/pawnstar-v20.bin)) 
 blob byte for byte in `pawnstar`, `pawnstar-rs` and `pawnstar-go`. It was trained on data that is not
 ours, which obliges a notice: **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** carries it, the
 `license` UCI command and `pawnstar-go --license` print it, and every release's documentation bundle
-ships it. This module has no third-party code dependencies, so that notice and the opening book's
-provenance are the whole of what it owes.
+ships it. This module has no third-party code dependencies, so that notice is the whole of what it
+owes: the opening book was built from the CC0-dedicated
+[Lichess open database](https://database.lichess.org/), and CC0 waives attribution, so the credit
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) gives Lichess is owed to nobody — it is there because
+saying where the lines came from is right.
