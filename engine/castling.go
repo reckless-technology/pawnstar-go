@@ -35,6 +35,30 @@ func (cr castlingRights) afterMove(m move) castlingRights {
 	return cr & castleMoveMasks[m.from()] & castleMoveMasks[m.to()]
 }
 
+// keepSupported drops every right whose king and rook are not on the squares castling with them
+// needs. Within a game the rights carry that themselves - afterMove revokes a right the moment its
+// king's or rook's home square is vacated or entered - so this is for a FEN, the one input that can
+// assert a right the board cannot support. positionFromFenFields applies it; see the castling block
+// of generateMoves for what the generator relies on (issue #30).
+func (cr castlingRights) keepSupported(
+	isWhiteKingsideSupported, isWhiteQueensideSupported,
+	isBlackKingsideSupported, isBlackQueensideSupported bool) castlingRights {
+	var supported castlingRights
+	if isWhiteKingsideSupported {
+		supported |= castleWhiteKingside
+	}
+	if isWhiteQueensideSupported {
+		supported |= castleWhiteQueenside
+	}
+	if isBlackKingsideSupported {
+		supported |= castleBlackKingside
+	}
+	if isBlackQueensideSupported {
+		supported |= castleBlackQueenside
+	}
+	return cr & supported
+}
+
 // castlingRightsFromFen parses the castling availability field of a FEN string.
 func castlingRightsFromFen(fen string) castlingRights {
 	if fen == "-" {

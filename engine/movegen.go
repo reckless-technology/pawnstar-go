@@ -140,7 +140,11 @@ func (pos *position) generateMovesInto(ml *moveList, c color, doAllMoves bool) {
 	}
 
 	// Castling (only when not in check; squares between king and rook must be
-	// empty and unattacked).
+	// empty and unattacked). Nothing here looks for the king and rook: a right implies they are
+	// home, because castlingRights.afterMove revokes it the moment one of their home squares is
+	// vacated or entered, and the FEN parse keeps no right the board cannot support (issue #30 - a
+	// FEN claiming KQ with no rook on a1 had makeMove move a rook that was not there). Any new way
+	// into a position owes that invariant too.
 	if doAllMoves && !pos.isInCheck() {
 		if c == white {
 			if pos.castling.mayWhiteCastleKingside() &&

@@ -708,3 +708,35 @@ func TestLoadOpeningBookMalformedLines(t *testing.T) {
 		t.Errorf("book holds %d positions, want 2", len(book.moves))
 	}
 }
+
+// TestUCISearchesAFenClaimingUnsupportedCastlingRights searches the FEN of issue #30 on a table the
+// searches before it have warmed, which is how it died: it claims KQ with White's rooks on c1 and g1,
+// and once the search moved the c1 rook away the generator emitted e1c1 and makeMove moved a rook from
+// an empty a1 - "panic: runtime error: index out of range [255] with length 6" in removePiece, at depth
+// 8, on the eleventh of sixteen positions driven over UCI (an access violation in the C++ engine, where
+// the issue was filed). The rights are dropped at the parse now, so what this asserts is the protocol's
+// own promise: the search finishes and answers with a legal move.
+func TestUCISearchesAFenClaimingUnsupportedCastlingRights(t *testing.T) {
+	const issue30Fen = "b2rk3/p2p1nr1/1p2n1p1/1Np2p1p/2P2P1P/1P1BP1P1/P4N2/2R1K1R1 w KQ - 1 16"
+	game := NewGame()
+	// Warm the transposition table, which the bug needed: on a cold table the castling is never
+	// reached and the same FEN alone is harmless at any depth. The table persists across `position`.
+	for _, fen := range benchFens[:10] {
+		runUCI(t, game, "position fen "+fen, "go depth 8")
+	}
+	out, _ := runUCI(t, game, "position fen "+issue30Fen, "go depth 8")
+	best := bestmoveOf(out)
+	if best == "" {
+		t.Fatalf("go depth 8 on a FEN claiming castling rights the board cannot support gave no bestmove:\n%s", out)
+	}
+	pos := positionFromFen(issue30Fen)
+	isLegal := false
+	for _, m := range pos.generateLegalMoves() {
+		if m.String() == best {
+			isLegal = true
+		}
+	}
+	if !isLegal {
+		t.Errorf("bestmove %s is not a legal move of %s", best, issue30Fen)
+	}
+}

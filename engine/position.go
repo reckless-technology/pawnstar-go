@@ -127,6 +127,15 @@ func (pos *position) hasBothKings() bool {
 	return (kings & pos.colors[white]).isNotEmpty() && (kings & pos.colors[black]).isNotEmpty()
 }
 
+// isCastlingRightSupported reports whether the king and rook a castling right needs are both on
+// their home squares: c is the castling side, kingHome that side's king's home square (e1 or e8)
+// and rookHome the castling rook's home square (a1, h1, a8 or h8).
+func (pos *position) isCastlingRightSupported(c color, kingHome, rookHome square) bool {
+	homeSquares := squareBB(kingHome) | squareBB(rookHome)
+	return pos.squares[kingHome] == king && pos.squares[rookHome] == rook &&
+		pos.colors[c]&homeSquares == homeSquares
+}
+
 // positionFromFenFields parses the whitespace-split fields of a FEN. It tolerates any truncation (every
 // field past the board is optional and length-guarded) and returns a kingless position for input it cannot
 // parse, which positionFromFen treats as "invalid, use the start position".
@@ -169,9 +178,20 @@ func positionFromFenFields(fields []string) position {
 		pos.colorToMove = black
 	}
 
-	// Castling rights
+	// Castling rights. This field is untrusted too, and a right the board cannot support is the one
+	// bad input that reached the move generator: it tests the rights, the squares between and the
+	// squares the king crosses, but never looks for the rook, because within a game a right cannot
+	// outlive it (see the castling block of generateMoves). A FEN claiming `KQ` with White's rooks on
+	// c1 and g1 - which Leela's classical input format produces for a Chess960 game read as standard
+	// chess, the way issue #30 was found - let the search generate e1c1 once c1 emptied, and makeMove
+	// then moved a rook from a1 that was not there, leaving a1 occupied by no piece and the search
+	// reading a position that cannot exist.
 	if len(fields) > 2 {
-		pos.castling = castlingRightsFromFen(fields[2])
+		pos.castling = castlingRightsFromFen(fields[2]).keepSupported(
+			pos.isCastlingRightSupported(white, e1, h1),
+			pos.isCastlingRightSupported(white, e1, a1),
+			pos.isCastlingRightSupported(black, e8, h8),
+			pos.isCastlingRightSupported(black, e8, a8))
 	}
 
 	// En passant

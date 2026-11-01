@@ -79,3 +79,60 @@ func TestCastlingAdvancesFiftyMoveClock(t *testing.T) {
 		}
 	}
 }
+
+// TestCastlingRightsAgainstTheBoard holds the castling field of a FEN to what the board can support
+// (issue #30). A right is the engine's only record that its king and rook are home - the move generator
+// tests the rights, the squares between and the squares the king crosses, and never looks for the rook -
+// so a FEN asserting one the board cannot support put a position into the search that no game can reach:
+// the generator emitted e1c1 and makeMove moved a rook from an empty a1, panicking with
+// "index out of range [255] with length 6" in removePiece. Every such right is dropped at the parse, which
+// is where the invariant the generator relies on is established.
+func TestCastlingRightsAgainstTheBoard(t *testing.T) {
+	cases := []struct {
+		fen           string // The FEN handed to positionFromFen.
+		expectRights  string // The castling field it must read back as.
+		castlingMoves int    // How many castling moves the side to move must then have.
+		what          string // What the case is about.
+	}{
+		// The first is the position from issue #30, out of Leela's test80 archive: a Chess960 game read
+		// as standard chess, so the rights say KQ while White's rooks stand on c1 and g1.
+		{"b2rk3/p2p1nr1/1p2n1p1/1Np2p1p/2P2P1P/1P1BP1P1/P4N2/2R1K1R1 w KQ - 1 16", "-", 0,
+			"issue #30: KQ with White's rooks on c1 and g1"},
+		{"4k3/8/8/8/8/8/8/4K3 w KQkq - 0 1", "-", 0, "every right claimed with no rook on the board"},
+		{"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "KQkq", 2, "every right supported, and both White castlings legal"},
+		{"r3k3/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "KQq", 2, "Black's kingside right dropped, with no rook on h8"},
+		{"4k3/8/8/8/8/8/8/rn2K2R w KQ - 0 1", "K", 1,
+			"a rook of the other colour on a1 supports nothing, and the knight keeps it off the king"},
+		{"4k3/8/8/8/8/8/8/R2K3R w KQ - 0 1", "-", 0, "a king off its home square supports neither right"},
+		{"r3k2r/8/8/8/8/8/8/R3K1NR w KQkq - 0 1", "KQkq", 1,
+			"a right stands while a piece between king and rook blocks the move"},
+	}
+	for _, tc := range cases {
+		pos := positionFromFen(tc.fen)
+		// The castling field is the third of a FEN, and toFenString writes all six.
+		if got := strings.Fields(pos.toFenString())[2]; got != tc.expectRights {
+			t.Errorf("%s: rights read back as %s, expected %s", tc.what, got, tc.expectRights)
+		}
+		castlingMoves := 0
+		for _, m := range pos.generateLegalMoves() {
+			if m.kind() == castling {
+				castlingMoves++
+			}
+		}
+		if castlingMoves != tc.castlingMoves {
+			t.Errorf("%s: %d castling moves generated, expected %d", tc.what, castlingMoves, tc.castlingMoves)
+		}
+	}
+	// The board is what decides, so the same board with the rights spelled out and with them dropped
+	// parses to the same position, hash included - a position the search can be handed either way.
+	fromBadFen := positionFromFen("b2rk3/p2p1nr1/1p2n1p1/1Np2p1p/2P2P1P/1P1BP1P1/P4N2/2R1K1R1 w KQ - 1 16")
+	fromCleanFen := positionFromFen("b2rk3/p2p1nr1/1p2n1p1/1Np2p1p/2P2P1P/1P1BP1P1/P4N2/2R1K1R1 w - - 1 16")
+	if fromBadFen.hash != fromCleanFen.hash {
+		t.Errorf("the dropped rights must leave the Zobrist hash of the real position: %#x vs %#x",
+			fromBadFen.hash, fromCleanFen.hash)
+	}
+	if fromBadFen.toFenString() != fromCleanFen.toFenString() {
+		t.Errorf("both FENs must read back as the same position:\n %s\n %s",
+			fromBadFen.toFenString(), fromCleanFen.toFenString())
+	}
+}
