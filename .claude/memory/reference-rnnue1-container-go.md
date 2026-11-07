@@ -96,7 +96,7 @@ info string NNUE: keeping the net already loaded ('<kept net origin>'); '<refuse
 ```
 
 (bare, without the `info string ` prefix, on stderr). The wording is **fixed and shared with
-`pawnstar`, `pawnstar-rs` and `zenith`**; do not reword it in one port. `networkOrigin` on `Game` is
+`pawnstar`, `pawnstar-rs` and `trebuchet`**; do not reword it in one port. `networkOrigin` on `Game` is
 what makes naming the kept net possible at all: the path, or `embedded`.
 
 **Why it moved.** Installing `nil` closed trap 1 (a silent fallback) but opened the mirror of it: the

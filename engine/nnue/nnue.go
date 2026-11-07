@@ -212,7 +212,7 @@ func kingBucketMapCRC() uint64 { return crc64XZ(kingBucketMap[:]) }
 
 // KingBucketMapCRC is kingBucketMapCRC, exported so the cross-port reference values can be asserted
 // from outside the package: 0xCC6DDB5DAF0AB18D at v12's shape and 0x0A20060D4E9586E0 at the shared
-// architecture's mirrored map, both independently reproduced by the C++ and Rust ports and by zenith.
+// architecture's mirrored map, both independently reproduced by the C++ and Rust ports and by trebuchet.
 func KingBucketMapCRC() uint64 { return kingBucketMapCRC() }
 
 // Board is the raw piece-placement view of a chess position that the evaluator consumes. The engine

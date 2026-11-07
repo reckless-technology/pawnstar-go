@@ -449,7 +449,7 @@ networks**, which were trained on PlentyChess self-play data, are at the top of 
 |---|---|
 | `uci` | Prints engine id and `uciok` |
 | `isready` | Prints `readyok` |
-| `license` | Prints the engine's licence and the third-party notices the shipped data obliges - the condensed form of [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), in wording shared with the C++, Rust and zenith engines. Printing only: it reads and writes no engine state |
+| `license` | Prints the engine's licence and the third-party notices the shipped data obliges - the condensed form of [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), in wording shared with the C++, Rust and trebuchet engines. Printing only: it reads and writes no engine state |
 | `ucinewgame` | Stops search, resets position and clock. Does **not** clear the TT/eval cache (use `Clear Hash` for that) — so repeating a position in one session reuses the TT and node counts shrink |
 | `position startpos [moves ...]` | Sets position from start FEN, applies move list |
 | `position fen <fen> [moves ...]` | Sets position from FEN, applies move list |

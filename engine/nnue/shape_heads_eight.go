@@ -8,7 +8,7 @@ package nnue
 //
 // This is half of the shared architecture the reckless-technology chess engines are unified on, and
 // it is the DEFAULT: the shipped net (pawnstar-v20.bin, release 2.0.0) was trained for it. Measured
-// in zenith at +14.7 Elo at fixed depth. The other half is horizontal king mirroring
+// in trebuchet at +14.7 Elo at fixed depth. The other half is horizontal king mirroring
 // (shape_mirroring_on.go).
 //
 // Build v12's single output head with `-tags pawnstar_nnue_output_buckets_1`

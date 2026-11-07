@@ -92,8 +92,8 @@ checkmatedScore + ply (counting `checkmates`), else the draw; repetition after. 
 all three, so the trees stay one. Bench 6,601,454 and the stripped BENCH_DEBUG transcripts identical
 across the three (no bench line reaches clock 100). The eval's fifty-move test needed nothing: in the
 search it only sees positions the node already ruled on, or capture children at clock 0. Test FEN, shared
-with zenith and stoopid-chess: `6k1/5ppp/8/8/8/8/8/R5K1 w - - 99 80` (a1a8 mate 1; g1f1 at cp 0 before).
-zenith had the same bug (fixed, zenith #55); stoopid-chess never did (tests added, #12). The same PRs made
+with trebuchet and stoopid-chess: `6k1/5ppp/8/8/8/8/8/R5K1 w - - 99 80` (a1a8 mate 1; g1f1 at cp 0 before).
+trebuchet had the same bug (fixed, trebuchet #55); stoopid-chess never did (tests added, #12). The same PRs made
 the Windows binaries import system DLLs alone (C++ /MT, Rust +crt-static; Go was already kernel32 only),
 held by tools/windows-dependents.ps1 in CI and the release.
 

@@ -8,7 +8,7 @@ package nnue
 //
 // This is half of the shared architecture the reckless-technology chess engines are unified on, and
 // it is the DEFAULT: the shipped net (pawnstar-v20.bin, release 2.0.0) was trained for it. Measured
-// in zenith at +14.3 Elo at fixed depth and worth more than that — halving the king-placement space
+// in trebuchet at +14.3 Elo at fixed depth and worth more than that — halving the king-placement space
 // gives twice the effective data per bucket at the same file size. The other half is the eight
 // material output heads (shape_heads_eight.go).
 //

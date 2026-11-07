@@ -7,7 +7,7 @@ package engine
 // attribution accompany the Produced Work - someone who downloads only the binary gets no file from
 // this repository, and this port embeds the net (engine/nnue/embed.go), so every executable contains
 // the Produced Work. THIRD-PARTY-NOTICES.md is the full text and this is its condensed form; the two
-// must agree. The wording is shared with pawnstar, pawnstar-rs and zenith, so one log reads the same
+// must agree. The wording is shared with pawnstar, pawnstar-rs and trebuchet, so one log reads the same
 // whichever engine wrote it.
 //
 // Printing only: handleUciLicense touches no engine state and is reachable from no search path, so it

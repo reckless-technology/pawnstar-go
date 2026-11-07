@@ -40,9 +40,9 @@ func TestCrc64XZCheckValue(t *testing.T) {
 // version, the exact payload size and the king bucket map's CRC. The map's contents are part of the
 // architecture — king_buckets matching while the entries differ loads cleanly and then reads the
 // wrong weight bank at every evaluation — so the CRC is stamped into every net's header and must be
-// the same in the C++ and Rust ports and in zenith, whose maps are generated from the same numbers.
+// the same in the C++ and Rust ports and in trebuchet, whose maps are generated from the same numbers.
 //
-// The mirrored shape's three values were produced independently by the C++ port and by zenith before
+// The mirrored shape's three values were produced independently by the C++ port and by trebuchet before
 // this one was written. A port whose numbers differ has a bug and must compare field by field rather
 // than adjust its map.
 func TestShapeReferenceValues(t *testing.T) {

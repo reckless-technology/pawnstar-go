@@ -78,7 +78,7 @@ downloader has. Four places therefore carry the notice:
 - the documentation bundle each release ships (`pawnstar-go-<version>-docs.zip`), which includes it;
 - the engine itself: the **`license` UCI command** prints a condensed form of everything in this file
   (`engine/licence.go`), so it is reachable from inside any GUI's UCI session. The wording is shared
-  with `pawnstar`, `pawnstar-rs` and `zenith`, and `TestLicenceNoticeAgreesWithTheNoticesFile` holds
+  with `pawnstar`, `pawnstar-rs` and `trebuchet`, and `TestLicenceNoticeAgreesWithTheNoticesFile` holds
   the condensed form and this file to each other;
 - the command line: `pawnstar-go --license` prints the same text, from the same place.
 
