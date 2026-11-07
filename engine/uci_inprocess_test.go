@@ -710,20 +710,23 @@ func TestLoadOpeningBookMalformedLines(t *testing.T) {
 }
 
 // TestUCISearchesAFenClaimingUnsupportedCastlingRights searches the FEN of issue #30 on a table the
-// searches before it have warmed, which is how it died: it claims KQ with White's rooks on c1 and g1,
-// and once the search moved the c1 rook away the generator emitted e1c1 and makeMove moved a rook from
-// an empty a1 - "panic: runtime error: index out of range [255] with length 6" in removePiece, at depth
-// 8, on the eleventh of sixteen positions driven over UCI (an access violation in the C++ engine, where
-// the issue was filed). The rights are dropped at the parse now, so what this asserts is the protocol's
-// own promise: the search finishes and answers with a legal move.
+// searches before it have warmed, which is how it was found: it claims KQ with White's rooks on c1 and
+// g1, and once the search moved the c1 rook away the generator emitted e1c1 and makeMove moved a rook
+// from an empty a1 - "panic: runtime error: index out of range [255] with length 6" in removePiece, at
+// depth 8, on the eleventh of sixteen positions driven over UCI (an access violation in the C++ engine,
+// where the issue was filed). A warm table is not needed: measured on LEGION5I (Windows 11) on
+// 2026-11-06 with the published binaries at depth 8, pawnstar-go 2.1.0 died with that panic, removePiece
+// called from makeMove, in 3 of 3 runs after these same warming searches and in 5 of 5 on this FEN alone
+// from a fresh process; 2.2.0 survived both. The rights are dropped at the parse now, so what this
+// asserts is the protocol's own promise: the search finishes and answers with a legal move.
 func TestUCISearchesAFenClaimingUnsupportedCastlingRights(t *testing.T) {
 	// A real search needs a net this build can read, and at the retired v12 shape this tree has
 	// none - the parse rule above is what holds the invariant at either shape.
 	skipWithoutTheShippedNet(t)
 	const issue30Fen = "b2rk3/p2p1nr1/1p2n1p1/1Np2p1p/2P2P1P/1P1BP1P1/P4N2/2R1K1R1 w KQ - 1 16"
 	game := NewGame()
-	// Warm the transposition table, which the bug needed: on a cold table the castling is never
-	// reached and the same FEN alone is harmless at any depth. The table persists across `position`.
+	// Warm the transposition table, as the run that found the bug had: the bug did not need it (the
+	// figures above), but this is the route the issue took. The table persists across `position`.
 	for _, fen := range benchFens[:10] {
 		runUCI(t, game, "position fen "+fen, "go depth 8")
 	}
