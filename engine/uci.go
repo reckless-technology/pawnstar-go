@@ -41,7 +41,12 @@ func (game *Game) HandleCommand(line string) bool {
 	case "setoption":
 		game.handleUciSetOption(fields[1:])
 	case "ucinewgame":
+		// A new game starts from empty tables, as in the C++ handle_ucinewgame and the Rust one: the
+		// transposition table (its generation reset too) and the eval cache are cleared here, not in
+		// newGameFromFen, which `position` also reaches on every move and which must keep the TT.
 		game.stopThinking()
+		game.transpositionTable.clear()
+		game.evalTable.clear()
 		game.newGameFromFen(startFen)
 	case "position":
 		game.handleUciPosition(fields[1:])

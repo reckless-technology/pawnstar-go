@@ -91,7 +91,7 @@ bench <depth>  the same at an explicit depth (the default is 13)
 
 There is no `eval`, `nnue`, `getboard`, `bookmoves`, `dbg` or `help` command — the C++ engine has those, this port does not; its search diagnostics are reached from tests instead (`dbgxClear`/`dbgxPrint`, [*Search diagnostics*](#search-diagnostics)). An unrecognised command is ignored in silence.
 
-One behaviour worth knowing before driving the engine from a harness: `ucinewgame` resets the position, the node count and the clock but **does not** clear the transposition table or the eval cache — `Clear Hash` is what does that. Repeating one position with `ucinewgame` + `go depth N` in a single session therefore gives shrinking, non-deterministic node counts; send `setoption name Clear Hash` before each search, or start a fresh process per position. The C++ engine clears on `ucinewgame`, so this is a deliberate divergence.
+One behaviour worth knowing before driving the engine from a harness: `ucinewgame` clears the transposition table and the eval cache as well as resetting the position, the node count and the clock, as the C++ and Rust engines do, so a position repeated after `ucinewgame` searches the same tree each time. `position` alone keeps both tables, which is what carries the TT across the moves of one game; repeating a position with only `position` + `go depth N` in one session therefore gives shrinking node counts. Until 2026-11-07 `ucinewgame` cleared neither, and only `Clear Hash` did.
 
 ### UCI options
 
@@ -450,7 +450,7 @@ networks**, which were trained on PlentyChess self-play data, are at the top of 
 | `uci` | Prints engine id and `uciok` |
 | `isready` | Prints `readyok` |
 | `license` | Prints the engine's licence and the third-party notices the shipped data obliges - the condensed form of [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), in wording shared with the C++, Rust and trebuchet engines. Printing only: it reads and writes no engine state |
-| `ucinewgame` | Stops search, resets position and clock. Does **not** clear the TT/eval cache (use `Clear Hash` for that) — so repeating a position in one session reuses the TT and node counts shrink |
+| `ucinewgame` | Stops search, clears the TT and the eval cache, resets position and clock |
 | `position startpos [moves ...]` | Sets position from start FEN, applies move list |
 | `position fen <fen> [moves ...]` | Sets position from FEN, applies move list |
 | `go wtime <ms> btime <ms> [winc <ms> binc <ms>] [movestogo <n>]` | Standard clock; without `movestogo`, moves-to-go is a decreasing horizon `max(40−move, 5)`. Increment is parsed but not folded into the budget (SPRT-neutral) |

@@ -131,6 +131,55 @@ func TestUCIPositionEdgeCases(t *testing.T) {
 	}
 }
 
+// TestUCINewGameClearsTheTables: `ucinewgame` empties the transposition table, resetting its generation,
+// and the eval cache, as the C++ and Rust engines do, so a search repeated after it searches exactly the
+// tree the first one did. `position` alone keeps them: the TT's value is that it persists across moves.
+func TestUCINewGameClearsTheTables(t *testing.T) {
+	skipWithoutTheShippedNet(t)
+	isTableEmpty := func(game *Game) bool {
+		for i := range game.transpositionTable.table {
+			if game.transpositionTable.table[i].key.Load() != 0 || game.transpositionTable.table[i].data.Load() != 0 {
+				return false
+			}
+		}
+		return game.transpositionTable.currentAge == 0
+	}
+	isEvalCacheEmpty := func(game *Game) bool {
+		for i := range game.evalTable.entries {
+			if game.evalTable.entries[i].Load() != 0 {
+				return false
+			}
+		}
+		return true
+	}
+
+	game := NewGame()
+	search := []string{"setoption name OwnBook value false", "position startpos", "go depth 6"}
+	runUCI(t, game, search...)
+	firstNodes := game.nodeCount
+	if isTableEmpty(game) || isEvalCacheEmpty(game) {
+		t.Fatal("a search left the transposition table or the eval cache empty")
+	}
+
+	runUCI(t, game, search...)
+	if game.nodeCount >= firstNodes {
+		t.Errorf("a repeat after `position` alone searched %d nodes, the first %d: the TT did not persist",
+			game.nodeCount, firstNodes)
+	}
+
+	runUCI(t, game, "ucinewgame")
+	if !isTableEmpty(game) {
+		t.Error("ucinewgame left the transposition table, or its generation, uncleared")
+	}
+	if !isEvalCacheEmpty(game) {
+		t.Error("ucinewgame left the eval cache uncleared")
+	}
+	runUCI(t, game, search...)
+	if game.nodeCount != firstNodes {
+		t.Errorf("a repeat after ucinewgame searched %d nodes, the first %d", game.nodeCount, firstNodes)
+	}
+}
+
 // TestUCIGoParsing checks what each `go` keyword puts in the time control, the side-dependence of
 // wtime/btime/winc/binc, the per-search reset of the limits, and that truncated or non-numeric values are
 // ignored rather than crashing the engine. The start position and its first replies are in the opening

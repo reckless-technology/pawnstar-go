@@ -67,10 +67,11 @@ var reInfoNodes = regexp.MustCompile(`^info depth [0-9]+ seldepth [0-9]+ .* node
 // the final cumulative node count.
 //
 // `Clear Hash` first and `isready` before the `go`: the TT and the eval cache deliberately persist
-// across searches in one session (see CLAUDE.md, "ucinewgame does not clear the TT/eval cache"), so
-// without clearing them a repeat of the same search returns a smaller, non-comparable node count. And
-// the search is read to its `bestmove` rather than abandoned — a `quit` straight after `go` cancels
-// the search and still answers `bestmove`, which would prove nothing at all.
+// across `position` commands in one session (see CLAUDE.md, "`ucinewgame` clears the TT and the eval
+// cache; `position` keeps them"), so without clearing them a repeat of the same search returns a
+// smaller, non-comparable node count. And the search is read to its `bestmove` rather than abandoned —
+// a `quit` straight after `go` cancels the search and still answers `bestmove`, which would prove
+// nothing at all.
 func (e *uciEngine) searchFromStartpos(t *testing.T, depth int) (bestmove string, nodes int) {
 	t.Helper()
 	e.send("setoption name Clear Hash")
