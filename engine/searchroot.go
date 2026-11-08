@@ -91,15 +91,7 @@ func searchRootNode(game *Game) move {
 		ss.resetForSearch()
 	}
 
-	// Initial shallow pass to get move ordering before deepening.
-	var initPV variation
-	for i := range moves {
-		m := moves[i]
-		score := searchSingleMove(ss, startDepth, 0, initialAlpha, initialBeta, m, &initPV, i)
-		moves[i] = m.withScore(score)
-	}
-	sortMoves(moves)
-	bestMove := moves[0]
+	bestMove := orderRootMoves(ss, moves)
 
 	// Lazy SMP: each thread runs an independent iterative-deepening search of the same root, sharing
 	// only the lockless transposition table and eval cache (history/killers/continuation/countermoves
@@ -132,6 +124,46 @@ func searchRootNode(game *Game) move {
 	game.isCancelPending.Store(true)
 	helpers.Wait()
 	return bestMove
+}
+
+// orderRootMoves runs the shallow ordering pass: every root move is searched to startDepth, scored, and
+// the list sorted best first. It returns the move to seed iterative deepening with, which is also the
+// move played if the search is cancelled before iterative deepening finds a better one.
+//
+// The pass polls the cancel flag after each move. A move whose search was interrupted by the hard
+// deadline, `stop` or a node limit returns the cancel sentinel, which truncated into the 23-bit score
+// field reads as about +3957070 and used to sort that move first — played with no info line, at times
+// straight into mate. So once cancel is pending the interrupted move and every move after it are
+// unsearched: they keep generation order (sortMoves is stable) beneath every move that completed. If
+// none completed, the root's TT move is played when it is in the list, else the first generated move.
+// With no cancellation the pass is unchanged, so fixed-depth results and the bench signature are too.
+// Mirrors the C++ ordering pass in SearchRootNode.
+func orderRootMoves(ss *searchState, moves []move) move {
+	var initPV variation
+	completedCount := 0
+	for i := range moves {
+		m := moves[i]
+		score := searchSingleMove(ss, startDepth, 0, initialAlpha, initialBeta, m, &initPV, i)
+		if ss.isCancelled() {
+			break // this move's score is not trusted
+		}
+		moves[i] = m.withScore(score)
+		completedCount++
+	}
+	for i := completedCount; i < len(moves); i++ {
+		moves[i] = moves[i].withScore(unsearchedRootMoveScore)
+	}
+	sortMoves(moves)
+	if completedCount == 0 {
+		if transpos, found := ss.game.transpositionTable.find(ss.currentPosition().hash); found {
+			for _, m := range moves {
+				if m.equal(transpos.move) {
+					return m
+				}
+			}
+		}
+	}
+	return moves[0]
 }
 
 // lazySmpSkipSize / lazySmpSkipPhase drive the Stockfish-style per-helper iteration-skip schedule:

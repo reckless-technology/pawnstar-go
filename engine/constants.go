@@ -25,6 +25,11 @@ const (
 	// interrupted by the time limit, allowing the caller to detect cancellation.
 	searchCancelledScore = -12345678
 
+	// unsearchedRootMoveScore marks a root move the ordering pass did not finish searching because the
+	// search was cancelled. It is the least value the move's signed 23-bit score field holds, below every
+	// real score (all within ±initialBeta), so such moves sort after every move that was searched.
+	unsearchedRootMoveScore = -(1 << 22)
+
 	// scoreInstabilityThresh is the centipawn tolerance for the early-exit heuristic:
 	// if the best-move score varies by more than this across consecutive depths the
 	// search is not considered "stable".
