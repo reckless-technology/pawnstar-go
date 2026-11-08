@@ -26,9 +26,10 @@ const (
 	searchCancelledScore = -12345678
 
 	// unsearchedRootMoveScore marks a root move the ordering pass did not finish searching because the
-	// search was cancelled. It is the least value the move's signed 23-bit score field holds, below every
-	// real score (all within ±initialBeta), so such moves sort after every move that was searched.
-	unsearchedRootMoveScore = -(1 << 22)
+	// search was cancelled. It is one below initialAlpha, so below every real score (all within
+	// ±initialBeta), and such moves sort after every move that was searched. Matches the C++
+	// kUnsearchedRootScore and the Rust UNSEARCHED_ROOT_MOVE_SCORE.
+	unsearchedRootMoveScore = initialAlpha - 1
 
 	// scoreInstabilityThresh is the centipawn tolerance for the early-exit heuristic:
 	// if the best-move score varies by more than this across consecutive depths the
