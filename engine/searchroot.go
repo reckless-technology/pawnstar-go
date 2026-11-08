@@ -134,8 +134,10 @@ func searchRootNode(game *Game) move {
 // deadline, `stop` or a node limit returns the cancel sentinel, which truncated into the 23-bit score
 // field reads as about +3957070 and used to sort that move first — played with no info line, at times
 // straight into mate. So once cancel is pending the interrupted move and every move after it are
-// unsearched: they keep generation order (sortMoves is stable) beneath every move that completed. If
-// none completed, the root's TT move is played when it is in the list, else the first generated move.
+// unsearched: they keep generation order (sortMoves is stable) beneath every move that completed. Then
+// the root's TT move is played when it is in the list and its entry is deeper than the pass (depth >
+// startDepth), else the best completed move; if none completed, the TT move at any depth when it is in the
+// list, else the first generated move.
 // With no cancellation the pass is unchanged, so fixed-depth results and the bench signature are too.
 // Mirrors the C++ ordering pass in SearchRootNode.
 func orderRootMoves(ss *searchState, moves []move) move {
@@ -154,8 +156,16 @@ func orderRootMoves(ss *searchState, moves []move) move {
 		moves[i] = moves[i].withScore(unsearchedRootMoveScore)
 	}
 	sortMoves(moves)
-	if completedCount == 0 {
-		if transpos, found := ss.game.transpositionTable.find(ss.currentPosition().hash); found {
+	if completedCount < len(moves) {
+		// Cancelled inside the pass. The moves that finished first are the cheap ones, and their depth-3 scores
+		// miss what a deeper search sees, so prefer the root's TT move when its entry is deeper than the pass:
+		// the root itself is never stored by this search (its moves are searched one by one, here and in
+		// iterativeDeepen), so such an entry is the root reached inside an earlier, deeper search. Otherwise play
+		// the best completed move; and if none completed, the TT move at any depth, else the first generated
+		// (which the stable sort left at the front). The move must be legal here: a hash collision can leave a
+		// move from another position.
+		transpos, found := ss.game.transpositionTable.find(ss.currentPosition().hash)
+		if found && !transpos.move.isNone() && (transpos.depth() > startDepth || completedCount == 0) {
 			for _, m := range moves {
 				if m.equal(transpos.move) {
 					return m

@@ -150,3 +150,60 @@ func TestOrderingPassCancelFallsBackToTheTTMove(t *testing.T) {
 		})
 	}
 }
+
+// TestOrderingPassCancelPrefersADeepTTMove covers a pass cancelled part-way with a TT entry for the root
+// deeper than the pass, as an earlier search of the game leaves one: its move is played, even one the pass
+// never reached, ahead of the best completed move. An entry at the pass's own depth, or one whose move is
+// not in the root list, is passed over for the best completed move. The node limit is the first, doubling
+// from 2048, at which a move completes before the cancel. Mirrors the C++ test_principal_variation case.
+func TestOrderingPassCancelPrefersADeepTTMove(t *testing.T) {
+	skipWithoutTheShippedNet(t)
+	game := NewGame()
+	notInList := moveSinglePush(squareFromString("a2"), squareFromString("a3"))
+	for limit := 2048; limit <= 1<<24; limit *= 2 {
+		expected, ordered, generated := runOrderingPass(game, limit, moveNone(), false)
+		if !game.isCancelPending.Load() {
+			t.Fatal("no node limit cancels the ordering pass after a move has completed")
+		}
+		completed := countCompleted(ordered)
+		if completed == 0 {
+			continue
+		}
+		// A move the pass did not complete, so that playing it can only come from the table.
+		unreached := generated[len(generated)-1]
+		if completed >= len(generated)-1 || unreached.equal(expected) {
+			t.Fatalf("limit %d: the last generated move %s is reached by the cancelled pass", limit, unreached)
+		}
+		cases := []struct {
+			name  string
+			seed  move
+			depth int
+			want  move
+		}{
+			{"a TT move deeper than the pass", unreached, startDepth + 1, unreached},
+			{"a TT move only as deep as the pass", unreached, startDepth, expected},
+			{"a deep TT move not in the root list", notInList, startDepth + 1, expected},
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				prepareOrderingPassGame(game, limit, moveNone(), false)
+				game.transpositionTable.record(game.currentPosition().hash, c.seed, c.depth, nodePV)
+				best := orderRootMoves(newSearchStateFromGame(game), slices.Clone(generated))
+				if !best.equal(c.want) {
+					t.Errorf("limit %d, cancelled after %d of %d moves, depth-%d TT move %s: the ordering pass "+
+						"chose %s, want %s", limit, completed, len(generated), c.depth, c.seed, best, c.want)
+				}
+				prepareOrderingPassGame(game, limit, moveNone(), false)
+				game.transpositionTable.record(game.currentPosition().hash, c.seed, c.depth, nodePV)
+				if played := searchRootNode(game); !played.equal(c.want) {
+					t.Errorf("limit %d, depth-%d TT move %s: searchRootNode played %s, want %s", limit, c.depth,
+						c.seed, played, c.want)
+				}
+			})
+		}
+		t.Logf("limit %d: cancelled after %d of %d moves; best completed %s, deep TT move %s", limit, completed,
+			len(generated), expected, unreached)
+		return
+	}
+	t.Fatal("no node limit up to 2^24 cancels the ordering pass after a move has completed")
+}
