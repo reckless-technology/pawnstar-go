@@ -158,10 +158,11 @@ func orderRootMoves(ss *searchState, moves []move) move {
 	sortMoves(moves)
 	if completedCount < len(moves) {
 		// Cancelled inside the pass. The moves that finished first are the cheap ones, and their depth-3 scores
-		// miss what a deeper search sees, so prefer the root's TT move when its entry is deeper than the pass:
-		// the root itself is never stored by this search (its moves are searched one by one, here and in
-		// iterativeDeepen), so such an entry is the root reached inside an earlier, deeper search. Otherwise play
-		// the best completed move; and if none completed, the TT move at any depth, else the first generated
+		// miss what a deeper search sees, so prefer the root's TT move when its entry is deeper than the pass.
+		// The pass can reach the root again through a repetition and store it there, but such an entry is
+		// shallower than startDepth, so the depth test never prefers it; it can overwrite a deeper entry, and
+		// then the rule falls back to the best completed move. A deeper entry is the root reached inside an
+		// earlier, deeper search. If none completed, play the TT move at any depth, else the first generated
 		// (which the stable sort left at the front). The move must be legal here: a hash collision can leave a
 		// move from another position.
 		transpos, found := ss.game.transpositionTable.find(ss.currentPosition().hash)
