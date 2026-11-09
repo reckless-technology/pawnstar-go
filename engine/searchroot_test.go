@@ -2,6 +2,7 @@ package engine
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -28,14 +29,15 @@ func prepareOrderingPassGame(game *Game, maxNodes int, ttSeed move, isCancelledB
 	game.isCancelPending.Store(isCancelledBeforehand)
 }
 
-// runOrderingPass runs orderRootMoves on a game prepared by prepareOrderingPassGame and returns the move
+// runOrderingPass runs the plain depth-3 ordering pass (orderRootMovesWith with no hard limit, so a node limit
+// only cuts the pass and does not bring in the depth-1 pass) on a game prepared by prepareOrderingPassGame and returns the move
 // chosen, the ordered list, and the list in generation order.
 func runOrderingPass(game *Game, maxNodes int, ttSeed move, isCancelledBeforehand bool) (best move, ordered,
 	generated []move) {
 	prepareOrderingPassGame(game, maxNodes, ttSeed, isCancelledBeforehand)
 	generated = game.currentPosition().generateLegalMoves()
 	ordered = slices.Clone(generated)
-	best = orderRootMoves(newSearchStateFromGame(game), ordered)
+	best = orderRootMovesWith(newSearchStateFromGame(game), ordered, false)
 	return best, ordered, generated
 }
 
@@ -52,8 +54,8 @@ func countCompleted(ordered []move) int {
 // orderingPassCancelFen and checks that a move whose search was interrupted is never chosen: the move
 // played is the best of the moves that completed, each scored exactly as an uninterrupted pass scores it.
 // The completed moves are a prefix of generation order sorted ahead of the unsearched rest, which keeps
-// generation order. Each limit is also run through searchRootNode, which must play the same move:
-// iterative deepening, starting with cancel already pending, returns its seed unchanged.
+// generation order. This is the pass as it runs with no hard limit; under one, searchRootNode runs the
+// depth-1 pass first (the tests below).
 func TestOrderingPassCancelPlaysACompletedMove(t *testing.T) {
 	skipWithoutTheShippedNet(t)
 	game := NewGame()
@@ -103,11 +105,6 @@ func TestOrderingPassCancelPlaysACompletedMove(t *testing.T) {
 		if !best.equal(want) {
 			t.Errorf("limit %d (%d of %d moves completed): the ordering pass chose %s, want %s", limit, completed,
 				len(generated), best, want)
-		}
-
-		prepareOrderingPassGame(game, limit, moveNone(), false)
-		if played := searchRootNode(game); !played.equal(want) {
-			t.Errorf("limit %d: searchRootNode played %s, want %s", limit, played, want)
 		}
 	}
 	if len(completedCountsSeen) < 2 {
@@ -188,16 +185,10 @@ func TestOrderingPassCancelPrefersADeepTTMove(t *testing.T) {
 			t.Run(c.name, func(t *testing.T) {
 				prepareOrderingPassGame(game, limit, moveNone(), false)
 				game.transpositionTable.record(game.currentPosition().hash, c.seed, c.depth, nodePV)
-				best := orderRootMoves(newSearchStateFromGame(game), slices.Clone(generated))
+				best := orderRootMovesWith(newSearchStateFromGame(game), slices.Clone(generated), false)
 				if !best.equal(c.want) {
 					t.Errorf("limit %d, cancelled after %d of %d moves, depth-%d TT move %s: the ordering pass "+
 						"chose %s, want %s", limit, completed, len(generated), c.depth, c.seed, best, c.want)
-				}
-				prepareOrderingPassGame(game, limit, moveNone(), false)
-				game.transpositionTable.record(game.currentPosition().hash, c.seed, c.depth, nodePV)
-				if played := searchRootNode(game); !played.equal(c.want) {
-					t.Errorf("limit %d, depth-%d TT move %s: searchRootNode played %s, want %s", limit, c.depth,
-						c.seed, played, c.want)
 				}
 			})
 		}
@@ -206,4 +197,137 @@ func TestOrderingPassCancelPrefersADeepTTMove(t *testing.T) {
 		return
 	}
 	t.Fatal("no node limit up to 2^24 cancels the ordering pass after a move has completed")
+}
+
+// orderingBudgetOutput runs one `go` on orderingPassCancelFen through the UCI dispatcher, from a cold table with
+// one thread and no book, and returns what it printed.
+func orderingBudgetOutput(t *testing.T, goCommand string) string {
+	t.Helper()
+	game := NewGame()
+	out, _ := runUCI(t, game, "setoption name Threads value 1", "setoption name OwnBook value false",
+		"position fen "+orderingPassCancelFen, goCommand)
+	return out
+}
+
+// TestHardLimitPrintsTheDepthOneInfoLine: the position on which 2.3.0 answered a hard limit with no info line at
+// all (its depth-3 pass outlasts the budget), under each of the limits that reproduced it. A depth-1 pass costs
+// 1,982 nodes here, so a line for it comes before a legal bestmove. The clock case is the 8+0.08 game's `go`.
+func TestHardLimitPrintsTheDepthOneInfoLine(t *testing.T) {
+	skipWithoutTheShippedNet(t)
+	legal := map[string]bool{}
+	rootPosition := positionFromFen(orderingPassCancelFen)
+	for _, m := range rootPosition.generateLegalMoves() {
+		legal[m.String()] = true
+	}
+	for _, goCommand := range []string{"go nodes 4096", "go nodes 65536", "go wtime 664 btime 1110 winc 80 binc 80"} {
+		t.Run(goCommand, func(t *testing.T) {
+			out := orderingBudgetOutput(t, goCommand)
+			infoIndex := strings.Index(out, "info depth 1 ")
+			bestIndex := strings.Index(out, "bestmove ")
+			if infoIndex < 0 || bestIndex < 0 || infoIndex > bestIndex {
+				t.Fatalf("want an `info depth 1` line before the bestmove, got:\n%s", out)
+			}
+			if best := bestmoveOf(out); !legal[best] {
+				t.Errorf("bestmove %q is not a legal move; output:\n%s", best, out)
+			}
+		})
+	}
+}
+
+// TestNoHardLimitPrintsNoOrderingInfoLine: a fixed-depth search has no hard limit, so the depth-3 ordering pass
+// runs alone and prints nothing, as before; its first line is iterative deepening's depth 4.
+func TestNoHardLimitPrintsNoOrderingInfoLine(t *testing.T) {
+	skipWithoutTheShippedNet(t)
+	out := orderingBudgetOutput(t, "go depth 3")
+	if strings.Contains(out, "info depth") {
+		t.Errorf("go depth 3 printed an info line:\n%s", out)
+	}
+	if bestmoveOf(out) == "" {
+		t.Errorf("go depth 3 printed no bestmove:\n%s", out)
+	}
+}
+
+// TestLimitedOrderingDecidesWhenTheDepthThreePassIsCut replays the hard-limit pass by hand: a depth-1 pass
+// with the PV extension off over the generated moves, a stable sort, and (for a node limit that lands inside
+// the depth-3 pass) the first move of that ordering as the expected answer, the table being empty. Node limits
+// below the depth-1 pass's 1,982 nodes cut it, and the 2.3.0 handling plays the best of the moves it
+// completed, or the first generated move when none did. Each limit is run through orderRootMoves, with the
+// limit in force, and through searchRootNode.
+func TestLimitedOrderingDecidesWhenTheDepthThreePassIsCut(t *testing.T) {
+	skipWithoutTheShippedNet(t)
+	game := NewGame()
+	prepareOrderingPassGame(game, 0, moveNone(), false)
+	generated := game.currentPosition().generateLegalMoves()
+	replayed := slices.Clone(generated)
+	replay := newSearchStateFromGame(game)
+	var replayPV variation
+	replay.pvExtensionSuppressed = true
+	for i, m := range replayed {
+		replayed[i] = m.withScore(searchSingleMove(replay, limitedOrderingDepth, 0, initialAlpha, initialBeta, m,
+			&replayPV, i))
+	}
+	replay.pvExtensionSuppressed = false
+	depthOneNodes := replay.nodeCount
+	sortMoves(replayed)
+	want := replayed[0]
+
+	for _, limit := range []int{depthOneNodes + 1, 2048, 4096, 16384, 65536, 131072} {
+		for _, run := range []string{"orderRootMoves", "searchRootNode"} {
+			prepareOrderingPassGame(game, limit, moveNone(), false)
+			var best move
+			var ordered []move
+			if run == "orderRootMoves" {
+				ordered = slices.Clone(generated)
+				best = orderRootMoves(newSearchStateFromGame(game), ordered)
+			} else {
+				best = searchRootNode(game)
+			}
+			if !game.isCancelPending.Load() {
+				t.Fatalf("limit %d: the search was not cut", limit)
+			}
+			if !best.equal(want) {
+				t.Errorf("limit %d, %s: chose %s, want the depth-1 ordering's first move %s", limit, run, best, want)
+			}
+			if run == "orderRootMoves" {
+				// A cut depth-3 pass is set aside whole: the list is the depth-1 ordering with depth-1 scores.
+				for i, m := range ordered {
+					if !m.equal(replayed[i]) || m.score() != replayed[i].score() {
+						t.Fatalf("limit %d: ordered[%d] = %s (%d), want the depth-1 ordering's %s (%d)", limit, i, m,
+							m.score(), replayed[i], replayed[i].score())
+					}
+				}
+			}
+		}
+	}
+
+	// A cut inside the depth-1 pass (here a `stop` already pending; a node limit is polled only every 2048
+	// nodes, after the pass's 1,982) leaves the 2.3.0 handling to apply to that pass.
+	prepareOrderingPassGame(game, 1, moveNone(), true)
+	ordered := slices.Clone(generated)
+	best := orderRootMoves(newSearchStateFromGame(game), ordered)
+	if completed := countCompleted(ordered); completed != 0 || !best.equal(generated[0]) {
+		t.Errorf("a limit with cancel pending completed %d moves and chose %s, want none completed and %s", completed, best,
+			generated[0])
+	}
+}
+
+// TestPvExtensionSuppressionIsScopedToTheDepthOnePass: the flag is off in a fresh state and after a search that
+// used it, so that it cannot reach the depth-3 pass, iterative deepening or the next search on the reused state.
+func TestPvExtensionSuppressionIsScopedToTheDepthOnePass(t *testing.T) {
+	skipWithoutTheShippedNet(t)
+	game := NewGame()
+	prepareOrderingPassGame(game, 4096, moveNone(), false)
+	state := newSearchStateFromGame(game)
+	if state.pvExtensionSuppressed {
+		t.Fatal("a fresh search state has the PV extension suppressed")
+	}
+	orderRootMoves(state, game.currentPosition().generateLegalMoves())
+	if state.pvExtensionSuppressed {
+		t.Error("the flag is still set after the ordering pass")
+	}
+	state.pvExtensionSuppressed = true
+	state.resetForSearch()
+	if state.pvExtensionSuppressed {
+		t.Error("resetForSearch left the flag set")
+	}
 }

@@ -40,8 +40,13 @@ type searchState struct {
 	history   historyTable     // per-thread history heuristic (per-thread to avoid Lazy-SMP contention)
 	nodeCount int              // nodes searched since the last root iteration reset
 	seldepth  int              // deepest ply reached this search (for UCI `info seldepth`)
-	game      *Game            // shared: time control, cancel flag, lockless TT + eval cache
-	dbg       *debugX          // diagnostic counters: the global dbgx for the main thread, a throwaway per helper
+	// pvExtensionSuppressed is true only while the root's depth-1 ordering pass runs (orderRootMoves, under a
+	// hard limit): a table hit on a PV entry then does not extend the depth. On a table warm from deeper
+	// searches every such hit adds the ply the move took away, so along the stored lines the depth never falls
+	// and even a depth-1 search ran on to maxPly, taking up to ~750k nodes where it otherwise takes about 2,000.
+	pvExtensionSuppressed bool
+	game                  *Game   // shared: time control, cancel flag, lockless TT + eval cache
+	dbg                   *debugX // diagnostic counters: the global dbgx for the main thread, a throwaway per helper
 
 	// Move-ordering follow-up heuristics keyed by the previous move (persist across a whole search).
 	// countermoves[prev.pieceTo()] is the best quiet refutation observed to the previous move.
@@ -102,6 +107,7 @@ func (ss *searchState) resetForSearch() {
 	clear(ss.continuationHistory)
 	ss.nodeCount = 0
 	ss.seldepth = 0
+	ss.pvExtensionSuppressed = false
 	ss.accStack = ss.accStack[:1]
 	ss.accValid = ss.accValid[:1]
 	// No net installed means the embedded net itself was unusable (a refused EvalFile keeps the net
