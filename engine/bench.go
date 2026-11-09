@@ -63,6 +63,8 @@ func (game *Game) runBench(depth int) {
 		game.newGameFromFen(fen)
 		game.timeControl.clockType = clockFixedDepth
 		game.timeControl.depth = depth
+		game.timeControl.maxNodes = 0 // a fixed-depth search has no hard limit, so no depth-1 ordering pass runs
+		game.maxSearchTime = 0        // (a stale limit from an earlier `go` would otherwise change the bench)
 		game.isCancelPending.Store(false)
 		// bench calls searchRootNode directly, bypassing startThinking (and therefore armClock), so nothing
 		// else sets the clock origin. Left at 0 it means "the Unix epoch", making elapsedSinceSearchStart

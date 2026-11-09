@@ -130,43 +130,92 @@ func searchRootNode(game *Game) move {
 // the list sorted best first. It returns the move to seed iterative deepening with, which is also the
 // move played if the search is cancelled before iterative deepening finds a better one.
 //
+// Under a hard limit (a positive hard budget, or `go nodes`) the depth-3 pass can outlast the whole budget:
+// on positions from 8+0.08 games it took up to 369k nodes from a cold table and 464 ms on a warm one, against
+// an 80 ms budget (~115k nodes), so no search result existed when the deadline landed. So a depth-1 pass runs
+// first, with the PV extension off (see searchState.pvExtensionSuppressed), at about 2% of the depth-3 pass's
+// cost. If it completes, the list is stably sorted by it, `info depth 1` is printed and the depth-3 pass
+// searches the moves in that order; if the depth-3 pass is then cut it is set aside whole and the depth-1
+// ordering decides. A completed depth-3 pass prints its own info line. Without a hard limit (fixed depth,
+// infinite, bench) the depth-3 pass runs alone, as before.
+//
 // The pass polls the cancel flag after each move. A move whose search was interrupted by the hard
 // deadline, `stop` or a node limit returns the cancel sentinel, which truncated into the 23-bit score
-// field reads as about +3957070 and used to sort that move first — played with no info line, at times
+// field reads as about +3957070 and used to sort that move first - played with no info line, at times
 // straight into mate. So once cancel is pending the interrupted move and every move after it are
-// unsearched: they keep generation order (sortMoves is stable) beneath every move that completed. Then
+// unsearched: they keep list order (sortMoves is stable) beneath every move that completed. Then
 // the root's TT move is played when it is in the list and its entry is deeper than the pass (depth >
-// startDepth), else the best completed move; if none completed, the TT move at any depth when it is in the
-// list, else the first generated move.
-// With no cancellation the pass is unchanged, so fixed-depth results and the bench signature are too.
+// startDepth), else the best completed move; if no search completed, the TT move at any depth when it is in
+// the list, else the first move.
+// With no limit the pass is unchanged, so fixed-depth results and the bench signature are too.
 // Mirrors the C++ ordering pass in SearchRootNode.
 func orderRootMoves(ss *searchState, moves []move) move {
+	return orderRootMovesWith(ss, moves, ss.game.maxSearchTime > 0 || ss.game.timeControl.maxNodes != 0)
+}
+
+// orderRootMovesWith is orderRootMoves with the hard-limit decision made by the caller. Only the tests pass
+// anything but orderRootMoves's own answer: they cut the plain depth-3 pass with a node limit, which would
+// otherwise bring in the depth-1 pass.
+func orderRootMovesWith(ss *searchState, moves []move, hasHardLimit bool) move {
 	var initPV variation
-	completedCount := 0
-	for i := range moves {
-		m := moves[i]
-		score := searchSingleMove(ss, startDepth, 0, initialAlpha, initialBeta, m, &initPV, i)
-		if ss.isCancelled() {
-			break // this move's score is not trusted
+	runOrderingPass := func(depth int) int {
+		completed := 0
+		for i := range moves {
+			m := moves[i]
+			score := searchSingleMove(ss, depth, 0, initialAlpha, initialBeta, m, &initPV, i)
+			if ss.isCancelled() {
+				break // this move's score is not trusted
+			}
+			moves[i] = m.withScore(score)
+			completed++
 		}
-		moves[i] = m.withScore(score)
-		completedCount++
+		return completed
 	}
-	for i := completedCount; i < len(moves); i++ {
-		moves[i] = moves[i].withScore(unsearchedRootMoveScore)
+
+	hasLimitedOrdering := false // whether the depth-1 pass completed
+	var limitedOrdering []move  // its moves, sorted by its scores
+	completedCount := 0         // moves of the last pass run whose search completed
+	if hasHardLimit {
+		ss.pvExtensionSuppressed = true // else a warm table makes this pass unbounded
+		completedCount = runOrderingPass(limitedOrderingDepth)
+		ss.pvExtensionSuppressed = false
+		hasLimitedOrdering = completedCount == len(moves)
+		if hasLimitedOrdering {
+			sortMoves(moves)
+			limitedOrdering = slices.Clone(moves)
+			printSearchInfo(ss, limitedOrderingDepth, moves[0].score(), moves[0].String())
+		}
 	}
-	sortMoves(moves)
+	if !hasHardLimit || hasLimitedOrdering {
+		completedCount = runOrderingPass(startDepth)
+	}
+	if hasLimitedOrdering && completedCount < len(moves) {
+		copy(moves, limitedOrdering) // the depth-3 pass was cut: order by the completed depth-1 pass
+	} else {
+		// Each move the last pass run did not complete (the depth-3 pass, or the depth-1 pass when even that
+		// was cut) is marked unsearched, below every real score, and the stable sort leaves the unsearched
+		// moves last in list order.
+		for i := completedCount; i < len(moves); i++ {
+			moves[i] = moves[i].withScore(unsearchedRootMoveScore)
+		}
+		sortMoves(moves)
+		if hasHardLimit && completedCount == len(moves) {
+			printSearchInfo(ss, startDepth, moves[0].score(), moves[0].String())
+		}
+	}
 	if completedCount < len(moves) {
-		// Cancelled inside the pass. The moves that finished first are the cheap ones, and their depth-3 scores
-		// miss what a deeper search sees, so prefer the root's TT move when its entry is deeper than the pass.
-		// The pass can reach the root again through a repetition and store it there, but such an entry is
-		// shallower than startDepth, so the depth test never prefers it; it can overwrite a deeper entry, and
-		// then the rule falls back to the best completed move. A deeper entry is the root reached inside an
-		// earlier, deeper search. If none completed, play the TT move at any depth, else the first generated
-		// (which the stable sort left at the front). The move must be legal here: a hash collision can leave a
-		// move from another position.
+		// Cancelled inside a pass. The moves that finished first are the cheap ones, and their depth-3 scores
+		// miss what a deeper search sees (the depth-1 pass sees less still), so prefer the root's TT move when
+		// its entry is deeper than the pass. A pass can reach the root again through a repetition and store it
+		// there, but such an entry is shallower than startDepth, so the depth test never prefers it; it can
+		// overwrite a deeper entry, and then the rule falls back to the best completed move: the first move of
+		// the completed depth-1 ordering when there is one, else of the pass that was cut. A deeper entry is
+		// the root reached inside an earlier, deeper search. If no move's search completed at all, play the TT
+		// move at any depth, else the first move (which the stable sort left at the front). The move must be
+		// legal here: a hash collision can leave a move from another position.
+		hasCompletedSearch := hasLimitedOrdering || completedCount != 0
 		transpos, found := ss.game.transpositionTable.find(ss.currentPosition().hash)
-		if found && !transpos.move.isNone() && (transpos.depth() > startDepth || completedCount == 0) {
+		if found && !transpos.move.isNone() && (transpos.depth() > startDepth || !hasCompletedSearch) {
 			for _, m := range moves {
 				if m.equal(transpos.move) {
 					return m
@@ -175,6 +224,16 @@ func orderRootMoves(ss *searchState, moves []move) move {
 		}
 	}
 	return moves[0]
+}
+
+// printSearchInfo prints one `info depth` line for the main thread: the depth, its seldepth, the score, the
+// time since the search started, its node count, its speed, the table's fill and the principal variation given.
+func printSearchInfo(ss *searchState, depth, score int, pv string) {
+	elapsedMs := ss.game.elapsedSinceSearchStart().Milliseconds()
+	nps := int64(ss.nodeCount) * 1000 / max(1, elapsedMs)
+	fmt.Printf("info depth %d seldepth %d score %s time %d nodes %d nps %d hashfull %d pv %s\n",
+		depth, ss.seldepth, formatScore(score), elapsedMs, ss.nodeCount, nps,
+		ss.game.transpositionTable.hashfull(), pv)
 }
 
 // lazySmpSkipSize / lazySmpSkipPhase drive the Stockfish-style per-helper iteration-skip schedule:
@@ -239,11 +298,7 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, threadID int)
 					} else {
 						ss.game.ponderMove = moveNone()
 					}
-					elapsedMs := ss.game.elapsedSinceSearchStart().Milliseconds()
-					nps := int64(ss.nodeCount) * 1000 / max(1, elapsedMs)
-					fmt.Printf("info depth %d seldepth %d score %s time %d nodes %d nps %d hashfull %d pv %s\n",
-						depth, ss.seldepth, formatScore(alpha), elapsedMs, ss.nodeCount, nps,
-						ss.game.transpositionTable.hashfull(), pvString(principalVariation))
+					printSearchInfo(ss, depth, alpha, pvString(principalVariation))
 				}
 			}
 		}

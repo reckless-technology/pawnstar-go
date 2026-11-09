@@ -104,7 +104,9 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		case nodePV:
 			// PV hit: search deeper so the PV is fully verified.
 			ss.dbg.tableHitPvNode++
-			depth++
+			if !ss.pvExtensionSuppressed {
+				depth++
+			}
 		}
 	}
 

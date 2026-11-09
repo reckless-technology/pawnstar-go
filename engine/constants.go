@@ -40,6 +40,10 @@ const (
 	// iterative deepening begins.
 	startDepth = 3
 
+	// limitedOrderingDepth is the depth of the pass run first under a hard deadline or node limit. Mirrors the
+	// C++ kLimitedOrderingDepth.
+	limitedOrderingDepth = 1
+
 	// hashTableMB is the default transposition table size in megabytes, and the value `uci` advertises as
 	// `option name Hash ... default`. It must stay 64, the same as the C++ kHashtableMegabytes and the Rust
 	// HASHTABLE_MEGABYTES: table size changes the collision pattern and so the node count at a fixed depth,
