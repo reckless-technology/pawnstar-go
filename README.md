@@ -10,11 +10,15 @@ trained **entirely on Leela Chess Zero self-play data**. It is the same blob, by
 [`pawnstar`](https://github.com/reckless-technology/pawnstar) and
 [`pawnstar-rs`](https://github.com/reckless-technology/pawnstar-rs) ship.
 
-Measured against the previous net, v12, in single-threaded self-play (finished 2026-10-30, on the
+Measured against the previous net, v12, in single-threaded self-play (both run on 2026-10-30, on the
 project's Linux match machines `reckless-ci-lin-0` and `reckless-ci-lin-2`): **+9.99 Elo at 8+0.08**
-over 8,000 games (95% interval +4.33 to +15.66, on lin-0; biased upward, because the run was extended
-after a good first stage) and **+1.13 at 12+0.12** over 12,000 games (95% interval -3.17 to +5.43; -4.90
-to +7.16 allowing for the spread between 1,000-game chunks; 4,000 games on lin-0 and 8,000 on lin-2).
+over 8,000 games on lin-0 (95% interval +2.42 to +17.57; an **estimate**, because that arm's PGNs were
+never written, so the interval is bracketed from the opening-replay ICC of 0.061 measured on the same
+machine at the same openings; biased upward, because the run was extended after a good first stage) and
+**+1.13 at 12+0.12** over 12,000 games (4,000 on lin-0 and 8,000 on lin-2; 95% interval -5.63 to +7.89,
+measured). Both intervals are widened for the replay of the 306-opening book; the 12+0.12 one uses ICC
+0.0746 and design effect 2.473 from `tools/opening_icc.py` in [`pawnstar`](https://github.com/reckless-technology/pawnstar)
+(the nominal interval was -3.17 to +5.43).
 That is a gain at the faster time control and no measurable difference at the slower one: v20 is
 **non-inferior** to v12, not shown stronger, and it was shipped to remove the PlentyChess-trained data.
 
