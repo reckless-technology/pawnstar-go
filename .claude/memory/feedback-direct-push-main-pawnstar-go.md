@@ -7,7 +7,7 @@ metadata:
   originSessionId: 6ae67a0a-eca5-4c78-b247-b3c77c1452d5
 ---
 
-The user authorized me to work on and push **directly to `main`** in the pawnstar-go repo (`/home/jonny/work/pawnstar-go`, origin `git@github.com:jonny-reckless/pawnstar-go.git`). No need to branch first or ask before committing/pushing to `main` here.
+The user authorized me to work on and push **directly to `main`** in the pawnstar-go repo (`/home/jonny/work/pawnstar-go`, origin `git@github.com:reckless-technology/pawnstar-go.git`). No need to branch first or ask before committing/pushing to `main` here.
 
 **Why:** It's the user's personal engine repo; the default-branch "branch first" guardrail just adds friction they don't want on this repo.
 
