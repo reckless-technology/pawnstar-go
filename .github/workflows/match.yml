@@ -1,0 +1,235 @@
+name: Match
+
+# A strength match between two builds of this engine, played on GitHub-hosted runners through the organisation's shared
+# match workflow (reckless-technology/pawnstar, .github/workflows/match-core.yml, guide docs/match-core.md there).
+# Manual only: nothing here runs on a push or a pull request.
+#
+# This file is a CALLER and holds only what is this engine's:
+#
+#   refs   -> resolves the two refs to commits (the baseline defaults to the newest vMAJOR.MINOR.PATCH tag)
+#   build  -> builds both binaries on ubuntu-24.04 exactly as `make build` does (GOEXPERIMENT=simd, version from git)
+#             and gathers them, the pinned opening set and a manifest.json into ONE artifact, `match-inputs`
+#   match  -> the shared workflow: fastchess, the plan, the chunk matrix, the pool (pooled result in the job summary)
+#
+# This port compares two BINARIES, not two nets (each carries its own embedded net, EvalFile <embedded>). Each side is
+# one search thread: Threads=1 through the core, and GOMAXPROCS=1 in the environment as tools/sprt.sh sets it. OwnBook
+# is off for both, since the book move is weighted-random.
+#
+# The shared workflow is pinned to a COMMIT, never a branch: it checks its tools out at the commit it was called at.
+# To move the pin, change the SHA below and nothing else; docs/match-core.md at that commit is the guide.
+#
+# A workflow_dispatch workflow cannot be dispatched until its file is on the default branch, so a change to this file
+# is dispatched from its own branch with `gh workflow run match.yml --ref <branch>`.
+#
+# Capacity: every public repository of the organisation shares about 60 concurrent hosted jobs, and the core keeps
+# max-parallel at 40. A smoke run wants `chunks: 4` and a few hundred games, not the 20 chunks of a full match.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_ref:
+        description: 'Candidate: branch, tag or commit'
+        default: 'main'
+      baseline_ref:
+        description: 'Baseline: branch, tag or commit (empty = the newest vMAJOR.MINOR.PATCH tag)'
+        default: ''
+      time_control:
+        description: 'Time control, e.g. 8+0.08 (ignored when a depth is given)'
+        default: '8+0.08'
+      baseline_time_control:
+        description: 'Time-odds match: the baseline plays this time control instead. Empty = the same clock'
+        default: ''
+      depth:
+        description: 'Fixed search depth instead of a time control (empty = use the time control)'
+        default: ''
+      games:
+        description: 'Total games (rounded up to whole colour-reversed pairs; at most 2 x the openings left)'
+        default: '4000'
+      chunks:
+        description: 'Number of chunk jobs'
+        default: '20'
+      concurrency:
+        description: 'Games at once per chunk job (a comma list is dealt out round-robin to the chunks)'
+        default: '2'
+      hash_mb:
+        description: 'Transposition table per engine, MB'
+        default: '64'
+      first_opening:
+        description: 'First position of the opening set to play (1-based; the chunks take consecutive slices)'
+        default: '1'
+
+permissions:
+  contents: read
+
+# The NNUE kernels are gated behind GOEXPERIMENT=simd (CLAUDE.md, Build); the Makefile exports it too.
+env:
+  GOEXPERIMENT: simd
+
+jobs:
+  refs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      candidate_sha: ${{ steps.refs.outputs.candidate_sha }}
+      baseline_sha: ${{ steps.refs.outputs.baseline_sha }}
+      baseline_ref: ${{ steps.refs.outputs.baseline_ref }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Resolve the refs
+        id: refs
+        env:
+          IN_CANDIDATE: ${{ inputs.candidate_ref || 'main' }}
+          IN_BASELINE: ${{ inputs.baseline_ref }}
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+
+          def sh(*args):
+              return subprocess.run(args, check=True, capture_output=True, text=True).stdout.strip()
+
+          env = os.environ
+          # Resolved to commits here, once, so every job builds exactly what this named.
+          sh("git", "fetch", "--tags", "--force", "origin", "+refs/heads/*:refs/remotes/origin/*")
+          def resolve(ref):
+              for candidate in (ref, "origin/" + ref):
+                  try:
+                      return sh("git", "rev-parse", "--verify", candidate + "^{commit}")
+                  except subprocess.CalledProcessError:
+                      continue
+              raise SystemExit(f"::error::cannot resolve '{ref}'")
+          baseline = env["IN_BASELINE"].strip()
+          if not baseline:
+              tags = sh("git", "tag", "--list", "v[0-9]*.[0-9]*.[0-9]*", "--sort=-v:refname").splitlines()
+              if not tags:
+                  raise SystemExit("::error::no vMAJOR.MINOR.PATCH tag to default the baseline to")
+              baseline = tags[0]
+          candidate_sha, baseline_sha = resolve(env["IN_CANDIDATE"]), resolve(baseline)
+          print(f"candidate {env['IN_CANDIDATE']} = {candidate_sha}")
+          print(f"baseline  {baseline} = {baseline_sha}")
+          with open(env["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"candidate_sha={candidate_sha}\nbaseline_sha={baseline_sha}\nbaseline_ref={baseline}\n")
+          PY
+
+  build:
+    needs: refs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: The workflow's own tree (the opening-set pin)
+        uses: actions/checkout@v5
+        with:
+          path: wf
+      - name: Candidate checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.refs.outputs.candidate_sha }}
+          fetch-depth: 0
+          path: candidate-src
+      - name: Baseline checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.refs.outputs.baseline_sha }}
+          fetch-depth: 0
+          path: baseline-src
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate-src/go.mod
+          cache: false # no go.sum / external deps to cache
+      - name: Check runner has AVX2
+        run: |
+          grep -q avx2 /proc/cpuinfo \
+            || { echo "::error::runner CPU lacks AVX2 - cannot run the SIMD engine"; exit 1; }
+      - name: Build both binaries (make build)
+        run: |
+          make -C candidate-src build
+          make -C baseline-src build
+      - name: Gather the match inputs and write the manifest
+        env:
+          CANDIDATE_COMMIT: ${{ needs.refs.outputs.candidate_sha }}
+          BASELINE_COMMIT: ${{ needs.refs.outputs.baseline_sha }}
+          BASELINE_REF: ${{ needs.refs.outputs.baseline_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p inputs/candidate inputs/baseline
+          # `pawnstar-go` is a symlink to the versioned binary: copy what it points at.
+          cp -L candidate-src/pawnstar-go inputs/candidate/pawnstar-go
+          cp -L baseline-src/pawnstar-go inputs/baseline/pawnstar-go
+          # The pinned opening set, verified against tools/openings.pin. The core strips the '#' header itself
+          # (match_core.py strip_openings), after checking this file's SHA-256, so the set goes in as fetched.
+          openings="$(wf/tools/fetch-openings.sh)"
+          cp "$openings" inputs/openings.epd
+          chmod +x inputs/*/pawnstar-go
+
+          python3 - <<'PY'
+          import hashlib, json, os
+          def side(role, commit, label):
+              return {"name": f"{label} {commit[:8]}",
+                      "command": "{inputs}/%s/pawnstar-go" % role,
+                      # The net: this port embeds its own, and `<embedded>` says so explicitly.
+                      "options": {"EvalFile": "<embedded>"},
+                      "env": {"GOMAXPROCS": "1"}}
+          env = os.environ
+          manifest = {
+              "format": 1,
+              "candidate": side("candidate", env["CANDIDATE_COMMIT"], "candidate"),
+              "baseline": side("baseline", env["BASELINE_COMMIT"], env["BASELINE_REF"]),
+              "each_options": {"OwnBook": "false"},
+              "openings": {"path": "openings.epd",
+                           "sha256": hashlib.sha256(open("inputs/openings.epd", "rb").read()).hexdigest()},
+              "notes": [f"candidate commit {env['CANDIDATE_COMMIT']}",
+                        f"baseline {env['BASELINE_REF']} commit {env['BASELINE_COMMIT']}",
+                        "workflow commit ${{ github.sha }}"],
+          }
+          json.dump(manifest, open("inputs/manifest.json", "w"), indent=2)
+          PY
+          {
+            echo "candidate_commit  $CANDIDATE_COMMIT"
+            echo "baseline_commit   $BASELINE_COMMIT ($BASELINE_REF)"
+            echo "workflow_commit   ${{ github.sha }}"
+            (cd inputs && sha256sum openings.epd candidate/pawnstar-go baseline/pawnstar-go)
+          } | tee inputs/manifest.txt
+          {
+            echo '### Match inputs'
+            echo '```'
+            cat inputs/manifest.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: match-inputs
+          path: inputs
+          retention-days: 14
+          if-no-files-found: error
+
+  match:
+    needs: [refs, build]
+    # Pinned to the commit pawnstar PR #99 merged (docs/match-core.md there is the guide), never a branch.
+    uses: reckless-technology/pawnstar/.github/workflows/match-core.yml@c0ffab8bd8ed60369a9e819b9475b4a63e6157d4
+    with:
+      artifact: match-inputs
+      title: 'Pawnstar-Go: ${{ needs.refs.outputs.candidate_sha }} (candidate) vs ${{ needs.refs.outputs.baseline_ref }} ${{ needs.refs.outputs.baseline_sha }} (baseline)'
+      time_control: ${{ inputs.time_control || '8+0.08' }}
+      baseline_time_control: ${{ inputs.baseline_time_control }}
+      depth: ${{ inputs.depth }}
+      games: ${{ inputs.games || '4000' }}
+      chunks: ${{ inputs.chunks || '20' }}
+      concurrency: ${{ inputs.concurrency || '2' }}
+      hash_mb: ${{ inputs.hash_mb || '64' }}
+      first_opening: ${{ inputs.first_opening || '1' }}
+      # The generic probe cannot tell that a net loaded. This one gives each binary the EvalFile option and fails on
+      # the engine's own refusal wording (CLAUDE.md, "A refused net is never substituted for"), then runs `bench 4`
+      # so the binary searches for real. Nothing is played.
+      preflight: |
+        for role in candidate baseline; do
+          out="$(printf 'uci\nsetoption name EvalFile value <embedded>\nisready\nbench 4\nquit\n' \
+                 | env GOMAXPROCS=1 "./$role/pawnstar-go")"
+          echo "$out" | tail -n 6
+          if echo "$out" | grep -qiE 'refus|keeping the net'; then
+            echo "::error::the $role binary refused its net option"; exit 1
+          fi
+          echo "$out" | grep -q 'readyok' || { echo "::error::the $role binary never said readyok"; exit 1; }
+          echo "$out" | grep -qiE 'nodes' || { echo "::error::the $role binary printed no bench result"; exit 1; }
+          echo "preflight: $role OK"
+        done

@@ -72,7 +72,33 @@ Perft (move generation only) runs at ~200 Mnps single-threaded (start position) 
 
 ## SPRT self-play harness
 
-`tools/sprt.sh <candidate-bin> <baseline-bin> [rounds]` runs a fastchess binary-vs-binary SPRT (single-core engines via `GOMAXPROCS=1`, fixed depth via `DEPTH=`, openings from `~/pawnstar_nnue/openings.epd`). Snapshot a baseline with `make baseline`. Every eval or search change that could affect strength is gated this way — run it in the background, they are long. The NNUE port itself passed [0, 10] with LLR 2.96 (146W/3L/5D over 154 games).
+`tools/sprt.sh <candidate-bin> <baseline-bin> [rounds]` runs a fastchess binary-vs-binary SPRT (single-core engines via `GOMAXPROCS=1`, fixed depth via `DEPTH=`, openings from the set pinned in `tools/openings.pin`: Pawnstar's `nnue/openings.epd` at one commit, fetched and SHA-256-verified by `tools/fetch-openings.sh`, with its `#` header stripped for fastchess). Snapshot a baseline with `make baseline`. Every eval or search change that could affect strength is gated this way — run it in the background, they are long. The NNUE port itself passed [0, 10] with LLR 2.96 (146W/3L/5D over 154 games).
+
+## Running a match on hosted runners
+
+`.github/workflows/match.yml` plays a candidate against a baseline on GitHub-hosted `ubuntu-24.04` runners, so a match
+needs no lin-0 and no private-runner time. It is manual only (`workflow_dispatch`) and a **caller** of the organisation's
+shared workflow, `reckless-technology/pawnstar/.github/workflows/match-core.yml`, which does fastchess, the plan, the
+chunk matrix and the pool; its guide is `docs/match-core.md` in that repository, at the commit the `uses:` line names
+(a full SHA, never a branch: the core checks its tools out at the commit it was called at). Run it:
+
+```bash
+gh workflow run match.yml -f candidate_ref=main -f games=400 -f chunks=4 -f depth=8     # a short fixed-depth match
+gh workflow run match.yml -f candidate_ref=my-branch -f time_control=8+0.08              # 4000 games over 20 chunks
+```
+
+Inputs: `candidate_ref` (default `main`), `baseline_ref` (default the newest `vMAJOR.MINOR.PATCH` tag), `time_control`
+or `depth`, `baseline_time_control` (time odds), `games`, `chunks`, `concurrency`, `hash_mb`, `first_opening`. Both refs
+are resolved to commits once, built with `make build` (so `GOEXPERIMENT=simd` and the git-derived version, as a release),
+and handed to the core as one artifact with a `manifest.json`: the two binaries, the pinned opening set and each side's
+options (`Threads=1` from the core, `GOMAXPROCS=1` in the environment as `tools/sprt.sh` has it, `OwnBook=false`,
+`EvalFile=<embedded>`, since this port compares binaries and each carries its net). The pooled result, with the
+opening-corrected Elo and a 95 % bar, is in the run's job summary. **Mind the shared budget**: the organisation's public
+repositories share about 60 hosted jobs and the core runs up to 40 chunks at once, so a smoke test wants `chunks=4`. A
+hosted CPU model is not fixed, so a time-control match is fair within a chunk and only approximately comparable between
+runs; a fixed-depth match is deterministic. There is no `-sprt` here: a sequential test cannot be split across chunks, so
+a serial SPRT is still `tools/sprt.sh`. Dispatching needs the file on `main`; a change to the workflow is tested with
+`gh workflow run match.yml --ref <branch>`.
 
 ## Playing test games
 
