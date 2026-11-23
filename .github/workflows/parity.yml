@@ -1,0 +1,256 @@
+name: Parity
+
+# A fixed-depth match between this port and Pawnstar (C++) that must agree GAME FOR GAME. The two engines are
+# bit-exact at a fixed depth on one thread (the bench signature, 5,617,906 nodes at depth 13 with net v20, is the same
+# in both), so a depth-limited match between them from the same openings is deterministic: each colour-reversed pair
+# must be two identical games, move for move, score for score and node for node, and the candidate's score must be
+# exactly 50 %. A divergence in a deterministic system is a bug in one of the engines, not noise.
+#
+# What it replaces: the by-hand checks on lin-0 (replay.py, the sweep_*.py comparisons of 'go nodes N' answers, and
+# the match directories), which lived in a working directory no repository held. This is the match half of that.
+#
+#   refs   -> resolves the two refs to commits
+#   build  -> builds this port (make build) and Pawnstar (clang-18, release), and gathers both binaries, both nets,
+#             the pinned opening set and a manifest.json into one artifact
+#   match  -> pawnstar's shared match workflow (match-core.yml), fixed depth, Threads=1, the PGNs of every chunk
+#   check  -> tools/parity_check.py reads those PGNs: pair by pair, the moves, scores, depths and node counts of the
+#             two games must be identical, and the total must be exactly 50 %. The job fails otherwise.
+#
+# Manual only (workflow_dispatch). A release trigger was left out: the check is cheap to dispatch against a release's
+# tags (go_ref=v2.3.1 pawnstar_ref=v2.3.1) and the release workflow builds and tests on three platforms already.
+#
+# `fault_depth` is a fault injection, and the way this check is shown to fail: it makes the Pawnstar side search that
+# depth instead of the match depth, and the run MUST then fail in the check job. A check that never fails proves nothing.
+#
+# A workflow_dispatch workflow cannot be dispatched until its file is on the default branch, so a change to this file
+# is dispatched from its own branch with `gh workflow run parity.yml --ref <branch>`.
+#
+# Capacity: every public repository of the organisation shares about 60 concurrent hosted jobs. The defaults are 400
+# games over 4 chunks.
+
+on:
+  workflow_dispatch:
+    inputs:
+      go_ref:
+        description: 'This port: branch, tag or commit'
+        default: 'main'
+      pawnstar_ref:
+        description: 'Pawnstar (C++, reckless-technology/pawnstar): branch, tag or commit. Pair it with go_ref, e.g. v2.3.1 with v2.3.1'
+        default: 'main'
+      depth:
+        description: 'Fixed search depth'
+        default: '8'
+      games:
+        description: 'Total games (rounded up to whole colour-reversed pairs)'
+        default: '400'
+      chunks:
+        description: 'Number of chunk jobs'
+        default: '4'
+      concurrency:
+        description: 'Games at once per chunk job'
+        default: '2'
+      first_opening:
+        description: 'First position of the opening set to play (1-based)'
+        default: '1'
+      fault_depth:
+        description: 'FAULT INJECTION: Pawnstar searches this depth instead of the match depth. The run must then FAIL'
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  GOEXPERIMENT: simd
+
+jobs:
+  refs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      go_sha: ${{ steps.refs.outputs.go_sha }}
+      pawnstar_sha: ${{ steps.refs.outputs.pawnstar_sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Resolve the refs
+        id: refs
+        env:
+          IN_GO: ${{ inputs.go_ref || 'main' }}
+          IN_PAWNSTAR: ${{ inputs.pawnstar_ref || 'main' }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin '+refs/heads/*:refs/remotes/origin/*'
+          go_sha="$(git rev-parse --verify "$IN_GO^{commit}" 2>/dev/null || git rev-parse --verify "origin/$IN_GO^{commit}")"
+          # Pawnstar is public: a bare clone of it is enough to resolve a ref to a commit.
+          git clone --quiet --bare --filter=blob:none https://github.com/reckless-technology/pawnstar.git "$RUNNER_TEMP/pawnstar.git"
+          pawnstar_sha="$(git -C "$RUNNER_TEMP/pawnstar.git" rev-parse --verify "$IN_PAWNSTAR^{commit}" 2>/dev/null \
+                          || git -C "$RUNNER_TEMP/pawnstar.git" rev-parse --verify "refs/heads/$IN_PAWNSTAR^{commit}")"
+          echo "this port  $IN_GO = $go_sha"
+          echo "pawnstar   $IN_PAWNSTAR = $pawnstar_sha"
+          echo "go_sha=$go_sha" >> "$GITHUB_OUTPUT"
+          echo "pawnstar_sha=$pawnstar_sha" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: refs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: The workflow's own tree (the opening-set pin and the checker)
+        uses: actions/checkout@v5
+        with:
+          path: wf
+      - name: This port
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.refs.outputs.go_sha }}
+          fetch-depth: 0
+          path: go-src
+      - name: Pawnstar (C++)
+        uses: actions/checkout@v5
+        with:
+          repository: reckless-technology/pawnstar
+          ref: ${{ needs.refs.outputs.pawnstar_sha }}
+          fetch-depth: 0
+          path: pawnstar-src
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go-src/go.mod
+          cache: false # no go.sum / external deps to cache
+      - name: Install the C++ toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang-18 cmake ninja-build
+      - name: Check runner has AVX2 + BMI2
+        run: |
+          grep -q avx2 /proc/cpuinfo && grep -q bmi2 /proc/cpuinfo \
+            || { echo "::error::runner CPU lacks AVX2/BMI2 - cannot run the engines"; exit 1; }
+      - name: Build this port (make build)
+        run: make -C go-src build
+      - name: Build Pawnstar (release, clang-18)
+        run: make -C pawnstar-src -j"$(nproc)" RELEASE=1 CXX=clang++-18
+      - name: Gather the match inputs and write the manifest
+        env:
+          GO_COMMIT: ${{ needs.refs.outputs.go_sha }}
+          PAWNSTAR_COMMIT: ${{ needs.refs.outputs.pawnstar_sha }}
+          FAULT_DEPTH: ${{ inputs.fault_depth }}
+        run: |
+          set -euo pipefail
+          mkdir -p inputs/candidate inputs/baseline
+          # candidate = this port, baseline = Pawnstar (C++). `pawnstar-go` is a symlink: copy what it points at.
+          cp -L go-src/pawnstar-go inputs/candidate/pawnstar-go
+          cp -L pawnstar-src/build/pawnstar inputs/baseline/pawnstar
+          # Each side gets its own net file, from its own repository.
+          cp go-src/engine/nnue/pawnstar-v20.bin inputs/candidate.bin
+          cp pawnstar-src/nnue/pawnstar-v20.bin inputs/baseline.bin
+          # The pinned opening set, verified against tools/openings.pin. The core strips the '#' header itself
+          # (match_core.py strip_openings) after checking this file's SHA-256, so it goes in as fetched.
+          cp "$(wf/tools/fetch-openings.sh)" inputs/openings.epd
+          cp wf/tools/parity_check.py wf/tools/parity_check_test.py inputs/
+          chmod +x inputs/candidate/pawnstar-go inputs/baseline/pawnstar
+
+          python3 - <<'PY'
+          import hashlib, json, os
+          env = os.environ
+          pawnstar = {"name": "Pawnstar C++ " + env["PAWNSTAR_COMMIT"][:8],
+                      "command": "{inputs}/baseline/pawnstar",
+                      "options": {"EvalFile": "{inputs}/baseline.bin"},
+                      "env": {"PAWNSTAR_EVALFILE": "{inputs}/baseline.bin", "PAWNSTAR_THREADS": "1"}}
+          if env["FAULT_DEPTH"]:
+              # FAULT INJECTION: the engine is started through a one-line filter that rewrites 'go depth N'.
+              pawnstar["command"] = "/bin/sh"
+              pawnstar["args"] = ["-c", "sed -u 's/^go depth .*/go depth %s/' | {inputs}/baseline/pawnstar"
+                                  % int(env["FAULT_DEPTH"])]
+          manifest = {
+              "format": 1,
+              "candidate": {"name": "Pawnstar-Go " + env["GO_COMMIT"][:8],
+                            "command": "{inputs}/candidate/pawnstar-go",
+                            "options": {"EvalFile": "{inputs}/candidate.bin"},
+                            "env": {"GOMAXPROCS": "1"}},
+              "baseline": pawnstar,
+              "each_options": {"OwnBook": "false"},
+              "openings": {"path": "openings.epd",
+                           "sha256": hashlib.sha256(open("inputs/openings.epd", "rb").read()).hexdigest()},
+              "notes": ["this port " + env["GO_COMMIT"], "pawnstar " + env["PAWNSTAR_COMMIT"],
+                        "fault injection: " + (env["FAULT_DEPTH"] or "none")],
+          }
+          json.dump(manifest, open("inputs/manifest.json", "w"), indent=2)
+          PY
+          {
+            echo "go_commit        $GO_COMMIT"
+            echo "pawnstar_commit  $PAWNSTAR_COMMIT"
+            echo "fault_depth      ${FAULT_DEPTH:-none}"
+            echo "workflow_commit  ${{ github.sha }}"
+            (cd inputs && sha256sum candidate.bin baseline.bin openings.epd candidate/pawnstar-go baseline/pawnstar)
+            if cmp -s inputs/candidate.bin inputs/baseline.bin; then echo "nets             IDENTICAL"; else echo "nets             DIFFERENT (parity cannot hold)"; fi
+          } | tee inputs/manifest.txt
+          {
+            echo '### Parity inputs'
+            echo '```'
+            cat inputs/manifest.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: parity-inputs
+          path: inputs
+          retention-days: 14
+          if-no-files-found: error
+
+  match:
+    needs: [refs, build]
+    # Pinned to the commit pawnstar PR #99 merged (docs/match-core.md there is the guide), never a branch.
+    uses: reckless-technology/pawnstar/.github/workflows/match-core.yml@c0ffab8bd8ed60369a9e819b9475b4a63e6157d4
+    with:
+      artifact: parity-inputs
+      tag: parity
+      title: "Parity: Pawnstar-Go ${{ needs.refs.outputs.go_sha }} vs Pawnstar ${{ needs.refs.outputs.pawnstar_sha }} at depth ${{ inputs.depth || '8' }}"
+      depth: ${{ inputs.depth || '8' }}
+      games: ${{ inputs.games || '400' }}
+      chunks: ${{ inputs.chunks || '4' }}
+      concurrency: ${{ inputs.concurrency || '2' }}
+      first_opening: ${{ inputs.first_opening || '1' }}
+      # Both binaries load their net and must report the same bench node total before a game is played: the same
+      # signature the two repositories' CIs pin, here between the two builds of this run. (The fault injection leaves
+      # `bench` alone, so it still reaches the match.)
+      preflight: |
+        bench() {  # <label> <command> [env...]
+          label="$1"; shift
+          out="$(printf 'uci\nsetoption name EvalFile value %s\nsetoption name OwnBook value false\nisready\nbench 6\nquit\n' "$NET" \
+                 | env "$@" 2>&1)"
+          echo "$out" | grep -qiE 'refus|keeping the net' && { echo "::error::$label refused its net"; exit 1; }
+          echo "$out" | grep -E '^[0-9]+ nodes' | tail -n 1
+        }
+        NET="$PWD/candidate.bin"; go_bench="$(bench Pawnstar-Go GOMAXPROCS=1 ./candidate/pawnstar-go | awk '{print $1}')"
+        NET="$PWD/baseline.bin";  cpp_bench="$(bench Pawnstar PAWNSTAR_THREADS=1 PAWNSTAR_EVALFILE="$PWD/baseline.bin" ./baseline/pawnstar | awk '{print $1}')"
+        echo "bench 6: Pawnstar-Go ${go_bench:-none}  Pawnstar ${cpp_bench:-none}"
+        [ -n "$go_bench" ] && [ "$go_bench" = "$cpp_bench" ] \
+          || { echo "::error::bench 6 differs between the two builds, so the games cannot agree"; exit 1; }
+
+  check:
+    needs: [refs, build, match]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: The match must have played
+        if: needs.match.result != 'success'
+        run: |
+          echo "::error::the match did not complete (${{ needs.match.result }}): there is nothing to compare"
+          exit 1
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: parity-chunk-*
+          merge-multiple: true
+          path: chunks
+      - uses: actions/download-artifact@v5
+        with:
+          name: parity-inputs
+          path: inputs
+      - name: The checker's own tests (it must fail each way two games can differ)
+        run: python3 -I inputs/parity_check_test.py
+      - name: Game-for-game agreement, pair by pair
+        env:
+          GAMES: ${{ inputs.games || '400' }}
+          FAULT_DEPTH: ${{ inputs.fault_depth }}
+        run: |
+          python3 -I inputs/parity_check.py chunks --expect-games "$(( (GAMES + 1) / 2 * 2 ))" \
+            --summary "$GITHUB_STEP_SUMMARY"
