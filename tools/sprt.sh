@@ -34,7 +34,15 @@ command -v fastchess >/dev/null || { echo "error: fastchess not on PATH" >&2; ex
 # Fetch (if need be) and verify the pinned opening set; a failure here stops the run (set -e).
 OPENINGS="$("$(dirname "${BASH_SOURCE[0]}")/fetch-openings.sh")"
 
-echo "openings: $OPENINGS" >&2
+# fastchess's EPD reader rejects the '#' provenance header and blank lines, so it is handed a scratch
+# copy without them. The hash was checked above, on the fetched file; the copy is never hashed and the
+# pinned original is left as fetched.
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+grep -v '^[[:space:]]*#' "$OPENINGS" | grep -v '^[[:space:]]*$' > "$scratch/openings.epd" || true
+[ -s "$scratch/openings.epd" ] || { echo "error: no positions left in $OPENINGS after stripping comments" >&2; exit 1; }
+
+echo "openings: $OPENINGS (comments stripped into $scratch/openings.epd, $(wc -l < "$scratch/openings.epd") positions)" >&2
 
 # Each engine is pinned to one core so CONCURRENCY concurrent games don't oversubscribe.
 # GOMAXPROCS=1 is the Go equivalent of the C++ harness's PAWNSTAR_THREADS=1: the search still
@@ -51,12 +59,13 @@ fi
 
 # -games 2 -repeat plays each opening twice with colours reversed. Draw/resign adjudication
 # ends decided games early. -sprt stops as soon as elo0 vs elo1 is decided at alpha/beta=0.05.
-exec fastchess \
+# Not exec'd: the EXIT trap has to remove the scratch copy; the script exits with fastchess's status.
+fastchess \
     -engine cmd="$CAND" name=cand \
     -engine cmd="$BASE" name=base \
     -each proto=uci "${clock_args[@]}" \
     -rounds "$ROUNDS" -games 2 -repeat \
-    -openings file="$OPENINGS" format=epd order=random \
+    -openings file="$scratch/openings.epd" format=epd order=random \
     -draw movenumber=40 movecount=8 score=20 \
     -resign movecount=3 score=600 \
     -sprt elo0="$ELO0" elo1="$ELO1" alpha=0.05 beta=0.05 \
