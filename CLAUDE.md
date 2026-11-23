@@ -100,6 +100,30 @@ runs; a fixed-depth match is deterministic. There is no `-sprt` here: a sequenti
 a serial SPRT is still `tools/sprt.sh`. Dispatching needs the file on `main`; a change to the workflow is tested with
 `gh workflow run match.yml --ref <branch>`.
 
+## The parity match against Pawnstar
+
+`.github/workflows/parity.yml` is the cross-engine check as a hosted job: this port and Pawnstar (C++) are bit-exact at a
+fixed depth on one thread, so a depth-8 match between them from the same openings is deterministic, and
+`tools/parity_check.py` asserts it from the chunk PGNs after the shared match workflow's pool. Each colour-reversed pair
+must be two identical games (the moves, and for every move the score, depth and selective depth in the move comment;
+node counts are compared and listed too, and fail the check only with `--strict-nodes`; the clock figures are never
+compared), so every pair agrees in result and the candidate's score is exactly 50 %. It fails otherwise, naming the first differing ply of each divergent pair. Dispatch it (it needs the file on
+`main`, or `--ref <branch>`):
+
+```bash
+gh workflow run parity.yml -f go_ref=v2.3.1 -f pawnstar_ref=v2.3.1      # a release pair; the defaults are both main
+gh workflow run parity.yml -f fault_depth=7                             # the check must FAIL this one
+```
+
+`fault_depth` is how the check is shown to fail: Pawnstar's side is given a different depth through a one-line filter on
+its `go depth`, and the parity job must go red. The checker's own tests (`tools/parity_check_test.py`, run in the job
+before the check) cover each way two games can differ. Before any game a preflight requires the two builds to print the
+same `bench 6` total, with each side's net loaded from its own repository's file; the job summary says whether the nets
+are identical. **Known finding (2026-11-23, main against main, depth 8, 200 pairs from openings 1 and from 201):** 199 and 198 pairs
+agreed; the others diverged only in games past ply 100 (a node count at ply 127, then a score and seldepth at ply 140;
+seldepth 64 against 60 at ply 120), so the two engines are not bit-exact in long endgames. The check reports it; it is
+the engines' to explain. Pair the two refs: Pawnstar `main` and this port's `main` agree only while both are in lockstep.
+
 ## Playing test games
 
 [game.py](../pawnstar-rs/game.py) (in the sibling Rust repo) orchestrates a UCI game between pawnstar-go and pawnstar-rs, building both engines automatically. Time control and colours are configured at the top of the file.
