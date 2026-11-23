@@ -54,7 +54,7 @@ var (
 	blackMoveHash        zobrist     // XORed into the hash when Black is to move
 )
 
-// init runs all table initialisation in dependency order at program startup.
+// init runs all table initialization in dependency order at program startup.
 func init() {
 	initRays()
 	initAttacks()
@@ -297,7 +297,7 @@ func lsbX(b bitboard) square { return (b | 0x8000000000000000).lsb() }
 func msbX(b bitboard) square { return (b | 1).msb() }
 
 // rookAttacksClassic computes rook attacks from sq on occ using classical ray
-// subtraction.  Used only during magic table initialisation; the hot path uses
+// subtraction.  Used only during magic table initialization; the hot path uses
 // the precomputed lookup in rookAttacks.
 func rookAttacksClassic(occ bitboard, sq square) bitboard {
 	result := rookAttacksEmpty[sq]
@@ -309,7 +309,7 @@ func rookAttacksClassic(occ bitboard, sq square) bitboard {
 }
 
 // bishopAttacksClassic computes bishop attacks from sq on occ using classical ray
-// subtraction.  Used only during magic table initialisation.
+// subtraction.  Used only during magic table initialization.
 func bishopAttacksClassic(occ bitboard, sq square) bitboard {
 	result := bishopAttacksEmpty[sq]
 	result ^= northeastOf[lsbX(northeastOf[sq]&occ)]

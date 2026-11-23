@@ -13,7 +13,7 @@ type seeBoard struct {
 	colors [2]bitboard
 }
 
-// newSeeBoard initialises a seeBoard from the piece bitboards of pos.
+// newSeeBoard initializes a seeBoard from the piece bitboards of pos.
 func newSeeBoard(pos *position) seeBoard {
 	return seeBoard{pieces: pos.pieces, colors: pos.colors}
 }
@@ -80,9 +80,9 @@ func evaluateStaticExchange(pos *position, m move) int {
 //
 // which lets each side "stand pat" rather than recapture into a loss.
 func evaluateSwapOff(bb *seeBoard, sq square, c color, pieceOnSquare piece) int {
-	// Source squares of the pawn attackers of `location`, by attacking colour. `location` is fixed for
+	// Source squares of the pawn attackers of `location`, by attacking color. `location` is fixed for
 	// the whole swap-off, but the side to move flips every ply, so the correct set must be selected per
-	// ply below. (Computing it once for the initial colour missed the opposite colour's pawn recaptures
+	// ply below. (Computing it once for the initial color missed the opposite color's pawn recaptures
 	// — e.g. a white c4 pawn recapturing after a black e6xd5, which the swap-off must follow.)
 	pawnSrc := [2]bitboard{white: pawnAttacksBlack[sq], black: pawnAttacksWhite[sq]}
 	knightTargets := knightAttacks[sq]
@@ -128,12 +128,12 @@ func evaluateSwapOff(bb *seeBoard, sq square, c color, pieceOnSquare piece) int 
 	return scores[0]
 }
 
-// leastValuableAttacker returns the cheapest piece of colour c that attacks sq in the swap-off board,
+// leastValuableAttacker returns the cheapest piece of color c that attacks sq in the swap-off board,
 // and the bitboard of those attackers (the caller takes its least-significant bit as the specific
 // attacker). It probes piece types in ascending value — pawn, knight, bishop, rook, queen, king — so
 // the first hit is the least valuable, and returns (noPiece, 0) when c has no attacker left. The sliding
 // targets are computed against the live `occupied` (updated as pieces leave the exchange) so X-rays open
-// up correctly; pawnSources is the pre-selected pawn-attack-source set for colour c (pawnSrc[c]).
+// up correctly; pawnSources is the pre-selected pawn-attack-source set for color c (pawnSrc[c]).
 func (bb *seeBoard) leastValuableAttacker(sq square, c color, occupied, pawnSources, knightTargets, kingTargets bitboard) (piece, bitboard) {
 	own := bb.colors[c]
 	if a := pawnSources & own & bb.pieces[pawn]; a.isNotEmpty() {

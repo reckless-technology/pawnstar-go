@@ -9,7 +9,7 @@ import (
 )
 
 // debugX collects per-search diagnostic counters.  To use, call dbgxClear before
-// a search and dbgxPrint after to inspect search behaviour.
+// a search and dbgxPrint after to inspect search behavior.
 // Field names are kept in sync with the C++ engine's debug_dictionary keys: dbgxPrint renders each field
 // as camelToWords(name), which must equal the corresponding C++ INCREMENT("...") key, so the two engines'
 // diagnostic dumps line up counter-for-counter.
@@ -22,7 +22,7 @@ type debugX struct {
 	checkmates                  uint
 	drawsByMaterial2            uint // K vs K
 	drawsByMaterial3            uint // K+minor vs K
-	drawsByMaterial4            uint // KB vs KB, same-colour bishops
+	drawsByMaterial4            uint // KB vs KB, same-color bishops
 	drawsByRepetition           uint
 	epCaptureExtensions         uint // an en-passant capture was searched one ply deeper
 	evalCalls                   uint

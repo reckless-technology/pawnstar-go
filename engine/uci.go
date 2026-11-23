@@ -197,7 +197,7 @@ func goArgValue(args []string, i int) (int, bool) {
 	return v, err == nil
 }
 
-// goKeywords is every token handleUciGo recognises as a `go` keyword: the flags `infinite`/`ponder`, the
+// goKeywords is every token handleUciGo recognizes as a `go` keyword: the flags `infinite`/`ponder`, the
 // value-taking clock and limit keywords, and `searchmoves` itself. It exists so the move list after
 // `searchmoves` knows where to stop, and it must list exactly the cases handleUciGo's switch handles — the
 // C++ handle_go and the Rust handle_go keep the same list for the same reason.
@@ -207,7 +207,7 @@ var goKeywords = map[string]bool{
 	"searchmoves": true,
 }
 
-// isGoKeyword reports whether token is a recognised `go` keyword rather than, say, a coordinate move.
+// isGoKeyword reports whether token is a recognized `go` keyword rather than, say, a coordinate move.
 func isGoKeyword(token string) bool { return goKeywords[token] }
 
 // handleUciGo handles the "go" command, parsing the clock parameters and starting the search.
@@ -281,7 +281,7 @@ func (game *Game) handleUciGo(args []string) {
 			}
 			i++
 		case "searchmoves":
-			// Collect the UCI moves to restrict the root search to, stopping at the next recognised `go`
+			// Collect the UCI moves to restrict the root search to, stopping at the next recognized `go`
 			// keyword rather than at the end of the line — the rule the C++ (handle_go's kCollectMoves) and
 			// Rust (State::CollectMoves) parsers share. `searchmoves` is usually last, but a keyword may
 			// follow it, and swallowing the tail left `go searchmoves e2e4 depth 10` with no depth limit at

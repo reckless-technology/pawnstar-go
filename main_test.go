@@ -74,16 +74,16 @@ func TestMainEndsAtEndOfInput(t *testing.T) {
 	}
 }
 
-// TestMainLicenceFlag: --license prints the licence notice and nothing else - no banner, no engine
+// TestMainLicenseFlag: --license prints the license notice and nothing else - no banner, no engine
 // constructed, stdin untouched - under each spelling the flag accepts, and prints exactly the text the
-// `license` UCI command prints, since the two must never drift. engine.LicenceNotice is the one copy;
+// `license` UCI command prints, since the two must never drift. engine.LicenseNotice is the one copy;
 // the engine package's own test is what holds that text to THIRD-PARTY-NOTICES.md.
-func TestMainLicenceFlag(t *testing.T) {
-	want := strings.Join(engine.LicenceNotice(), "\n") + "\n"
+func TestMainLicenseFlag(t *testing.T) {
+	want := strings.Join(engine.LicenseNotice(), "\n") + "\n"
 	for _, flag := range []string{"--license", "-license", "--licence", "-licence"} {
 		out := runMain(t, "isready\n", flag)
 		if out != want {
-			t.Errorf("%s did not print the licence notice alone; output:\n%s", flag, out)
+			t.Errorf("%s did not print the license notice alone; output:\n%s", flag, out)
 		}
 		if strings.Contains(out, "UCI compatible chess engine") || strings.Contains(out, "readyok") {
 			t.Errorf("%s ran the UCI loop; output:\n%s", flag, out)
@@ -92,11 +92,11 @@ func TestMainLicenceFlag(t *testing.T) {
 }
 
 // TestMainIgnoresOtherArguments: the engine takes its configuration from UCI and the environment, so an
-// unrecognised argument is ignored rather than refused - which is also why the in-process tests above can
+// unrecognized argument is ignored rather than refused - which is also why the in-process tests above can
 // call main with the test binary's own command line.
 func TestMainIgnoresOtherArguments(t *testing.T) {
 	out := runMain(t, "isready\nquit\n", "--not-a-flag", "license")
 	if !strings.HasPrefix(out, "Pawnstar (Go)") || !strings.Contains(out, "readyok") {
-		t.Errorf("unrecognised arguments did not leave the UCI loop alone; output:\n%s", out)
+		t.Errorf("unrecognized arguments did not leave the UCI loop alone; output:\n%s", out)
 	}
 }

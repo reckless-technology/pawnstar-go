@@ -15,8 +15,8 @@ const orderingPassCancelFen = "3k3b/3P1KP1/8/5B2/7p/7P/1p6/8 b - - 0 92"
 
 // prepareOrderingPassGame resets game to orderingPassCancelFen with fresh tables and a node limit
 // (0 = none), records ttSeed at the root unless it is moveNone, and sets the cancel flag first when
-// isCancelledBeforehand (a `stop` that arrived before the pass began).
-func prepareOrderingPassGame(game *Game, maxNodes int, ttSeed move, isCancelledBeforehand bool) {
+// isCanceledBeforehand (a `stop` that arrived before the pass began).
+func prepareOrderingPassGame(game *Game, maxNodes int, ttSeed move, isCanceledBeforehand bool) {
 	game.newGameFromFen(orderingPassCancelFen)
 	game.transpositionTable.clear()
 	game.evalTable.clear()
@@ -26,15 +26,15 @@ func prepareOrderingPassGame(game *Game, maxNodes int, ttSeed move, isCancelledB
 	if ttSeed != moveNone() {
 		game.transpositionTable.record(game.currentPosition().hash, ttSeed, 10, nodePV)
 	}
-	game.isCancelPending.Store(isCancelledBeforehand)
+	game.isCancelPending.Store(isCanceledBeforehand)
 }
 
 // runOrderingPass runs the plain depth-3 ordering pass (orderRootMovesWith with no hard limit, so a node limit
 // only cuts the pass and does not bring in the depth-1 pass) on a game prepared by prepareOrderingPassGame and returns the move
 // chosen, the ordered list, and the list in generation order.
-func runOrderingPass(game *Game, maxNodes int, ttSeed move, isCancelledBeforehand bool) (best move, ordered,
+func runOrderingPass(game *Game, maxNodes int, ttSeed move, isCanceledBeforehand bool) (best move, ordered,
 	generated []move) {
-	prepareOrderingPassGame(game, maxNodes, ttSeed, isCancelledBeforehand)
+	prepareOrderingPassGame(game, maxNodes, ttSeed, isCanceledBeforehand)
 	generated = game.currentPosition().generateLegalMoves()
 	ordered = slices.Clone(generated)
 	best = orderRootMovesWith(newSearchStateFromGame(game), ordered, false)
@@ -61,7 +61,7 @@ func TestOrderingPassCancelPlaysACompletedMove(t *testing.T) {
 	game := NewGame()
 	_, reference, generated := runOrderingPass(game, 0, moveNone(), false)
 	if game.isCancelPending.Load() {
-		t.Fatal("the uncancelled reference pass was cancelled")
+		t.Fatal("the uncanceled reference pass was canceled")
 	}
 	referenceScore := map[move]int{} // keyed by the move with its score cleared
 	for _, m := range reference {
@@ -83,7 +83,7 @@ func TestOrderingPassCancelPlaysACompletedMove(t *testing.T) {
 					completed)
 			}
 			if m.score() != referenceScore[m.withScore(0)] {
-				t.Errorf("limit %d: %s scored %d, the uncancelled pass %d", limit, m, m.score(),
+				t.Errorf("limit %d: %s scored %d, the uncanceled pass %d", limit, m, m.score(),
 					referenceScore[m.withScore(0)])
 			}
 		}
@@ -148,7 +148,7 @@ func TestOrderingPassCancelFallsBackToTheTTMove(t *testing.T) {
 	}
 }
 
-// TestOrderingPassCancelPrefersADeepTTMove covers a pass cancelled part-way with a TT entry for the root
+// TestOrderingPassCancelPrefersADeepTTMove covers a pass canceled part-way with a TT entry for the root
 // deeper than the pass, as an earlier search of the game leaves one: its move is played, even one the pass
 // never reached, ahead of the best completed move. An entry at the pass's own depth, or one whose move is
 // not in the root list, is passed over for the best completed move. The node limit is the first, doubling
@@ -169,7 +169,7 @@ func TestOrderingPassCancelPrefersADeepTTMove(t *testing.T) {
 		// A move the pass did not complete, so that playing it can only come from the table.
 		unreached := generated[len(generated)-1]
 		if completed >= len(generated)-1 || unreached.equal(expected) {
-			t.Fatalf("limit %d: the last generated move %s is reached by the cancelled pass", limit, unreached)
+			t.Fatalf("limit %d: the last generated move %s is reached by the canceled pass", limit, unreached)
 		}
 		cases := []struct {
 			name  string
@@ -187,12 +187,12 @@ func TestOrderingPassCancelPrefersADeepTTMove(t *testing.T) {
 				game.transpositionTable.record(game.currentPosition().hash, c.seed, c.depth, nodePV)
 				best := orderRootMovesWith(newSearchStateFromGame(game), slices.Clone(generated), false)
 				if !best.equal(c.want) {
-					t.Errorf("limit %d, cancelled after %d of %d moves, depth-%d TT move %s: the ordering pass "+
+					t.Errorf("limit %d, canceled after %d of %d moves, depth-%d TT move %s: the ordering pass "+
 						"chose %s, want %s", limit, completed, len(generated), c.depth, c.seed, best, c.want)
 				}
 			})
 		}
-		t.Logf("limit %d: cancelled after %d of %d moves; best completed %s, deep TT move %s", limit, completed,
+		t.Logf("limit %d: canceled after %d of %d moves; best completed %s, deep TT move %s", limit, completed,
 			len(generated), expected, unreached)
 		return
 	}

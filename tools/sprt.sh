@@ -57,7 +57,7 @@ else
     echo "SPRT  cand=$CAND  base=$BASE  depth=${DEPTH:-8}  rounds=$ROUNDS  elo[$ELO0,$ELO1]"
 fi
 
-# -games 2 -repeat plays each opening twice with colours reversed. Draw/resign adjudication
+# -games 2 -repeat plays each opening twice with colors reversed. Draw/resign adjudication
 # ends decided games early. -sprt stops as soon as elo0 vs elo1 is decided at alpha/beta=0.05.
 # Not exec'd: the EXIT trap has to remove the scratch copy; the script exits with fastchess's status.
 fastchess \

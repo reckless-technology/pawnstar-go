@@ -12,7 +12,7 @@ import (
 	"strconv"
 )
 
-// wantsLicence reports whether the command line asks for the licence notice - the same text the
+// wantsLicense reports whether the command line asks for the license notice - the same text the
 // `license` UCI command prints (engine/licence.go), which is where it lives: the net is embedded, so a
 // release binary carries an ODbL Produced Work while carrying no file from the source tree, and the
 // notice has to be reachable both from a GUI's UCI session and from a bare command line.
@@ -20,7 +20,7 @@ import (
 // Anything else on the command line is ignored, as it always has been - the engine takes its
 // configuration from UCI and the environment, and the in-process tests call main with the test
 // binary's own arguments.
-func wantsLicence(args []string) bool {
+func wantsLicense(args []string) bool {
 	for _, arg := range args {
 		if arg == "--license" || arg == "-license" || arg == "--licence" || arg == "-licence" {
 			return true
@@ -34,8 +34,8 @@ func wantsLicence(args []string) bool {
 // `--license` short-circuits all of that and prints the third-party notice instead - the same text
 // the `license` UCI command prints, taken from the same place.
 func main() {
-	if wantsLicence(os.Args[1:]) {
-		for _, line := range engine.LicenceNotice() {
+	if wantsLicense(os.Args[1:]) {
+		for _, line := range engine.LicenseNotice() {
 			fmt.Println(line)
 		}
 		return

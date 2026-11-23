@@ -3,7 +3,7 @@
 package nnue
 
 // Scalar accumulator column kernels: the portable fallback for targets without a hand-written
-// vectorised addColumn/subColumn. arm64 supplies NEON versions in kernels_arm64.{go,s}; the
+// vectorized addColumn/subColumn. arm64 supplies NEON versions in kernels_arm64.{go,s}; the
 // amd64+simd build supplies archsimd versions in kernels_amd64.go. The shared scalar helpers
 // (screlu, outputDot, outputDotInt8, ...) live in kernels_scalar.go. All are bit-identical.
 

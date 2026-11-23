@@ -37,7 +37,7 @@ const benchDepth = 13
 const benchHashMB = 64
 
 // runBench searches every benchFens position to a fixed depth, single-threaded and with the book off, so
-// the same build reports the same node count on every run (guarding the uninitialised-read class of bug
+// the same build reports the same node count on every run (guarding the uninitialized-read class of bug
 // that makes counts wobble). It pins a fresh benchHashMB TT (restored afterwards, so the caller's Hash is
 // untouched) and mirrors the C++ handle_bench otherwise: the hash starts empty but persists across the
 // positions within the run. It prints "<nodes> nodes <nps> nps".

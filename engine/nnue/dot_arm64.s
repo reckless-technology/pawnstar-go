@@ -11,7 +11,7 @@
 //
 // The loop is unrolled 4 blocks (32 lanes) per iteration, each block accumulating into its OWN int32
 // vector pair (V16/V17, V18/V19, V20/V21, V22/V23). The SMLAL accumulate is a read-modify-write of an
-// architectural register, so a single accumulator would serialise the loop on SMLAL's latency; four
+// architectural register, so a single accumulator would serialize the loop on SMLAL's latency; four
 // independent accumulators let consecutive blocks overlap and the out-of-order core hides it. The pairs
 // are summed after the loops. nnueHiddenSize (1024) is a multiple of 32, so 32 iterations per perspective.
 //

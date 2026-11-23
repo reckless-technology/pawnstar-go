@@ -34,7 +34,7 @@ A trained network is an ODbL **Produced Work**, and distributing one obliges a n
 source. That notice, in full and with both run lines verbatim, is
 **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** - read it there. Two things it states plainly: the
 obligation is the *notice*, and ODbL does not require the network itself to be ODbL-licensed; and the
-engine's GPLv3 licence does not make the network GPLv3 merely because GPLv3 code trained it.
+engine's GPLv3 license does not make the network GPLv3 merely because GPLv3 code trained it.
 
 Because the net is embedded in the binary, the notice travels with the executable too: the **`license`
 UCI command** prints a condensed form of it, as does `pawnstar-go --license` on the command line, and
@@ -83,23 +83,23 @@ Run as a UCI engine — point any UCI-compatible GUI (Arena, Cute Chess, and the
 ./pawnstar-go             # interactive UCI session (pawnstar-go.exe on Windows)
 ```
 
-No files need to sit beside it: both the NNUE network and the opening book are compiled into the binary (`go:embed`), so the single executable is the whole engine. It prints one banner line, `Pawnstar (Go) — UCI compatible chess engine`, before the handshake; a GUI ignores it. The only command-line argument it recognises is `--license` (`--licence`, `-license`, `-licence`), which prints the licence and the third-party notices and exits — anything else on the command line is ignored, since the engine takes its configuration from UCI and the environment.
+No files need to sit beside it: both the NNUE network and the opening book are compiled into the binary (`go:embed`), so the single executable is the whole engine. It prints one banner line, `Pawnstar (Go) — UCI compatible chess engine`, before the handshake; a GUI ignores it. The only command-line argument it recognizes is `--license` (`--licence`, `-license`, `-licence`), which prints the license and the third-party notices and exits — anything else on the command line is ignored, since the engine takes its configuration from UCI and the environment.
 
 `PAWNSTAR_THREADS`, read once at startup, sets the initial Lazy SMP thread count; unset or not a positive integer, the default is every logical CPU. A GUI can override it at any time with `setoption name Threads`.
 
 Beyond the standard UCI commands — [*UCI protocol*](#uci-protocol) under Architecture lists every one of them, with the `go` variants and the `info` fields — two engine-specific commands are available at the prompt:
 
 ```
-license        print the engine's licence and the third-party notices the shipped data obliges
+license        print the engine's license and the third-party notices the shipped data obliges
 bench          search 16 fixed positions to a fixed depth; print "<nodes> nodes <nps> nps"
 bench <depth>  the same at an explicit depth (the default is 13)
 ```
 
 `bench` is deterministic: single-threaded, book off, on its own pinned 64 MB transposition table, so its node count does not move with the `Hash` or `Threads` options. The signature is **5,617,906** nodes, asserted by a golden-signature test. `PAWNSTAR_BENCH_DEBUG=1` additionally dumps each position's best move and diagnostic counters after its search, for comparison against the C++ engine's bench; normal `bench` output is unchanged without it.
 
-There is no `eval`, `nnue`, `getboard`, `bookmoves`, `dbg` or `help` command — the C++ engine has those, this port does not; its search diagnostics are reached from tests instead (`dbgxClear`/`dbgxPrint`, [*Search diagnostics*](#search-diagnostics)). An unrecognised command is ignored in silence.
+There is no `eval`, `nnue`, `getboard`, `bookmoves`, `dbg` or `help` command — the C++ engine has those, this port does not; its search diagnostics are reached from tests instead (`dbgxClear`/`dbgxPrint`, [*Search diagnostics*](#search-diagnostics)). An unrecognized command is ignored in silence.
 
-One behaviour worth knowing before driving the engine from a harness: `ucinewgame` clears the transposition table and the eval cache as well as resetting the position, the node count and the clock, as the C++ and Rust engines do, so a position repeated after `ucinewgame` searches the same tree each time. `position` alone keeps both tables, which is what carries the TT across the moves of one game; repeating a position with only `position` + `go depth N` in one session therefore gives shrinking node counts. Releases up to 2.2.0 cleared neither on `ucinewgame`, and only `Clear Hash` did; release 2.3.0 (2026-11-08) changed that.
+One behavior worth knowing before driving the engine from a harness: `ucinewgame` clears the transposition table and the eval cache as well as resetting the position, the node count and the clock, as the C++ and Rust engines do, so a position repeated after `ucinewgame` searches the same tree each time. `position` alone keeps both tables, which is what carries the TT across the moves of one game; repeating a position with only `position` + `go depth N` in one session therefore gives shrinking node counts. Releases up to 2.2.0 cleared neither on `ucinewgame`, and only `Clear Hash` did; release 2.3.0 (2026-11-08) changed that.
 
 ### UCI options
 
@@ -199,16 +199,16 @@ that `actions/setup-go` gives the Go `go.mod` names.
 | File | What it is |
 |---|---|
 | `pawnstar-go-<version>-windows-amd64.exe` | the engine (AVX2), Authenticode-signed through SSL.com eSigner (Jonathan Reckless) |
-| `pawnstar-go-<version>-macos-arm64.zip` | the engine for Apple silicon, signed with a Developer ID (hardened runtime) and notarised by Apple |
+| `pawnstar-go-<version>-macos-arm64.zip` | the engine for Apple silicon, signed with a Developer ID (hardened runtime) and notarized by Apple |
 | `pawnstar-go-<version>-linux-amd64` | the engine for Linux (AVX2) |
 | `pawnstar-go-<version>-docs.zip` | the documentation bundle - README, CLAUDE.md, [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and `go doc -all` for both packages (`make docs-bundle`) |
 
 No source tarball is published. The repository is public: clone or fork it for the source, which is also the only copy
 that carries its history.
 
-The macOS engine ships in a zip because a bare binary can't carry a stapled notarisation ticket: Gatekeeper looks its
+The macOS engine ships in a zip because a bare binary can't carry a stapled notarization ticket: Gatekeeper looks its
 ticket up online, and the zip keeps the executable bit through a browser's download. The signing runs from
-`tools/sign-macos.sh` and `tools/sign-windows.ps1`, with the organisation's signing secrets (the same ones as its other
+`tools/sign-macos.sh` and `tools/sign-windows.ps1`, with the organization's signing secrets (the same ones as its other
 apps). The Windows binary is signed only in a run that publishes, since every signing spends the eSigner account's
 allowance. A publishing run that would ship an unsigned binary fails.
 
@@ -256,7 +256,7 @@ Move lists use a **stack-resident `moveList`** (a fixed `[256]move` array + coun
 
 ### Attack generation
 
-[engine/tables.go](engine/tables.go) holds all precomputed data initialised once at startup via `init()`:
+[engine/tables.go](engine/tables.go) holds all precomputed data initialized once at startup via `init()`:
 
 - **Magic bitboard tables** for sliding pieces (`bishopAttacks`, `rookAttacks`) — magic numbers found offline with seed 1337
 - **Ray tables** in all eight compass directions, 64 squares × 8 directions
@@ -305,7 +305,7 @@ The result is a `pins` struct with a `pinned` bitboard and a `[64]bitboard` of a
 
 `Game` ([engine/game.go](engine/game.go)) owns only the state shared across Lazy SMP threads: the lockless transposition table and eval cache, the opening book, the chess clock, the `threadCount`, and the `posStack []position` game-history stack. Everything else — history, killers, continuation history, countermoves, the NNUE accumulator stack, node counts — is **per-thread**, living on each thread's `searchState` so the concurrent search never contends. `isCancelPending` is an `atomic.Bool` set by `stopThinking` or by the time-check logic inside the search.
 
-The search uses **Lazy SMP** (as in the C++ engine): `searchRootNode` runs `threadCount` threads, each an independent iterative-deepening search of the whole root sharing only the lockless transposition table and eval cache. The main thread (id 0) is authoritative — it prints `info`, manages time, and returns the move — while helper threads deepen the shared TT, desynchronised by a Stockfish-style iteration-skip schedule so they explore diverse lines. Thread count defaults to 1 (raised by `main()` from `PAWNSTAR_THREADS`/`NumCPU`, or the UCI `Threads` option). All per-thread state (history, killers, continuation history, countermoves, accumulator, diagnostics) lives on each thread's `searchState`, so nothing is shared except the two lockless tables — the concurrent search is data-race free with no locks.
+The search uses **Lazy SMP** (as in the C++ engine): `searchRootNode` runs `threadCount` threads, each an independent iterative-deepening search of the whole root sharing only the lockless transposition table and eval cache. The main thread (id 0) is authoritative — it prints `info`, manages time, and returns the move — while helper threads deepen the shared TT, desynchronized by a Stockfish-style iteration-skip schedule so they explore diverse lines. Thread count defaults to 1 (raised by `main()` from `PAWNSTAR_THREADS`/`NumCPU`, or the UCI `Threads` option). All per-thread state (history, killers, continuation history, countermoves, accumulator, diagnostics) lives on each thread's `searchState`, so nothing is shared except the two lockless tables — the concurrent search is data-race free with no locks.
 
 #### searchState
 
@@ -413,10 +413,10 @@ The engine evaluates exclusively with the embedded **NNUE** network (see below);
 
 ### NNUE evaluation
 
-The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direct Go port of the C++ Pawnstar NNUE — a Chess768 → 1024 → 1 network with 8 horizontally mirrored king buckets, 8 material output heads and SCReLU activation, quantised (QA=255, QB=64, scale=400). It reads the shared **`RNNUE1`** net container directly (64-byte self-describing header + little-endian weight arrays), the one format every reckless-technology chess engine loads; the shipped net, [engine/nnue/pawnstar-v20.bin](engine/nnue/pawnstar-v20.bin), is embedded in the binary via `go:embed`. The package has no engine imports — positions cross the boundary as an `nnue.Board` (raw `uint64` bitboards + `uint8` piece codes), built by the small bridge in [engine/nnue_bridge.go](engine/nnue_bridge.go), which also hosts `EnableNNUE`/`LoadNNUEFile` and the search-band clamp. When first ported it measured **+572 Elo** over the engine's former handcrafted evaluation (fixed-depth self-play SPRT); that handcrafted eval has since been removed.
+The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direct Go port of the C++ Pawnstar NNUE — a Chess768 → 1024 → 1 network with 8 horizontally mirrored king buckets, 8 material output heads and SCReLU activation, quantized (QA=255, QB=64, scale=400). It reads the shared **`RNNUE1`** net container directly (64-byte self-describing header + little-endian weight arrays), the one format every reckless-technology chess engine loads; the shipped net, [engine/nnue/pawnstar-v20.bin](engine/nnue/pawnstar-v20.bin), is embedded in the binary via `go:embed`. The package has no engine imports — positions cross the boundary as an `nnue.Board` (raw `uint64` bitboards + `uint8` piece codes), built by the small bridge in [engine/nnue_bridge.go](engine/nnue_bridge.go), which also hosts `EnableNNUE`/`LoadNNUEFile` and the search-band clamp. When first ported it measured **+572 Elo** over the engine's former handcrafted evaluation (fixed-depth self-play SPRT); that handcrafted eval has since been removed.
 
 - **Net container (`RNNUE1`):** the one format every reckless-technology chess engine reads, so a net trained once loads in all of them. A 64-byte little-endian self-describing header (magic, format version, header size, features per bucket, king buckets, hidden size, output buckets, flags, activation, QA, QB, eval scale, the king bucket map's CRC, the payload's size and CRC, and a CRC over the header itself) followed by the weight payload, bucket-major. Loading makes two checks in order: the header — magic, its own CRC, **every** architecture field against this build's compile-time constants, and the king bucket map's CRC against the CRC of this engine's own map — then the payload, its exact size and its CRC. Integrity is **CRC-64/XZ**, whose check value for `123456789` is `0x995DC9BBDF1939FA`; the suite asserts that before anything else. Any mismatch **refuses** the net, naming the field with both the file's value and the engine's, and substitutes nothing for it: the net already loaded is kept and goes on playing, named on stdout and stderr both, rather than the engine silently switching to some other weights. The default build is at `flags` = 1 (king mirroring on) and `output_buckets` = 8, the shared architecture the shipped net was trained for; both are build knobs — see *Network shape* below — and `format_version` is derived from them, so a net can only load into a build of its own shape.
-- **Feature transformer / accumulator:** two 1024-int16 perspective accumulators. Feature row per perspective is `bucket*768 + colour*384 + (type−1)*64 + square`, with the black perspective mirroring colour and square (`sq ^ 0x38`); the king bucket comes from `kingBucketMap`.
+- **Feature transformer / accumulator:** two 1024-int16 perspective accumulators. Feature row per perspective is `bucket*768 + color*384 + (type−1)*64 + square`, with the black perspective mirroring color and square (`sq ^ 0x38`); the king bucket comes from `kingBucketMap`.
 - **Network shape:** the **default** is the shared architecture every reckless-technology chess engine
   is unified on — **horizontal king mirroring** (a perspective whose own king stands on files e–h is
   mirrored, `square ^ 7`, before indexing, against the per-file map `half * 4 + min(file, 7 − file)`)
@@ -441,9 +441,9 @@ The [engine/nnue/](engine/nnue/) package is the engine's only evaluator, a direc
   fail as a drifted generator, not as a search regression — and `--hash` is mandatory, its value printed
   beside every node count, because a node count with no transposition-table size next to it is not a
   number anybody can compare. Write the net with `make synthetic-net NET=synthetic-net.bin`.
-- **Lazy accumulator:** maintained on `searchState` and computed on demand. `playMove`/`makeNullMove` only invalidate the new ply; `undoMove` is free; `currentAccumulator` catches up from the nearest valid ancestor (copy + incremental `update`) **only when an eval reads it on an eval-cache miss**. A king move that crosses a bucket boundary refreshes that perspective from scratch. Captures, en passant, castling and promotion are handled uniformly through the colour bitboards plus the `squares[]` array.
-- **Output layer:** two forward passes (mirroring the C++ engine). `EvaluateExact` is the int16 SCReLU reference. `EvaluateInt8` is the **search's hot-path evaluator**: activations requantised to uint8 (`(clamp(x,0,QA)²+256) >> 9`) and the output weights to int8 range, scaled back before dequant — faster, at a bounded ≤40 cp deviation from the int16 reference (measured 40 over the 250 reference positions with the shipped net, 28 with v12's). Exactly the C++ int8 layer.
-- **Kernels** are build-tag split three ways, all bit-identical (the int8 dot is the exact integer sum `Σ u8·w8`, so scalar == SIMD == NEON): **amd64 + `goexperiment.simd`** (256-bit `simd/archsimd` plus a hand-written AVX2 int8 dot), **arm64** (hand-written NEON — `VADD`/`VSUB` column updates and a `SQXTUN`/`UMULL`/`SMLAL` int8 dot, with the four ops Go's assembler lacks emitted as clang-verified `WORD` encodings), and **scalar** on other targets. The vectorised dot is roughly an order of magnitude faster than scalar (int8 output dot ~9.9× on Apple Silicon; column updates ~7×).
+- **Lazy accumulator:** maintained on `searchState` and computed on demand. `playMove`/`makeNullMove` only invalidate the new ply; `undoMove` is free; `currentAccumulator` catches up from the nearest valid ancestor (copy + incremental `update`) **only when an eval reads it on an eval-cache miss**. A king move that crosses a bucket boundary refreshes that perspective from scratch. Captures, en passant, castling and promotion are handled uniformly through the color bitboards plus the `squares[]` array.
+- **Output layer:** two forward passes (mirroring the C++ engine). `EvaluateExact` is the int16 SCReLU reference. `EvaluateInt8` is the **search's hot-path evaluator**: activations requantized to uint8 (`(clamp(x,0,QA)²+256) >> 9`) and the output weights to int8 range, scaled back before dequant — faster, at a bounded ≤40 cp deviation from the int16 reference (measured 40 over the 250 reference positions with the shipped net, 28 with v12's). Exactly the C++ int8 layer.
+- **Kernels** are build-tag split three ways, all bit-identical (the int8 dot is the exact integer sum `Σ u8·w8`, so scalar == SIMD == NEON): **amd64 + `goexperiment.simd`** (256-bit `simd/archsimd` plus a hand-written AVX2 int8 dot), **arm64** (hand-written NEON — `VADD`/`VSUB` column updates and a `SQXTUN`/`UMULL`/`SMLAL` int8 dot, with the four ops Go's assembler lacks emitted as clang-verified `WORD` encodings), and **scalar** on other targets. The vectorized dot is roughly an order of magnitude faster than scalar (int8 output dot ~9.9× on Apple Silicon; column updates ~7×).
 - **Correctness:** `TestNNUEReference` matches an independent oracle's exact int16 evaluations on 250 FENs to 0 cp — a reader and forward pass written from the `reckless-nnue` specification rather than from this package, validated first by reproducing all 250 of the v12 net's trainer-produced values to 0 cp; `TestNNUEInt8` bounds the search's int8 eval within 40 cp of that reference (and confirms scalar == SIMD); `TestNNUEIncremental` proves the lazy accumulator equals a full refresh at every node. Load a different net at runtime with the `EvalFile` UCI option.
 
 ### Provenance of the shipped network
@@ -461,7 +461,7 @@ networks**, which were trained on PlentyChess self-play data, are at the top of 
 
 ### History heuristic
 
-`historyTable` ([engine/history.go](engine/history.go)) is a **butterfly table** — `counts[2][4096]` indexed by side-to-move and the move's from/to squares — counting how often each move raised alpha or caused a beta cutoff anywhere in the search tree. Pooling across plies (it replaced a per-ply `[maxPly][4096]` table) concentrates the statistics where positions repeat across branches and transpositions, and the explicit colour dimension replaces the accidental colour proxy that ply parity provided. Counts are added to the quiet-move sort score by `scoreAndSortMoves` (alongside continuation history). The table lives on each `searchState` (per-thread, so Lazy SMP threads don't contend) and starts fresh each search.
+`historyTable` ([engine/history.go](engine/history.go)) is a **butterfly table** — `counts[2][4096]` indexed by side-to-move and the move's from/to squares — counting how often each move raised alpha or caused a beta cutoff anywhere in the search tree. Pooling across plies (it replaced a per-ply `[maxPly][4096]` table) concentrates the statistics where positions repeat across branches and transpositions, and the explicit color dimension replaces the accidental color proxy that ply parity provided. Counts are added to the quiet-move sort score by `scoreAndSortMoves` (alongside continuation history). The table lives on each `searchState` (per-thread, so Lazy SMP threads don't contend) and starts fresh each search.
 
 ### UCI protocol
 
@@ -471,7 +471,7 @@ networks**, which were trained on PlentyChess self-play data, are at the top of 
 |---|---|
 | `uci` | Prints engine id and `uciok` |
 | `isready` | Prints `readyok` |
-| `license` | Prints the engine's licence and the third-party notices the shipped data obliges - the condensed form of [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), in wording shared with the C++, Rust and trebuchet engines. Printing only: it reads and writes no engine state |
+| `license` | Prints the engine's license and the third-party notices the shipped data obliges - the condensed form of [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), in wording shared with the C++, Rust and trebuchet engines. Printing only: it reads and writes no engine state |
 | `ucinewgame` | Stops search, clears the TT and the eval cache, resets position and clock |
 | `position startpos [moves ...]` | Sets position from start FEN, applies move list |
 | `position fen <fen> [moves ...]` | Sets position from FEN, applies move list |
@@ -480,7 +480,7 @@ networks**, which were trained on PlentyChess self-play data, are at the top of 
 | `go depth <n>` | Fixed depth |
 | `go infinite` | Search until `stop` |
 | `go nodes <n>` | Search until the node limit (checked per thread) |
-| `go searchmoves <m…>` | Restrict the root search to the given moves. The list ends at the next recognised `go` keyword, so `go searchmoves e2e4 depth 10` is a depth-10 search restricted to `e2e4` |
+| `go searchmoves <m…>` | Restrict the root search to the given moves. The list ends at the next recognized `go` keyword, so `go searchmoves e2e4 depth 10` is a depth-10 search restricted to `e2e4` |
 | `go ... ponder` | Search on the opponent's time; no `bestmove` until `ponderhit`/`stop` |
 | `ponderhit` | Predicted move was played — convert the ponder search to a timed one (budget from now) |
 | `bench` / `bench <depth>` | Node-count benchmark over the 16 C++-reference (Bratko-Kopec) positions at depth `benchDepth`=13 (or an explicit `<depth>`); deterministic, single-threaded, book off, on a pinned 64 MB TT (signature independent of the `Hash` option). Current signature: 5,617,906 nodes (since release 2.0.0's net and shape; 6,601,454 with the v12 net at v12's shape, 6,888,983 with the earlier butterfly history), pinned by a golden-signature test |
@@ -500,7 +500,7 @@ networks**, which were trained on PlentyChess self-play data, are at the top of 
 
 ### Search diagnostics
 
-[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, the pruning/reduction techniques (check extensions, IIR, RFP, LMP, qsearch SEE prunes, the three LMR tiers), draw detection, and killer move beta cutoffs. The search reaches them through `searchState.dbg`: the main thread points at the global `dbgx`, each helper thread at a throwaway, so the counters neither race nor contend under Lazy SMP (helper counts are discarded). Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect single-threaded search behaviour. Counters accumulate across searches unless explicitly reset.
+[engine/debug.go](engine/debug.go) defines a global `dbgx debugX` struct with counters for beta cutoffs, TT hits by node type, null-move/LMR/PVS attempt and fail counts, the pruning/reduction techniques (check extensions, IIR, RFP, LMP, qsearch SEE prunes, the three LMR tiers), draw detection, and killer move beta cutoffs. The search reaches them through `searchState.dbg`: the main thread points at the global `dbgx`, each helper thread at a throwaway, so the counters neither race nor contend under Lazy SMP (helper counts are discarded). Call `dbgxClear()` before a search and `dbgxPrint()` after to inspect single-threaded search behavior. Counters accumulate across searches unless explicitly reset.
 
 ## License
 

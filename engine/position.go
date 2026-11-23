@@ -145,9 +145,9 @@ func positionFromFenFields(fields []string) position {
 		return pos // no board field: kingless, so the caller falls back to the start position
 	}
 
-	// Pieces. The board field is untrusted, so every placement is validated: an unrecognised piece letter, or
+	// Pieces. The board field is untrusted, so every placement is validated: an unrecognized piece letter, or
 	// a rank/file that has run off the board, aborts the parse and returns a kingless position (which
-	// positionFromFen rejects in favour of the start position). Without this, `position fen garbage` walked
+	// positionFromFen rejects in favor of the start position). Without this, `position fen garbage` walked
 	// x past 7 and indexed a 64-entry table out of range.
 	y, x := 7, 0
 	for _, ch := range fields[0] {
@@ -245,7 +245,7 @@ func (pos *position) computeHash() zobrist {
 	return hash
 }
 
-// toFenString serialises the position to a FEN string.
+// toFenString serializes the position to a FEN string.
 func (pos *position) toFenString() string {
 	var sb strings.Builder
 	occ := pos.occupied()
@@ -383,7 +383,7 @@ func (pos *position) makeNullMove() {
 }
 
 // materialDrawCategory reports the insufficient-mating-material draw category by total piece count:
-// 2 (K vs K), 3 (K+N vs K or K+B vs K), or 4 (K+B vs K+B, both bishops on the same colour) — or 0 if the
+// 2 (K vs K), 3 (K+N vs K or K+B vs K), or 4 (K+B vs K+B, both bishops on the same color) — or 0 if the
 // position is not a material draw. The category feeds the drawsByMaterial{2,3,4} diagnostic counters.
 func (pos *position) materialDrawCategory() int {
 	if pos.pieces[pawn].isNotEmpty() || pos.pieces[rook].isNotEmpty() || pos.pieces[queen].isNotEmpty() {
@@ -397,7 +397,7 @@ func (pos *position) materialDrawCategory() int {
 	case 1:
 		return 3 // K + single minor vs K
 	case 2:
-		// Two bishops on the same colour squares is also a draw.
+		// Two bishops on the same color squares is also a draw.
 		if pos.pieces[knight] == 0 && (minorPieces&whiteSqs == minorPieces || minorPieces&blackSqs == minorPieces) {
 			return 4
 		}

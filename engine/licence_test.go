@@ -10,10 +10,10 @@ import (
 	"testing"
 )
 
-// licenceAttributionLines are the two ODbL attribution lines, one per run behind v20, as the extractor
+// licenseAttributionLines are the two ODbL attribution lines, one per run behind v20, as the extractor
 // that read the archive writes them into every training shard's provenance sidecar. They are the
 // notice: they must appear, unaltered, in the printed form and in THIRD-PARTY-NOTICES.md alike.
-var licenceAttributionLines = []string{
+var licenseAttributionLines = []string{
 	"Position data from the Leela Chess Zero self-play training data " +
 		"(https://storage.lczero.org/files/training_data/), run test91, used under the " +
 		"Open Database License 1.0 (http://opendatacommons.org/licenses/odbl/1.0/).",
@@ -33,9 +33,9 @@ func collapse(text string) string {
 	return strings.Join(words, " ")
 }
 
-// TestLicenceCommandPrintsTheNotice: `license` prints the engine's licence and every third-party
+// TestLicenseCommandPrintsTheNotice: `license` prints the engine's license and every third-party
 // notice the shipped data obliges, and quits nothing.
-func TestLicenceCommandPrintsTheNotice(t *testing.T) {
+func TestLicenseCommandPrintsTheNotice(t *testing.T) {
 	game := NewGame()
 	out := captureStdout(t, func() {
 		if game.HandleCommand("license") {
@@ -74,7 +74,7 @@ func TestLicenceCommandPrintsTheNotice(t *testing.T) {
 		// was added there. Those lines are this project's work, and the notice draws the distinction.
 		"Eighty-four of the book's 3,328 lines",
 	}
-	for _, want := range append(wants, licenceAttributionLines...) {
+	for _, want := range append(wants, licenseAttributionLines...) {
 		if !strings.Contains(flat, collapse(want)) {
 			t.Errorf("`license` did not print %q", want)
 		}
@@ -87,18 +87,18 @@ func TestLicenceCommandPrintsTheNotice(t *testing.T) {
 	}
 }
 
-// TestLicenceNoticeAgreesWithTheNoticesFile: the printed notice is the condensed form of
+// TestLicenseNoticeAgreesWithTheNoticesFile: the printed notice is the condensed form of
 // THIRD-PARTY-NOTICES.md, so the claims that make up the obligation must appear in both. Editing one
 // and not the other is the failure this guards - a shipped binary that attributes differently from the
 // file it points at is worse than either alone.
-func TestLicenceNoticeAgreesWithTheNoticesFile(t *testing.T) {
+func TestLicenseNoticeAgreesWithTheNoticesFile(t *testing.T) {
 	raw, err := os.ReadFile("../THIRD-PARTY-NOTICES.md")
 	if err != nil {
 		t.Fatalf("read THIRD-PARTY-NOTICES.md: %v", err)
 	}
 	file := collapse(string(raw))
-	printed := collapse(strings.Join(licenceNotice, "\n"))
-	for _, want := range append(licenceAttributionLines,
+	printed := collapse(strings.Join(licenseNotice, "\n"))
+	for _, want := range append(licenseAttributionLines,
 		"https://storage.lczero.org/files/training_data/",
 		"Open Database License 1.0",
 		"Database Contents License 1.0",

@@ -1,7 +1,7 @@
 # Pawnstar-Go build wrapper.
 #
 # The NNUE kernels use the experimental simd/archsimd package, which is gated behind
-# GOEXPERIMENT=simd. Every build/test MUST set it, so it is centralised here — always
+# GOEXPERIMENT=simd. Every build/test MUST set it, so it is centralized here — always
 # build via `make`, not a bare `go build`. Requires Go 1.26.x, not 1.27 or later: archsimd landed in 1.26, and
 # 1.27 changed its API (LoadInt16x16Slice became LoadInt16x16, StoreSlice became Store, the array forms gained an
 # Array suffix), so this code does not compile there.

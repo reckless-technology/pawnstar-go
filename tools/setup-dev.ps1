@@ -270,7 +270,7 @@ else {
   if ($p.ExitCode -ne 0) { throw "the MSYS2 archive exited with $($p.ExitCode)" }
   if ((Split-Path $msys -Leaf) -ne 'msys64') { Rename-Item (Join-Path $parent 'msys64') (Split-Path $msys -Leaf) -ErrorAction Stop }
   Remove-Item -Recurse -Force $scratch
-  # The first login initialises the keyring; then the core update, which may end its own shell, and the rest.
+  # The first login initializes the keyring; then the core update, which may end its own shell, and the rest.
   Invoke-Msys 'true'
   Invoke-Msys 'pacman -Syuu --noconfirm' -MayFail
   Invoke-Msys 'pacman -Syuu --noconfirm'

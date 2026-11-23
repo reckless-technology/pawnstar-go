@@ -56,7 +56,7 @@ func TestNnueBoardLayout(t *testing.T) {
 // TestNNUEReference cross-checks the scalar int16 EvaluateExact forward pass against an independent
 // oracle's evaluations (engine/testdata/nnue_reference.txt, one "<fen> | <expected_cp>" per line).
 // Agreement within a couple of centipawns confirms the feature indexing, king-bucket orientation and
-// mirroring, the material output head, the SCReLU activation, dequantisation and the net file format
+// mirroring, the material output head, the SCReLU activation, dequantization and the net file format
 // all match. This is the correctness oracle for the whole NNUE port — the SIMD kernels must reproduce
 // it bit-for-bit.
 //
@@ -72,7 +72,7 @@ func TestNnueBoardLayout(t *testing.T) {
 // again.
 func TestNNUEReference(t *testing.T) {
 	skipWithoutTheShippedNet(t)
-	const tolerance = 2 // integer-quantisation rounding vs bullet; mirrors the C++ test_nnue bound
+	const tolerance = 2 // integer-quantization rounding vs bullet; mirrors the C++ test_nnue bound
 
 	net, err := nnue.LoadFile("nnue/pawnstar-v20.bin")
 	if err != nil {
@@ -131,7 +131,7 @@ func TestNNUEReference(t *testing.T) {
 // int8Bound is 40, which is EXACTLY what this set measures: 40 cp over v20's 250 reference positions,
 // 2026-10-30, and the same 40 in all three ports (C++, Rust and Go each report it). It was 26-28 cp with
 // v12, and the rise is not drift: ONE int8 scale is shared across all eight output heads, so the head
-// carrying the largest weight sets the scale every other head is then requantised against.
+// carrying the largest weight sets the scale every other head is then requantized against.
 //
 // A bound sitting exactly on the measured maximum is deliberate here, because this is integer arithmetic:
 // the deviation is exactly 40 on every platform, deterministically, so there is no marginal pass to tip

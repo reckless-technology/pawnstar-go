@@ -78,7 +78,7 @@ func outputDotInt8(stm, ntm *[hiddenSize]int16, w8 []int16) int64 {
 	qa := archsimd.BroadcastInt16x16(qa)
 	round := archsimd.BroadcastInt32x8(int8Round)
 	// The u8*w8 products (|.| <= 127*127 = 16129) sum to ~33M over the 2048 terms, well within int32, so
-	// the whole dot accumulates in int32 (no int64 widening). Each block requantises to the uint8-range
+	// the whole dot accumulates in int32 (no int64 widening). Each block requantizes to the uint8-range
 	// activation, packs it to int16, and uses VPMADDWD (DotProductPairs) against the pre-regrouped weights.
 	acc := archsimd.BroadcastInt32x8(0)
 

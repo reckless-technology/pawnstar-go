@@ -30,8 +30,8 @@ func TestScaleByRule50(t *testing.T) {
 }
 
 // TestMaterialDrawCategory pins the insufficient-material classification: category 2 (K vs K),
-// 3 (K + one minor vs K), 4 (KB vs KB with both bishops on the same square colour), and 0 for
-// everything else — including opposite-coloured bishops, two knights, and any pawn/rook/queen.
+// 3 (K + one minor vs K), 4 (KB vs KB with both bishops on the same square color), and 0 for
+// everything else — including opposite-colored bishops, two knights, and any pawn/rook/queen.
 func TestMaterialDrawCategory(t *testing.T) {
 	cases := []struct {
 		fen  string

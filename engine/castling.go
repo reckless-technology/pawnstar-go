@@ -80,7 +80,7 @@ func castlingRightsFromFen(fen string) castlingRights {
 	return cr
 }
 
-// toFenString serialises the castling rights to the FEN field, e.g. "KQkq" or "-".
+// toFenString serializes the castling rights to the FEN field, e.g. "KQkq" or "-".
 func (cr castlingRights) toFenString() string {
 	if cr == 0 {
 		return "-"

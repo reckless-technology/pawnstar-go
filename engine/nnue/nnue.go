@@ -9,11 +9,11 @@
 // "PSN1" header, which described the architecture but carried neither the king bucket map's contents
 // nor any integrity check — the two gaps that let a net load cleanly and then evaluate wrongly.
 //
-// Architecture (the shipped net, pawnstar-v20.bin of release 2.0.0): Chess768 features (2 colours *
+// Architecture (the shipped net, pawnstar-v20.bin of release 2.0.0): Chess768 features (2 colors *
 // 6 types * 64 squares) per perspective, x kingBuckets horizontally mirrored king-square weight
 // banks -> an hiddenSize int16 accumulator per perspective. Activation is SCReLU (clamp to [0,QA]
 // then square). The output layer dots the two perspectives (side-to-move first) through the material
-// output head the piece count selects, and dequantises to centipawns.
+// output head the piece count selects, and dequantizes to centipawns.
 //
 // The package is decoupled from the engine's board types: positions are passed as a Board — raw
 // uint64 occupancy bitboards plus uint8 piece codes — so the engine (which this package must not
@@ -38,7 +38,7 @@ import (
 // architecture is the DEFAULT and is what the shipped net was trained for; v12's shape is the tagged
 // build. Everything below derives from the two knobs; nothing about the shape is written down twice.
 const (
-	featuresPerBucket = 768                             // features per perspective per bucket: 2 colours * 6 types * 64
+	featuresPerBucket = 768                             // features per perspective per bucket: 2 colors * 6 types * 64
 	kingBuckets       = 8                               // king-square weight banks (TestKingBucketMapWellFormed checks the map needs exactly this many)
 	featureRows       = featuresPerBucket * kingBuckets // 6144 (bucket-major)
 	hiddenSize        = 1024                            // feature-transformer / accumulator width per perspective
@@ -217,21 +217,21 @@ func KingBucketMapCRC() uint64 { return kingBucketMapCRC() }
 
 // Board is the raw piece-placement view of a chess position that the evaluator consumes. The engine
 // builds one at the call boundary from its own position type (a plain value conversion), keeping
-// this package free of engine imports. White is colour index 0, black 1; piece codes are 1 (pawn)
+// this package free of engine imports. White is color index 0, black 1; piece codes are 1 (pawn)
 // through 6 (king), 0 = empty — matching the engine's constants bit-for-bit.
 type Board struct {
 	Pieces  [7]uint64 // per-piece-type occupancy; index = piece code (index 0 holds all occupied squares)
-	Colors  [2]uint64 // per-colour occupancy
+	Colors  [2]uint64 // per-color occupancy
 	Squares [64]uint8 // piece code per square, 0 when empty
 }
 
-// kingSquare returns the king square of colour c (a legal board always has both kings).
+// kingSquare returns the king square of color c (a legal board always has both kings).
 func (b *Board) kingSquare(c int) int {
 	return bits.TrailingZeros64(b.Pieces[kingCode] & b.Colors[c])
 }
 
 // pieceCount returns how many pieces stand on the board, which is what selects the output head. It
-// is taken from the union of the two colour bitboards rather than Pieces[0], so a Board built field
+// is taken from the union of the two color bitboards rather than Pieces[0], so a Board built field
 // by field in a test counts the same as the engine's zero-copy view of a position.
 func (b *Board) pieceCount() int {
 	return bits.OnesCount64(b.Colors[0] | b.Colors[1])
@@ -245,8 +245,8 @@ func outputBucket(b *Board) int {
 	return (b.pieceCount() - 2) / outputBucketDivisor
 }
 
-// perspective is everything one perspective needs to turn a (colour, piece, square) into a feature
-// row: which weight bank it reads, and how a square and a colour are oriented into its own view.
+// perspective is everything one perspective needs to turn a (color, piece, square) into a feature
+// row: which weight bank it reads, and how a square and a color are oriented into its own view.
 //
 // The whole point of gathering these three into one comparable value is the REFRESH RULE. A
 // perspective can be updated incrementally only while all three stay put; if any of them changes,
@@ -261,7 +261,7 @@ func outputBucket(b *Board) int {
 type perspective struct {
 	bank       int // first feature row of this perspective's bank: bucket * featuresPerBucket
 	squareFlip int // XOR applied to a square: rankFlip for black's view, plus fileFlip if mirrored
-	colorFlip  int // XOR applied to a piece's colour: 0 for white's view, 1 for black's
+	colorFlip  int // XOR applied to a piece's color: 0 for white's view, 1 for black's
 }
 
 // perspectiveFor returns one perspective's indexing state for a board.
@@ -285,7 +285,7 @@ func perspectiveFor(b *Board, blackPersp bool) perspective {
 
 // NeedsRefresh reports, for each perspective, whether moving from board `from` to board `to` forces a
 // from-scratch rebuild rather than an incremental diff — that is, whether that perspective's bank,
-// square flip or colour flip changed. It is the single comparison Update makes, exported so a test
+// square flip or color flip changed. It is the single comparison Update makes, exported so a test
 // can assert that a line meant to cross a boundary really crossed one: a crossing case that quietly
 // stopped crossing anything would otherwise pass while testing nothing.
 func NeedsRefresh(from, to *Board) (white, black bool) {
@@ -294,13 +294,13 @@ func NeedsRefresh(from, to *Board) (white, black bool) {
 }
 
 // DescribePerspective names one perspective's indexing state for a board — its bank, square flip and
-// colour flip — so a divergence can be reported as the three values that decide whether an
+// color flip — so a divergence can be reported as the three values that decide whether an
 // accumulator may be diffed, rather than as a count of differing lanes. Reading "bank=2304 flip=7"
 // on both sides of a ply is what tells a reader at once that the bank was the same and the flip was
 // not, which is exactly the case mirroring added.
 func DescribePerspective(b *Board, black bool) string {
 	p := perspectiveFor(b, black)
-	return fmt.Sprintf("bank=%d flip=%d colour=%d", p.bank, p.squareFlip, p.colorFlip)
+	return fmt.Sprintf("bank=%d flip=%d color=%d", p.bank, p.squareFlip, p.colorFlip)
 }
 
 // Accumulator holds both perspective accumulators (each the feature-transformer output for one
@@ -324,7 +324,7 @@ func DiffLanes(a, b *Accumulator) (white, black int) {
 	return white, black
 }
 
-// Network is a loaded, quantised network: read-only after loading and safe to share across threads.
+// Network is a loaded, quantized network: read-only after loading and safe to share across threads.
 type Network struct {
 	featureWeights []int16 // [featureRows * hiddenSize], column-major: row*hidden + i; rows bucket-major
 	featureBias    []int16 // [hiddenSize]
@@ -333,7 +333,7 @@ type Network struct {
 	// contiguous 2*hiddenSize run, so selecting one is a slice and the kernels never learn about heads.
 	outputWeights []int16
 	outputBias    []int32 // [outputBuckets], in QA*QB units (int32 in the container, whatever the head count)
-	// outputWeightsI8 is outputWeights requantised to int8 range (values in [-127,127], stored int16 for the
+	// outputWeightsI8 is outputWeights requantized to int8 range (values in [-127,127], stored int16 for the
 	// SIMD kernel): w8 = clamp(round(w / outputWScale), -127, 127). It drives the search's int8 output dot
 	// (EvaluateInt8); the int16 outputWeights stay the reference path (EvaluateExact). Mirrors the C++ engine.
 	outputWeightsI8 []int16
@@ -508,7 +508,7 @@ func Stamp(payload []byte) ([]byte, error) {
 	return append(header, payload...), nil
 }
 
-// deriveInt8OutputWeights requantises the int16 output weights to int8 range for the int8 output dot.
+// deriveInt8OutputWeights requantizes the int16 output weights to int8 range for the int8 output dot.
 // The scale keeps the largest-magnitude weight inside [-127,127]; nets whose weights already fit (the
 // shipped one) get scale 1 and a lossless copy. Mirrors the C++ Network::LoadFromMemory tail.
 func (n *Network) deriveInt8OutputWeights() {
@@ -563,7 +563,7 @@ func readInt16Slice(b []byte, off int, dst []int16) int {
 }
 
 // featureRow is the feature row for a piece in one perspective's bucket bank:
-// `bank + (colour ^ colourFlip)*384 + (type-1)*64 + (square ^ squareFlip)`. All three of the
+// `bank + (color ^ colorFlip)*384 + (type-1)*64 + (square ^ squareFlip)`. All three of the
 // perspective's fields appear in it, which is exactly why all three have to be unchanged before an
 // accumulator may be diffed rather than rebuilt.
 func featureRow(p perspective, colorIdx int, pc uint8, sq int) int {
@@ -613,10 +613,10 @@ func (n *Network) Refresh(acc *Accumulator, b *Board) {
 // Update moves acc from matching `from` to matching `to` by applying only the feature deltas for
 // squares whose occupancy differs. Reversible — swap from/to to undo — and a no-op when placements
 // are identical (a null move). Captures, castling, en passant and promotion are handled uniformly
-// via the colour bitboards: for each square a colour vacated, subtract the piece that was there
+// via the color bitboards: for each square a color vacated, subtract the piece that was there
 // (read from `from`); for each it now occupies, add the piece now there (read from `to`).
 //
-// A king move that changes its perspective's bank, its square flip or its colour flip moves every
+// A king move that changes its perspective's bank, its square flip or its color flip moves every
 // feature row that perspective reads, so that perspective is refreshed from scratch. Both ways that
 // can happen go through ONE comparison of the whole perspective — see the perspective type for why
 // comparing banks alone is silently wrong once mirroring is on. At most one king moves per ply, so
@@ -691,7 +691,7 @@ func dequant(output int64, bias int32) int {
 }
 
 // EvaluateExact is the exact int16 SCReLU forward pass — the reference evaluator. Returns the score
-// in centipawns from the side-to-move's perspective (stm is the colour index, 0 white / 1 black).
+// in centipawns from the side-to-move's perspective (stm is the color index, 0 white / 1 black).
 // The side-to-move accumulator feeds the first half of the output layer.
 //
 // The board is needed as well as the accumulator because the output head is selected by the PIECE
@@ -715,10 +715,10 @@ func (n *Network) headWeights(weights []int16, bucket int) []int16 {
 }
 
 // EvaluateInt8 is the int8 output-layer forward pass — the search's hot-path evaluator (mirrors the
-// C++ Network::Evaluate). Activations are requantised to uint8 (SCReLU >> int8Shift) and the
+// C++ Network::Evaluate). Activations are requantized to uint8 (SCReLU >> int8Shift) and the
 // output weights to int8; the dot then scales back by outputWScale * 2^shift before dequant. Faster
 // than the exact int16 dot at a small (~<=40 cp) deviation from EvaluateExact, which the search
-// tolerates. stm is the colour index (0 white / 1 black), and b must be the board acc was maintained
+// tolerates. stm is the color index (0 white / 1 black), and b must be the board acc was maintained
 // for — it supplies the piece count that selects the output head.
 func (n *Network) EvaluateInt8(acc *Accumulator, b *Board, stm int) int {
 	s, o := &acc.white, &acc.black
