@@ -155,6 +155,13 @@ once in the `Makefile`), and CI's `coverage` job runs it on every pull request. 
 engine, `engine/nnue` and the binary's `main` package, everything a release ships; there are no developer-only Go tools
 to leave out, and test files are not counted. It stands near 99 %.
 
+**Self-play matches use a pinned opening set.** `tools/sprt.sh` (candidate binary against a baseline, through
+`fastchess`) plays from [`pawnstar`](https://github.com/reckless-technology/pawnstar)'s `nnue/openings.epd` at the commit
+and SHA-256 recorded in [tools/openings.pin](tools/openings.pin). `tools/fetch-openings.sh` downloads it over https into
+`~/.cache/pawnstar-go`, checks the hash on every run and prints the path; the match stops if the download fails or the
+hash differs. `OPENINGS=<file>` substitutes a file of your own only if it has the pinned hash, so a result can always
+name the exact positions it was played from.
+
 The speed figures in this paragraph were measured in July 2026 (recorded 2026-07-01 and 2026-07-02), before the v20 net and its shape, on the author's amd64 laptop (an i9-13900HX) and an Apple-silicon Mac; they have not been remeasured since. Perft (move generation only) runs at approximately **200 Mnps** single-threaded (start position, amd64 laptop) and is core-count-independent now that move generation is allocation-free. The NNUE evaluator used in real search is slower per node but far stronger — when first ported it measured **+572 Elo** over the engine's former handcrafted evaluation in a fixed-depth self-play SPRT (146W/3L/5D, July 2026); that handcrafted eval has since been removed. The C++ original reaches ~540 Mnps on the same machine — a raw move-gen gap of ~2.7×, attributable to compiler codegen rather than algorithm (PEXT vs magic bitboards measured near-identical in the C++ engine's own testing). In real NNUE search the Go↔C++ speed gap is much smaller than that raw move-gen gap — search nps is dominated by evaluation, where the SIMD kernels are close to the C++ hot path. Over the 24 Bratko-Kopec positions at depth 10 (single-threaded, bit-identical search trees) the Go engine runs ~1.06 Mnps versus the C++ engine's ~1.77 Mnps — **~1.66× slower** on the amd64 machine. On **arm64 (Apple Silicon)**, after the hand-written NEON kernels, the gap is essentially closed: the 16-position `bench` (identical 7,007,401-node trees — the pre-butterfly signature — interleaved) runs at **~1.14 Mnps vs C++ ~1.15–1.19 Mnps — parity (~0.98×)**, up 6.0× from ~190k nps when arm64 was fully scalar.
 
 ## Versions and releases

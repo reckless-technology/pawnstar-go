@@ -13,7 +13,9 @@
 #                oversubscription. This is the default mode.
 #   TC           time control e.g. "8+0.08". If set, overrides DEPTH and measures real
 #                strength including a heavier eval's speed cost.
-#   OPENINGS     opening book (default ~/pawnstar_nnue/openings.epd, UHO_Lichess).
+#   OPENINGS     an opening file to use instead of fetching the pinned set. It must still match the
+#                SHA-256 in tools/openings.pin; the run fails otherwise. By default the set pinned
+#                there (Pawnstar's nnue/openings.epd at one commit) is fetched over https and cached.
 #   ELO0 ELO1    SPRT hypothesis bounds (default 0 / 10).
 #   CONCURRENCY  parallel games (default nproc).
 set -euo pipefail
@@ -21,7 +23,6 @@ set -euo pipefail
 CAND="${1:-./pawnstar-go}"
 BASE="${2:-./pawnstar-go-baseline}"
 ROUNDS="${3:-500}"
-OPENINGS="${OPENINGS:-$HOME/pawnstar_nnue/openings.epd}"
 ELO0="${ELO0:-0}"
 ELO1="${ELO1:-10}"
 CONCURRENCY="${CONCURRENCY:-$(nproc)}"
@@ -29,8 +30,11 @@ CONCURRENCY="${CONCURRENCY:-$(nproc)}"
 for f in "$CAND" "$BASE"; do
     [ -x "$f" ] || { echo "error: engine binary not found/executable: $f" >&2; exit 1; }
 done
-[ -r "$OPENINGS" ] || { echo "error: openings file not readable: $OPENINGS" >&2; exit 1; }
 command -v fastchess >/dev/null || { echo "error: fastchess not on PATH" >&2; exit 1; }
+# Fetch (if need be) and verify the pinned opening set; a failure here stops the run (set -e).
+OPENINGS="$("$(dirname "${BASH_SOURCE[0]}")/fetch-openings.sh")"
+
+echo "openings: $OPENINGS" >&2
 
 # Each engine is pinned to one core so CONCURRENCY concurrent games don't oversubscribe.
 # GOMAXPROCS=1 is the Go equivalent of the C++ harness's PAWNSTAR_THREADS=1: the search still
