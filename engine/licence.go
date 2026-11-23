@@ -15,9 +15,9 @@ package engine
 
 import "fmt"
 
-// licenceNotice is what `license` prints: this engine's licence, then every third-party notice the
+// licenseNotice is what `license` prints: this engine's license, then every third-party notice the
 // material it distributes obliges. Condensed from THIRD-PARTY-NOTICES.md, which is the full text.
-var licenceNotice = []string{
+var licenseNotice = []string{
 	"Pawnstar (Go) is free software under the GNU General Public License, version 3,",
 	"and comes with NO WARRANTY. See <https://www.gnu.org/licenses/gpl-3.0.html>.",
 	"",
@@ -60,16 +60,16 @@ var licenceNotice = []string{
 	"This engine has no third-party code dependencies.",
 }
 
-// LicenceNotice returns the lines `license` prints, so the binary's own --license flag prints exactly
+// LicenseNotice returns the lines `license` prints, so the binary's own --license flag prints exactly
 // the same text from the same place rather than keeping a second copy of it.
-func LicenceNotice() []string {
-	return licenceNotice
+func LicenseNotice() []string {
+	return licenseNotice
 }
 
-// handleUciLicense prints the engine's own licence and the third-party notices the shipped data
+// handleUciLicense prints the engine's own license and the third-party notices the shipped data
 // obliges. It reads and writes nothing but stdout.
 func handleUciLicense() {
-	for _, line := range licenceNotice {
+	for _, line := range licenseNotice {
 		fmt.Println(line)
 	}
 }

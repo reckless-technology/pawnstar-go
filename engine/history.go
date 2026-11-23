@@ -3,7 +3,7 @@ package engine
 // historyTable is a butterfly table scoring how good each (side-to-move, from→to) move has been at
 // raising alpha or causing a beta cutoff anywhere in the search tree. Pooling across plies (rather
 // than the per-ply table this replaced) concentrates the statistics where positions repeat across
-// branches and transpositions; the side-to-move dimension keeps the two colours' moves separate
+// branches and transpositions; the side-to-move dimension keeps the two colors' moves separate
 // (which ply parity previously did only by accident, and null-move subtrees polluted). The table is
 // per-thread (owned by searchState) under Lazy SMP, so the counts are plain (non-atomic).
 //

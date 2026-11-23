@@ -102,7 +102,7 @@ func TestCastlingRightsAgainstTheBoard(t *testing.T) {
 		{"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "KQkq", 2, "every right supported, and both White castlings legal"},
 		{"r3k3/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "KQq", 2, "Black's kingside right dropped, with no rook on h8"},
 		{"4k3/8/8/8/8/8/8/rn2K2R w KQ - 0 1", "K", 1,
-			"a rook of the other colour on a1 supports nothing, and the knight keeps it off the king"},
+			"a rook of the other color on a1 supports nothing, and the knight keeps it off the king"},
 		{"4k3/8/8/8/8/8/8/R2K3R w KQ - 0 1", "-", 0, "a king off its home square supports neither right"},
 		{"r3k2r/8/8/8/8/8/8/R3K1NR w KQkq - 0 1", "KQkq", 1,
 			"a right stands while a piece between king and rook blocks the move"},

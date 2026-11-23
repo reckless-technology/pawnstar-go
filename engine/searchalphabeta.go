@@ -43,7 +43,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		timedOut := time.Now().UnixNano() >= ss.game.hardDeadlineNanos.Load()
 		if timedOut || (tc.maxNodes > 0 && ss.nodeCount >= tc.maxNodes) {
 			ss.game.isCancelPending.Store(true)
-			return searchCancelledScore
+			return searchCanceledScore
 		}
 	}
 
@@ -179,8 +179,8 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			var dummy variation
 			score := -searchAlphaBeta(ss, depth-4, ply+1, -beta, -alpha, &dummy, moveNone())
 			ss.undoMove()
-			if ss.isCancelled() {
-				return searchCancelledScore
+			if ss.isCanceled() {
+				return searchCanceledScore
 			}
 			if score >= beta {
 				return beta
@@ -197,7 +197,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 	hasRaisedAlpha := false
 
 	// quietsTried collects the quiet moves searched at this node (TT move included) so a later beta
-	// cutoff can penalise the ones that failed (the history malus in recordGood). Backed by a stack
+	// cutoff can penalize the ones that failed (the history malus in recordGood). Backed by a stack
 	// array to avoid a per-node heap allocation; capped at 64 (deeper is rare and the tail matters least).
 	var quietsBuffer [64]move
 	quietsTried := quietsBuffer[:0]
@@ -206,8 +206,8 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 		ss.dbg.tableMove++
 		pv.clear()
 		score := searchSingleMove(ss, depth, ply, alpha, beta, transpos.move, &pv, 0)
-		if ss.isCancelled() {
-			return searchCancelledScore
+		if ss.isCanceled() {
+			return searchCanceledScore
 		}
 		if score >= beta {
 			ss.dbg.tableMoveBetaCutoffs++
@@ -278,7 +278,7 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			}
 		}
 
-		// Record this quiet move as tried before searching it, so a cutoff by a later sibling penalises
+		// Record this quiet move as tried before searching it, so a cutoff by a later sibling penalizes
 		// it (the eventual cutoff move is excluded in recordGood).
 		if m.isQuiet() && len(quietsTried) < cap(quietsTried) {
 			quietsTried = append(quietsTried, m)
@@ -290,8 +290,8 @@ func searchAlphaBeta(ss *searchState, depth, ply, alpha, beta int, parentPV *var
 			ss.dbg.lateMoveReductionFails++
 			score = searchSingleMove(ss, depth, ply, alpha, beta, m, &pv, i)
 		}
-		if ss.isCancelled() {
-			return searchCancelledScore
+		if ss.isCanceled() {
+			return searchCanceledScore
 		}
 		if score >= beta {
 			ss.game.transpositionTable.record(pos.hash, m.withScore(score), depth, nodeCut)

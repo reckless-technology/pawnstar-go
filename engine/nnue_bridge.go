@@ -18,8 +18,8 @@ import (
 // colors [2]bitboard, squares [64]piece) are laid out byte-identically to nnue.Board (Pieces
 // [7]uint64, Colors [2]uint64, Squares [64]uint8) because bitboard is uint64 and piece is uint8 and
 // the field order matches — so the position's leading 136 bytes ARE an nnue.Board. Passing the
-// pointer (rather than materialising a value) is what C++ gets for free by handing Update a
-// `Position const&`; profiling showed the old per-eval materialisation was ~10% of runtime, almost
+// pointer (rather than materializing a value) is what C++ gets for free by handing Update a
+// `Position const&`; profiling showed the old per-eval materialization was ~10% of runtime, almost
 // all of it redundant rebuilds of the parent board across a node's siblings.
 //
 // The layout equivalence is a contract, not a coincidence: it mirrors the C++ Position. It is asserted

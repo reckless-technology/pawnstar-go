@@ -92,7 +92,7 @@ func TestComputeBudget(t *testing.T) {
 // TestPonderRace exercises the pondering state machine and its concurrency — the reason pondering was
 // deferred: `ponderhit` (this goroutine) mutates the live clock while the search goroutines read it. Run
 // under -race it proves that path is data-race free (searchStartNanos / hardDeadlineNanos are atomics). It
-// also checks the two behaviours: a ponder search does not finish until ponderhit/stop (the bestmove is
+// also checks the two behaviors: a ponder search does not finish until ponderhit/stop (the bestmove is
 // deferred by the ponder-wait), and ponderhit converts it into a timed search that actually terminates.
 func TestPonderRace(t *testing.T) {
 	if testing.Short() {

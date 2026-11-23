@@ -9,7 +9,7 @@ package engine
 // and about the engine still playing, with the net it already had, after the refusal.
 //
 // The in-process cases (engine/uci_inprocess_test.go, engine/uci_coverage_test.go) cover the same
-// behaviour through Game and are what the coverage profile sees; this one covers what they cannot.
+// behavior through Game and are what the coverage profile sees; this one covers what they cannot.
 
 import (
 	"encoding/binary"
@@ -124,7 +124,7 @@ func (e *uciEngine) waitForStderrLine(want string, from int, timeout time.Durati
 }
 
 // TestUCIRefusedEvalFileKeepsTheNetPlaying drives the built binary as a GUI would and asserts the whole
-// decided behaviour of a refused `setoption name EvalFile`:
+// decided behavior of a refused `setoption name EvalFile`:
 //
 //  1. the loader's refusal, naming the field, the file's value and the engine's value, appears on
 //     stdout as an `info string` AND on stderr (the same text, without the prefix);

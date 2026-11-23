@@ -2,7 +2,7 @@ package nnue
 
 // The RNNUE1 container: the CRC-64/XZ check value, the stamper's agreement with the shipped net, every
 // refusal the loader's two checks can raise, and the diagnostic lane diff, the output clamp and the int8
-// requantisation's degenerate cases. The engine package's suite exercises the loader and the evaluators on
+// requantization's degenerate cases. The engine package's suite exercises the loader and the evaluators on
 // the embedded net; these cover the inputs it never sees — a short, foreign, corrupt or mis-shaped file.
 
 import (
@@ -488,7 +488,7 @@ func TestDeriveInt8OutputWeightsDegenerate(t *testing.T) {
 	if n.outputWScale != 1 {
 		t.Errorf("all-zero weights: scale %d, want 1", n.outputWScale)
 	}
-	n.outputWeights[16] = 381 // scale (381 + 126) / 127 = 3, so 127 after requantising
+	n.outputWeights[16] = 381 // scale (381 + 126) / 127 = 3, so 127 after requantizing
 	n.deriveInt8OutputWeights()
 	if n.outputWScale != 3 || n.outputWeightsI8[16] != 127 || n.outputWeightsI8Nat[16] != 127 {
 		t.Errorf("scale %d, tail %d / %d; want 3, 127 / 127", n.outputWScale, n.outputWeightsI8[16], n.outputWeightsI8Nat[16])

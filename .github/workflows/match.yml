@@ -1,6 +1,6 @@
 name: Match
 
-# A strength match between two builds of this engine, played on GitHub-hosted runners through the organisation's shared
+# A strength match between two builds of this engine, played on GitHub-hosted runners through the organization's shared
 # match workflow (reckless-technology/pawnstar, .github/workflows/match-core.yml, guide docs/match-core.md there).
 # Manual only: nothing here runs on a push or a pull request.
 #
@@ -21,7 +21,7 @@ name: Match
 # A workflow_dispatch workflow cannot be dispatched until its file is on the default branch, so a change to this file
 # is dispatched from its own branch with `gh workflow run match.yml --ref <branch>`.
 #
-# Capacity: every public repository of the organisation shares about 60 concurrent hosted jobs, and the core keeps
+# Capacity: every public repository of the organization shares about 60 concurrent hosted jobs, and the core keeps
 # max-parallel at 40. A smoke run wants `chunks: 4` and a few hundred games, not the 20 chunks of a full match.
 
 on:
@@ -43,7 +43,7 @@ on:
         description: 'Fixed search depth instead of a time control (empty = use the time control)'
         default: ''
       games:
-        description: 'Total games (rounded up to whole colour-reversed pairs; at most 2 x the openings left)'
+        description: 'Total games (rounded up to whole color-reversed pairs; at most 2 x the openings left)'
         default: '4000'
       chunks:
         description: 'Number of chunk jobs'

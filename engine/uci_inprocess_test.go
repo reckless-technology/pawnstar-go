@@ -4,7 +4,7 @@ package engine
 // proves the protocol end to end but is invisible to the coverage profile, so HandleCommand, the `go`
 // parser, setoption, bench and the search goroutine's bestmove/ponder handshake are driven here through
 // HandleCommand on a real Game, with stdout captured. Nothing here changes what the engine does: each test
-// asserts the behaviour the protocol already has.
+// asserts the behavior the protocol already has.
 
 import (
 	"regexp"
@@ -19,7 +19,7 @@ import (
 
 // runUCI sends each line to game.HandleCommand and returns everything printed, plus whether a line asked
 // the engine to quit. After the last line it joins any search a `go` started (game.wg.Wait, not
-// stopThinking, so a fixed-depth or book search runs to its own end rather than being cancelled), so the
+// stopThinking, so a fixed-depth or book search runs to its own end rather than being canceled), so the
 // search goroutine's bestmove line is inside the captured output.
 func runUCI(t *testing.T, game *Game, lines ...string) (out string, quit bool) {
 	t.Helper()
@@ -324,8 +324,8 @@ func TestUCISearchMovesInProcess(t *testing.T) {
 	}
 }
 
-// TestUCIGoSearchMovesStopsAtTheNextKeyword: the move list after `searchmoves` ends at the next recognised
-// `go` keyword, which is then honoured - the rule the C++ and Rust parsers already had. Go used to append
+// TestUCIGoSearchMovesStopsAtTheNextKeyword: the move list after `searchmoves` ends at the next recognized
+// `go` keyword, which is then honored - the rule the C++ and Rust parsers already had. Go used to append
 // every remaining token to the move list and jump to the end of the line, so `go searchmoves e2e4 depth 10`
 // set no depth limit at all and the search ran to the engine's own default depth (15) where the other two
 // ports stopped at 10. Nothing caught it: the subprocess suite's SearchMoves case sends exactly that line
@@ -732,7 +732,7 @@ func TestSmallHelpersEdgeCases(t *testing.T) {
 		t.Errorf("hashfull of an empty table = %d", hf)
 	}
 	if bb := pieceAttacks(pawn, 0, squareFromString("e4")); bb != 0 {
-		t.Errorf("pieceAttacks(pawn) = %v, want 0 (pawns are handled by colour elsewhere)", bb)
+		t.Errorf("pieceAttacks(pawn) = %v, want 0 (pawns are handled by color elsewhere)", bb)
 	}
 }
 

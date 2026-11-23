@@ -21,12 +21,12 @@ const (
 	// maxPly caps search depth and is also the first dimension of the history table.
 	maxPly = 64
 
-	// searchCancelledScore is a sentinel returned by a search iteration that was
+	// searchCanceledScore is a sentinel returned by a search iteration that was
 	// interrupted by the time limit, allowing the caller to detect cancellation.
-	searchCancelledScore = -12345678
+	searchCanceledScore = -12345678
 
 	// unsearchedRootMoveScore marks a root move the ordering pass did not finish searching because the
-	// search was cancelled. It is one below initialAlpha, so below every real score (all within
+	// search was canceled. It is one below initialAlpha, so below every real score (all within
 	// ±initialBeta), and such moves sort after every move that was searched. Matches the C++
 	// kUnsearchedRootScore and the Rust UNSEARCHED_ROOT_MOVE_SCORE.
 	unsearchedRootMoveScore = initialAlpha - 1

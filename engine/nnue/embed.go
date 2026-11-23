@@ -16,7 +16,7 @@ import _ "embed"
 // the Open Database License 1.0, its contents under the Database Contents License 1.0, and
 // distributing a net trained on it obliges a notice naming the source - THIRD-PARTY-NOTICES.md, which
 // `pawnstar-go --license` prints. The obligation is the notice: ODbL does not require the network
-// itself to be ODbL-licensed, nor does the engine's GPLv3 licence make it GPLv3.
+// itself to be ODbL-licensed, nor does the engine's GPLv3 license make it GPLv3.
 //
 //go:embed pawnstar-v20.bin
 var embeddedNet []byte

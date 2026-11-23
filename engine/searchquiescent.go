@@ -46,8 +46,8 @@ func searchQuiescent(ss *searchState, depth, ply, alpha, beta int) int {
 		ss.playMove(m)
 		score = -searchQuiescent(ss, depth-1, ply+1, -beta, -alpha)
 		ss.undoMove()
-		if ss.isCancelled() {
-			return searchCancelledScore
+		if ss.isCanceled() {
+			return searchCanceledScore
 		}
 		if score >= beta {
 			ss.history.recordGoodMove(ss.currentPosition().colorToMove, m)

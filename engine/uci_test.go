@@ -2,12 +2,12 @@ package engine
 
 // UCI protocol regression test. Drives the actual engine binary over stdin/stdout with synchronized I/O
 // (read the engine's responses before sending the next command, so `quit` never cancels a running search)
-// and asserts on the protocol behaviour.
+// and asserts on the protocol behavior.
 //
 // This is a faithful port of the former test/uci_test.sh (now removed); `make test-uci` runs this test.
 // Every assertion the script made is reproduced here (see the section comments, which map 1:1 onto the
 // numbered checks in the original script). These features (seldepth / currmove / searchmoves, the
-// uciok/readyok handshake, bench determinism, the ponder protocol) are about the engine's behaviour *as a
+// uciok/readyok handshake, bench determinism, the ponder protocol) are about the engine's behavior *as a
 // UCI process*, so the only faithful test drives the built binary the way a GUI does — hence a subprocess.
 //
 // The build REQUIRES GOEXPERIMENT=simd (the NNUE SIMD kernels), which is set on the `go build` invocation
@@ -287,7 +287,7 @@ var (
 	reSeldepth     = regexp.MustCompile(`.*info depth +([0-9]+).*seldepth +([0-9]+)`)
 )
 
-// TestUCIProtocol drives the built engine as a UCI process and asserts on its protocol behaviour, mirroring
+// TestUCIProtocol drives the built engine as a UCI process and asserts on its protocol behavior, mirroring
 // the former test/uci_test.sh check-for-check. The sub-tests run against one shared engine process (the
 // original script used a single coproc for checks 1–6) except bench determinism, which spawns fresh processes.
 func TestUCIProtocol(t *testing.T) {
@@ -597,7 +597,7 @@ func TestUCIStopAndQuitStraightAfterGo(t *testing.T) {
 const benchGoldenNodes = "5617906"
 
 // TestUCIBenchDeterminism: single-threaded bench is deterministic, so two runs must agree (guards the
-// uninitialised-read class of bug that made node counts wobble) AND must equal the golden bit-parity
+// uninitialized-read class of bug that made node counts wobble) AND must equal the golden bit-parity
 // signature benchGoldenNodes. Each run is a fresh `bench\nquit` piped into a new process.
 func TestUCIBenchDeterminism(t *testing.T) {
 	skipWithoutTheShippedNet(t)

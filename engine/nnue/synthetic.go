@@ -65,8 +65,8 @@ func SyntheticNetPayload() []byte {
 		writeInt16(int16(int(source.next()>>56) - 128))
 	}
 	// output_weights: shifted one up from the feature weights' range so that -128, which has no
-	// positive int8 counterpart, never appears and the int8 requantisation stays essentially lossless
-	// — which keeps the accumulator gates about the accumulator and not about requantisation.
+	// positive int8 counterpart, never appears and the int8 requantization stays essentially lossless
+	// — which keeps the accumulator gates about the accumulator and not about requantization.
 	for i := 0; i < numOutputWeights; i++ {
 		writeInt16(int16(int(source.next()>>56) - 128 + 1))
 	}

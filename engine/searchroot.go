@@ -82,7 +82,7 @@ func searchRootNode(game *Game) move {
 
 	// Reuse the main thread's searchState across searches (helpers below always build fresh): the
 	// ~1 MiB history table and continuation-history slice are recycled instead of re-allocated per
-	// `go`. resetForSearch restores exact fresh-construction state, so behaviour is unchanged.
+	// `go`. resetForSearch restores exact fresh-construction state, so behavior is unchanged.
 	ss := game.mainSearchState
 	if ss == nil {
 		ss = newSearchStateFromGame(game)
@@ -97,7 +97,7 @@ func searchRootNode(game *Game) move {
 	// only the lockless transposition table and eval cache (history/killers/continuation/countermoves
 	// are per-thread on each searchState). The main thread (id 0) is authoritative — it prints info,
 	// applies time management, and returns the move — while helper threads deepen the shared TT to
-	// accelerate it, desynchronised by the per-thread iteration-skip schedule. Each helper gets its own
+	// accelerate it, desynchronized by the per-thread iteration-skip schedule. Each helper gets its own
 	// searchState, a private throwaway diagnostics struct, and its own copy of the move list.
 	nThreads := min(max(game.threadCount, 1), maxSearchThreads) // same clamp as SetThreads / the UCI Threads option
 	var helpers sync.WaitGroup
@@ -128,7 +128,7 @@ func searchRootNode(game *Game) move {
 
 // orderRootMoves runs the shallow ordering pass: every root move is searched to startDepth, scored, and
 // the list sorted best first. It returns the move to seed iterative deepening with, which is also the
-// move played if the search is cancelled before iterative deepening finds a better one.
+// move played if the search is canceled before iterative deepening finds a better one.
 //
 // Under a hard limit (a positive hard budget, or `go nodes`) the depth-3 pass can outlast the whole budget:
 // on positions from 8+0.08 games it took up to 369k nodes from a cold table and 464 ms on a warm one, against
@@ -163,7 +163,7 @@ func orderRootMovesWith(ss *searchState, moves []move, hasHardLimit bool) move {
 		for i := range moves {
 			m := moves[i]
 			score := searchSingleMove(ss, depth, 0, initialAlpha, initialBeta, m, &initPV, i)
-			if ss.isCancelled() {
+			if ss.isCanceled() {
 				break // this move's score is not trusted
 			}
 			moves[i] = m.withScore(score)
@@ -204,7 +204,7 @@ func orderRootMovesWith(ss *searchState, moves []move, hasHardLimit bool) move {
 		}
 	}
 	if completedCount < len(moves) {
-		// Cancelled inside a pass. The moves that finished first are the cheap ones, and their depth-3 scores
+		// Canceled inside a pass. The moves that finished first are the cheap ones, and their depth-3 scores
 		// miss what a deeper search sees (the depth-1 pass sees less still), so prefer the root's TT move when
 		// its entry is deeper than the pass. A pass can reach the root again through a repetition and store it
 		// there, but such an entry is shallower than startDepth, so the depth test never prefers it; it can
@@ -238,7 +238,7 @@ func printSearchInfo(ss *searchState, depth, score int, pv string) {
 
 // lazySmpSkipSize / lazySmpSkipPhase drive the Stockfish-style per-helper iteration-skip schedule:
 // helper thread t (1-based via (t-1) mod len) skips iteration depth d when ((d + phase) / size) is odd,
-// so helpers desynchronise from the main thread and each other and prefill the shared TT with diverse
+// so helpers desynchronize from the main thread and each other and prefill the shared TT with diverse
 // entries instead of recomputing the same tree in lockstep. The main thread (id 0) never skips.
 var (
 	lazySmpSkipSize  = [20]int{1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4}
@@ -283,7 +283,7 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, threadID int)
 			pv.clear()
 			score := searchSingleMove(ss, depth, 0, alpha, initialBeta, m, &pv, i)
 			moves[i] = m.withScore(score)
-			if ss.isCancelled() {
+			if ss.isCanceled() {
 				return bestMove
 			}
 			if score > alpha {
@@ -303,7 +303,7 @@ func iterativeDeepen(ss *searchState, moves []move, bestMove move, threadID int)
 			}
 		}
 
-		if ss.isCancelled() {
+		if ss.isCanceled() {
 			return bestMove
 		}
 

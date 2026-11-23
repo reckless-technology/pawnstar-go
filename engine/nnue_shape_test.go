@@ -9,7 +9,7 @@ package engine
 // has gained the file flip. Code that decided whether to refresh by comparing bucket indices, which
 // is all v12 ever needed, would diff an accumulator whose whole basis had just changed: no panic, no
 // bounds error, just a wrong evaluation on about one king move in eight. So nnue.NeedsRefresh
-// compares the whole perspective — bank, square flip and colour flip together — and these lines
+// compares the whole perspective — bank, square flip and color flip together — and these lines
 // cross each boundary on purpose.
 //
 // What is compared is the ACCUMULATORS, lane by lane, not the evaluations they produce: two different

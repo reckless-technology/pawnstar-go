@@ -154,7 +154,7 @@ func (ss *searchState) currentAccumulator() *nnue.Accumulator {
 	}
 	if k < d {
 		// Each posStack entry is passed to Update as a zero-copy nnue.Board view (nnueBoard), so no
-		// board is materialised — the ancestor and every intermediate position are read in place, the
+		// board is materialized — the ancestor and every intermediate position are read in place, the
 		// way C++ hands Update a Position const&. The views point into posStack, which is not appended
 		// to during this read-only sweep, so they stay valid; Update never mutates the boards it reads.
 		from := ss.posStack[k].nnueBoard()
@@ -240,9 +240,9 @@ func (ss *searchState) isDrawByRepetition() bool {
 	return false
 }
 
-// isCancelled returns true when the search should stop because the engine received a time-expiry or
+// isCanceled returns true when the search should stop because the engine received a time-expiry or
 // stop command.
-func (ss *searchState) isCancelled() bool {
+func (ss *searchState) isCanceled() bool {
 	return ss.game.isCancelPending.Load()
 }
 
