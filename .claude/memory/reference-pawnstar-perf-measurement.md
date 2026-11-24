@@ -7,12 +7,14 @@ metadata:
   originSessionId: 6ae67a0a-eca5-4c78-b247-b3c77c1452d5
 ---
 
-Benchmarking on this machine (laptop i9-13900HX) is noisy — take best-of-N and interleave the two engines in the same thermal state:
+Benchmarking on this machine (laptop i9-13900HX) is noisy. The general method (best of N, interleaved builds in one
+thermal state, no nps from a profiled run, the Apple Silicon `go test -c` interleaving) is in the
+`reckless-chess-engines` skill, "Best of N, interleaved builds, one thermal state". What follows is this engine's own
+figures and what the skill does not carry:
 
-- **Thermal throttling:** sustained/back-to-back heavy runs drop clocks and read up to ~2× slow; short, cool runs are truer. (A perft that looked "11× slower than C++" was really ~3× once measured clean.)
-- **`-memprofile` massively inflates** allocation-heavy workloads (it samples every allocation) — never trust nps from a run that also has `-memprofile`.
+- **Thermal throttling, the figure:** a perft that looked "11× slower than C++" was really ~3× once measured clean.
 - **GOMAXPROCS matters for allocation-bound Go code:** default (all cores) can be *slower* than `GOMAXPROCS=1`, because Go's concurrent GC spins up background mark workers (~25% of GOMAXPROCS) that contend for memory bandwidth with a single-threaded mutator. This is why the old perft (per-node slice alloc) showed ~45 Mnps under multi-core `make check` vs ~145 at 1 core.
-- **Apple Silicon: `go test -bench` single-shots can read ~1.5× slow and `-count=N` does NOT protect you** — a freshly spawned benchmark process can get mis-scheduled (E-core / no P-core promotion) and stays that way for its lifetime, so all N counts in that process agree with each other while being uniformly wrong (seen 2026-07: Update read 4.7μs across 4 "consistent" runs vs its true 3.2μs). For A/B comparisons, **precompile both test binaries (`go test -c`) and run them directly, interleaved** — that methodology gave pre/post readings within 1% at both 1s and 2s benchtimes. A kernel-level cpuprofile is the tie-breaker (artifact = same profile shape, everything uniformly slower).
+- **Apple Silicon, the figures:** `go test -bench` single-shots read ~1.5× slow and `-count=N` agreed with itself while wrong (2026-07: Update read 4.7μs across 4 "consistent" runs vs its true 3.2μs); interleaved precompiled binaries gave pre/post readings within 1% at both 1s and 2s benchtimes. A kernel-level cpuprofile is the tie-breaker (artifact = same profile shape, everything uniformly slower).
 
 Perft baseline after the allocation-free `moveList` (start position, single-thread, now core-count-independent): **Go ~200 Mnps vs C++ ~540 Mnps (~2.7×)**. But perft (move-gen only) overstates the practical gap — real NNUE search is **eval-dominated**.
 

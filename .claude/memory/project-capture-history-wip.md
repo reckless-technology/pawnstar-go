@@ -53,12 +53,10 @@ bit-identical bench signature + depth-12 PAWNSTAR_BENCH_DEBUG, SPRT [0,5] at 10+
 
 ---
 
-**PRE-SPRT ORDERING PROBE (2026-07-03, user-suggested — now the standing gate for ordering changes):**
-before any SPRT, measure the fixed-depth tree: (1) the `bench` signature delta is free (candidate vs
-7,007,401-class baseline); (2) BK-24 @ depth 12 cand-vs-base via the scratchpad driver (~2 min, node
-counts are load-independent). **A real ordering improvement should show node ratio ≤ ~1.00; ratio >
-~1.02 is a red flag** — the change is redirecting search, not improving it, and any TC Elo is
-move-quality luck paying a depth tax. Data: capture-history v1 bench +4.1% → SPRT −6.7; v2 BK-24
+**PRE-SPRT ORDERING PROBE (2026-07-03, user-suggested, now the standing gate for ordering changes).** The method
+(`bench` signature delta, then BK-24 at depth 12 candidate against baseline, node ratio about 1.00 or less, above about
+1.02 a red flag) is in the `reckless-chess-engines` skill, "The pre-SPRT node probe, and where it fails". Data from
+here: baseline 7,007,401-class bench; capture-history v1 bench +4.1% → SPRT −6.7; v2 BK-24
 +4.1% nodes (huge per-position variance: pos03 −45%, pos10 +126%, 8/24 bestmoves changed) while its
 SPRT read ~+9 ±11 (LLR ~0.9, no formal pass at 2500 games) — mechanism ≠ ordering efficiency, so
 weak evidence. Verdict standard: no formal SPRT pass + probe red flag → reject.
@@ -95,13 +93,9 @@ repos. The first strength feature landed since bit-parity was established.
 LLR 2.96 → H1 ACCEPTED.** Candidate = modern history with malus, NO history-guided LMR
 (PAWNSTAR_MODERN_HISTORY=1, all other knobs default). Baseline = same binary flag-off (legacy ++).
 **KEY LESSON: the fixed-depth node probe REJECTED this (every ablation +4.8% to +13.7% nodes over
-legacy — see below) yet it WON at time control by ~+17 Elo.** The probe protocol assumes node-inflation
-⟹ weaker (true for the capture-history head-fakes), but it has a FALSE-NEGATIVE mode: a change that
-trades more-nodes-per-depth for better MOVE QUALITY looks bad on the node probe and still gains at TC
-because quality > depth here. Node probe is necessary-not-sufficient; TC SPRT is the arbiter. Do not
-kill an ordering change on the node probe alone again — if the mechanism plausibly improves move choice
-(not just redirects search), SPRT it. Claude initially recommended rejecting on the probe; the user's
-"SPRT anyway" was correct.
+legacy, see below) yet it WON at time control by about +17 Elo.** The probe is necessary, not sufficient; the lesson is
+in the `reckless-chess-engines` skill, "The probe is necessary, not sufficient", which carries this result. Here:
+Claude initially recommended rejecting on the probe; the user's "SPRT anyway" was correct.
 
 Harness note (this env): fastchess ABSENT here; used **cutechess-cli** (/usr/local/bin) instead.
 Re-downloaded UHO_Lichess_4852_v1 (official-stockfish/books) → ~/pawnstar_nnue/openings.epd (2.6M pos).
