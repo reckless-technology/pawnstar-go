@@ -80,7 +80,7 @@ Perft (move generation only) runs at ~200 Mnps single-threaded (start position) 
 
 ## SPRT self-play harness
 
-`tools/sprt.sh <candidate-bin> <baseline-bin> [rounds]` runs a fastchess binary-vs-binary SPRT (single-core engines via `GOMAXPROCS=1`, fixed depth via `DEPTH=`, openings from the set pinned in `tools/openings.pin`: Pawnstar's `nnue/openings.epd` at one commit, fetched and SHA-256-verified by `tools/fetch-openings.sh`, with its `#` header stripped for fastchess). Snapshot a baseline with `make baseline`. Every eval or search change that could affect strength is gated this way — run it in the background, they are long. The NNUE port itself passed [0, 10] with LLR 2.96 (146W/3L/5D over 154 games).
+`tools/sprt.sh <candidate-bin> <baseline-bin> [rounds]` runs a fastchess binary-vs-binary SPRT (single-core engines via `GOMAXPROCS=1`, fixed depth via `DEPTH=`, openings from the set pinned in `tools/openings.pin`: Pawnstar's `nnue/openings.epd` at one commit, fetched and SHA-256-verified by `tools/fetch-openings.sh`, with its `#` header stripped for fastchess). Snapshot a baseline with `make baseline`. Every eval or search change that could affect strength is gated this way — run it in the background, they are long. The method (choosing the hypothesis, pinning `Threads`, `Hash` and `OwnBook` on both engines, progress reports, the node probe, the harness traps) is in the `reckless-chess-engines` skill. The NNUE port itself passed [0, 10] with LLR 2.96 (146W/3L/5D over 154 games).
 
 ## Running a match on hosted runners
 
